@@ -2,6 +2,7 @@
   "name": "novel-ai-studio",
   "version": "1.0.0",
   "description": "个人AI辅助小说创作工具",
+  "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
