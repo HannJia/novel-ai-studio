@@ -1,0 +1,8 @@
+// 类型定义入口
+export * from './book'
+export * from './chapter'
+export * from './character'
+export * from './knowledge'
+export * from './memory'
+export * from './ai'
+export * from './common'

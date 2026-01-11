@@ -1,0 +1,349 @@
+// 全局样式重置
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  font-family: $font-family;
+  font-size: $font-size-base;
+  color: $text-primary;
+  background-color: $bg-page;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.3s, color 0.3s;
+}
+
+#app {
+  width: 100%;
+  height: 100%;
+}
+
+// 暗色主题样式
+html.dark {
+  color-scheme: dark;
+
+  body {
+    color: $dark-text-primary;
+    background-color: $dark-bg-page;
+  }
+
+  // Element Plus 暗色主题覆盖
+  --el-bg-color: #{$dark-bg-base};
+  --el-bg-color-page: #{$dark-bg-page};
+  --el-bg-color-overlay: #{$dark-bg-overlay};
+  --el-text-color-primary: #{$dark-text-primary};
+  --el-text-color-regular: #{$dark-text-regular};
+  --el-text-color-secondary: #{$dark-text-secondary};
+  --el-text-color-placeholder: #{$dark-text-placeholder};
+  --el-border-color: #{$dark-border-base};
+  --el-border-color-light: #{$dark-border-light};
+  --el-border-color-lighter: #{$dark-border-lighter};
+  --el-fill-color-blank: #{$dark-bg-base};
+  --el-fill-color: #{$dark-bg-overlay};
+  --el-fill-color-light: #{$dark-bg-overlay};
+  --el-fill-color-lighter: #{$dark-bg-base};
+  --el-mask-color: rgba(0, 0, 0, 0.8);
+  --el-box-shadow: 0 12px 32px 4px rgba(0, 0, 0, 0.36), 0 8px 20px rgba(0, 0, 0, 0.72);
+  --el-box-shadow-light: 0 0 12px rgba(0, 0, 0, 0.72);
+
+  // 页面背景
+  .home-view,
+  .editor-view,
+  .settings-view,
+  .config-view {
+    background-color: $dark-bg-page;
+  }
+
+  // 头部和卡片
+  .home-header,
+  .config-header {
+    background-color: $dark-bg-base;
+    border-bottom-color: $dark-border-light;
+  }
+
+  .book-card {
+    background-color: $dark-bg-base;
+    box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.3);
+
+    &:hover {
+      box-shadow: 0 4px 16px 0 rgba(0, 0, 0, 0.5);
+    }
+
+    .book-cover {
+      background-color: $dark-bg-overlay;
+    }
+
+    .book-title {
+      color: $dark-text-primary;
+    }
+
+    .book-meta .genre-tag,
+    .book-meta .style-tag {
+      background-color: $dark-bg-overlay;
+      color: $dark-text-secondary;
+    }
+
+    .book-stats {
+      color: $dark-text-secondary;
+    }
+  }
+
+  // 对话框
+  .el-dialog {
+    background-color: $dark-bg-base;
+
+    .el-dialog__header {
+      border-bottom: 1px solid $dark-border-light;
+    }
+
+    .el-dialog__title {
+      color: $dark-text-primary;
+    }
+
+    .el-dialog__footer {
+      border-top: 1px solid $dark-border-light;
+    }
+  }
+
+  // 表单元素
+  .el-input__wrapper,
+  .el-textarea__inner,
+  .el-select__wrapper {
+    background-color: $dark-bg-overlay !important;
+    box-shadow: 0 0 0 1px $dark-border-base inset !important;
+  }
+
+  .el-input__inner,
+  .el-textarea__inner {
+    color: $dark-text-primary;
+  }
+
+  // 按钮
+  .el-button--default {
+    background-color: $dark-bg-overlay;
+    border-color: $dark-border-base;
+    color: $dark-text-primary;
+
+    &:hover {
+      background-color: lighten($dark-bg-overlay, 5%);
+      border-color: $primary-color;
+      color: $primary-color;
+    }
+  }
+
+  // 标签页
+  .el-tabs__header {
+    background-color: $dark-bg-base;
+  }
+
+  .el-tabs__item {
+    color: $dark-text-secondary;
+
+    &.is-active {
+      color: $primary-color;
+    }
+
+    &:hover {
+      color: $primary-color;
+    }
+  }
+
+  .el-tabs__content {
+    background-color: $dark-bg-page;
+  }
+
+  // 卡片
+  .el-card {
+    background-color: $dark-bg-base;
+    border-color: $dark-border-light;
+  }
+
+  // 配置卡片
+  .config-card {
+    background-color: $dark-bg-base;
+    border-color: $dark-border-light;
+
+    h3 {
+      color: $dark-text-primary;
+    }
+
+    p {
+      color: $dark-text-secondary;
+    }
+  }
+
+  // 表单项
+  .el-form-item__label {
+    color: $dark-text-regular;
+  }
+
+  // 单选框
+  .el-radio {
+    color: $dark-text-regular;
+
+    &.is-checked .el-radio__label {
+      color: $primary-color;
+    }
+  }
+
+  // 滑块
+  .el-slider__runway {
+    background-color: $dark-border-base;
+  }
+
+  // 空状态
+  .el-empty__description {
+    color: $dark-text-secondary;
+  }
+
+  // 标题
+  .app-title {
+    color: $primary-color;
+  }
+
+  h1, h2, h3 {
+    color: $dark-text-primary;
+  }
+
+  // 滚动条
+  ::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.2);
+
+    &:hover {
+      background-color: rgba(255, 255, 255, 0.3);
+    }
+  }
+
+  ::-webkit-scrollbar-track {
+    background-color: $dark-bg-base;
+  }
+}
+
+// 滚动条样式
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+
+  &:hover {
+    background-color: rgba(0, 0, 0, 0.3);
+  }
+}
+
+// 选择文本颜色
+::selection {
+  background-color: $primary-color;
+  color: #fff;
+}
+
+// 链接样式
+a {
+  color: $primary-color;
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+// 通用工具类
+.flex {
+  display: flex;
+}
+
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.flex-1 {
+  flex: 1;
+}
+
+.text-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.text-center {
+  text-align: center;
+}
+
+.cursor-pointer {
+  cursor: pointer;
+}
+
+// 间距工具类
+@each $size in (0, 4, 8, 12, 16, 20, 24, 32) {
+  .mt-#{$size} {
+    margin-top: #{$size}px;
+  }
+  .mb-#{$size} {
+    margin-bottom: #{$size}px;
+  }
+  .ml-#{$size} {
+    margin-left: #{$size}px;
+  }
+  .mr-#{$size} {
+    margin-right: #{$size}px;
+  }
+  .pt-#{$size} {
+    padding-top: #{$size}px;
+  }
+  .pb-#{$size} {
+    padding-bottom: #{$size}px;
+  }
+  .pl-#{$size} {
+    padding-left: #{$size}px;
+  }
+  .pr-#{$size} {
+    padding-right: #{$size}px;
+  }
+}
+
+// 过渡动画
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity $transition-duration $transition-ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.slide-enter-active,
+.slide-leave-active {
+  transition: transform $transition-duration $transition-ease;
+}
+
+.slide-enter-from {
+  transform: translateX(-100%);
+}
+
+.slide-leave-to {
+  transform: translateX(100%);
+}
