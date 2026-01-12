@@ -1,23 +1,50 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAiStore, useUiStore } from '@/stores'
 import { AI_PROVIDER_MAP } from '@/types'
-import type { AIProvider } from '@/types'
+import type { AIProvider, AIConfig } from '@/types'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const router = useRouter()
 const aiStore = useAiStore()
 const uiStore = useUiStore()
 
 const activeTab = ref('ai')
-const showAddConfigDialog = ref(false)
+const showConfigDialog = ref(false)
+const isEditing = ref(false)
+const editingConfigId = ref<string | null>(null)
+const testing = ref(false)
+const testingConfigId = ref<string | null>(null)
 
 const providerOptions = Object.entries(AI_PROVIDER_MAP).map(([value, label]) => ({
   value: value as AIProvider,
   label
 }))
 
-const newConfigForm = ref({
+// 根据提供商获取默认基础 URL
+const providerBaseUrls: Record<string, string> = {
+  openai: 'https://api.openai.com/v1',
+  claude: 'https://api.anthropic.com',
+  qianwen: 'https://dashscope.aliyuncs.com/api/v1',
+  wenxin: 'https://aip.baidubce.com',
+  zhipu: 'https://open.bigmodel.cn/api/paas/v4',
+  ollama: 'http://localhost:11434',
+  custom: ''
+}
+
+// 根据提供商获取默认模型列表
+const providerModels: Record<string, string[]> = {
+  openai: ['gpt-4-turbo-preview', 'gpt-4', 'gpt-3.5-turbo', 'gpt-3.5-turbo-16k'],
+  claude: ['claude-3-opus-20240229', 'claude-3-sonnet-20240229', 'claude-3-haiku-20240307'],
+  qianwen: ['qwen-turbo', 'qwen-plus', 'qwen-max'],
+  wenxin: ['ernie-bot-4', 'ernie-bot-turbo', 'ernie-bot'],
+  zhipu: ['glm-4', 'glm-4v', 'glm-3-turbo'],
+  ollama: ['llama2', 'mistral', 'codellama'],
+  custom: []
+}
+
+const configForm = ref({
   name: '',
   provider: 'openai' as AIProvider,
   apiKey: '',
@@ -25,7 +52,12 @@ const newConfigForm = ref({
   model: '',
   maxTokens: 4096,
   temperature: 0.7,
-  topP: 1.0
+  topP: 1.0,
+  isDefault: false
+})
+
+onMounted(async () => {
+  await aiStore.fetchConfigs()
 })
 
 function goHome(): void {
@@ -33,16 +65,138 @@ function goHome(): void {
 }
 
 function handleAddConfig(): void {
-  showAddConfigDialog.value = true
+  isEditing.value = false
+  editingConfigId.value = null
+  resetConfigForm()
+  showConfigDialog.value = true
+}
+
+function handleEditConfig(config: AIConfig): void {
+  isEditing.value = true
+  editingConfigId.value = config.id
+  configForm.value = {
+    name: config.name,
+    provider: config.provider,
+    apiKey: config.apiKey,
+    baseUrl: config.baseUrl || '',
+    model: config.model,
+    maxTokens: config.maxTokens,
+    temperature: config.temperature,
+    topP: config.topP,
+    isDefault: config.isDefault
+  }
+  showConfigDialog.value = true
+}
+
+async function handleDeleteConfig(config: AIConfig): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除配置"${config.name}"吗？`,
+      '删除确认',
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
+    )
+    const success = await aiStore.deleteConfig(config.id)
+    if (success) {
+      ElMessage.success('配置已删除')
+    } else {
+      ElMessage.error(aiStore.error || '删除失败')
+    }
+  } catch {
+    // 用户取消
+  }
+}
+
+async function handleSetDefault(config: AIConfig): Promise<void> {
+  if (config.isDefault) return
+  const success = await aiStore.setDefault(config.id)
+  if (success) {
+    ElMessage.success('已设为默认配置')
+  } else {
+    ElMessage.error(aiStore.error || '设置失败')
+  }
+}
+
+async function handleTestConnection(config: AIConfig): Promise<void> {
+  testing.value = true
+  testingConfigId.value = config.id
+  try {
+    const connected = await aiStore.testConnection(config.id)
+    if (connected) {
+      ElMessage.success('连接成功！')
+    } else {
+      ElMessage.error('连接失败，请检查配置')
+    }
+  } finally {
+    testing.value = false
+    testingConfigId.value = null
+  }
+}
+
+function handleThemeChange(val: string | number | boolean | undefined): void {
+  if (typeof val === 'string') {
+    uiStore.setThemeMode(val as 'light' | 'dark' | 'auto')
+  }
 }
 
 async function submitConfig(): Promise<void> {
-  // TODO: 保存配置
-  showAddConfigDialog.value = false
+  if (!configForm.value.name.trim()) {
+    ElMessage.warning('请输入配置名称')
+    return
+  }
+  if (!configForm.value.apiKey.trim() || configForm.value.apiKey.includes('****')) {
+    if (!isEditing.value) {
+      ElMessage.warning('请输入API Key')
+      return
+    }
+  }
+  if (!configForm.value.model.trim()) {
+    ElMessage.warning('请输入或选择模型')
+    return
+  }
+
+  if (isEditing.value && editingConfigId.value) {
+    // 更新配置
+    const result = await aiStore.updateConfig(editingConfigId.value, {
+      name: configForm.value.name,
+      provider: configForm.value.provider,
+      apiKey: configForm.value.apiKey,
+      baseUrl: configForm.value.baseUrl || undefined,
+      model: configForm.value.model,
+      maxTokens: configForm.value.maxTokens,
+      temperature: configForm.value.temperature,
+      topP: configForm.value.topP,
+      isDefault: configForm.value.isDefault
+    })
+    if (result) {
+      ElMessage.success('配置已更新')
+      showConfigDialog.value = false
+    } else {
+      ElMessage.error(aiStore.error || '更新失败')
+    }
+  } else {
+    // 创建新配置
+    const result = await aiStore.createConfig({
+      name: configForm.value.name,
+      provider: configForm.value.provider,
+      apiKey: configForm.value.apiKey,
+      baseUrl: configForm.value.baseUrl || undefined,
+      model: configForm.value.model,
+      maxTokens: configForm.value.maxTokens,
+      temperature: configForm.value.temperature,
+      topP: configForm.value.topP,
+      isDefault: configForm.value.isDefault
+    })
+    if (result) {
+      ElMessage.success('配置已添加')
+      showConfigDialog.value = false
+    } else {
+      ElMessage.error(aiStore.error || '添加失败')
+    }
+  }
 }
 
 function resetConfigForm(): void {
-  newConfigForm.value = {
+  configForm.value = {
     name: '',
     provider: 'openai',
     apiKey: '',
@@ -50,8 +204,18 @@ function resetConfigForm(): void {
     model: '',
     maxTokens: 4096,
     temperature: 0.7,
-    topP: 1.0
+    topP: 1.0,
+    isDefault: false
   }
+}
+
+function onProviderChange(provider: AIProvider): void {
+  configForm.value.baseUrl = providerBaseUrls[provider] || ''
+  configForm.value.model = ''
+}
+
+function getCurrentModelOptions(): string[] {
+  return providerModels[configForm.value.provider] || []
 }
 </script>
 
@@ -80,7 +244,12 @@ function resetConfigForm(): void {
               </el-button>
             </div>
 
-            <div v-if="aiStore.configs.length === 0" class="empty-state">
+            <div v-if="aiStore.loading && aiStore.configs.length === 0" class="loading-state">
+              <el-icon class="is-loading"><Loading /></el-icon>
+              <span>加载中...</span>
+            </div>
+
+            <div v-else-if="aiStore.configs.length === 0" class="empty-state">
               <el-empty description="还没有AI配置，点击上方按钮添加">
                 <el-button type="primary" @click="handleAddConfig">添加配置</el-button>
               </el-empty>
@@ -91,15 +260,41 @@ function resetConfigForm(): void {
                 v-for="config in aiStore.configs"
                 :key="config.id"
                 class="config-card"
+                :class="{ 'is-default': config.isDefault }"
               >
                 <div class="config-info">
-                  <h3>{{ config.name }}</h3>
-                  <p>{{ AI_PROVIDER_MAP[config.provider] }} - {{ config.model }}</p>
+                  <div class="config-title">
+                    <h3>{{ config.name }}</h3>
+                    <el-tag v-if="config.isDefault" type="success" size="small">默认</el-tag>
+                  </div>
+                  <p class="config-detail">
+                    <span class="provider">{{ AI_PROVIDER_MAP[config.provider] }}</span>
+                    <span class="divider">|</span>
+                    <span class="model">{{ config.model }}</span>
+                  </p>
+                  <p class="config-params">
+                    MaxTokens: {{ config.maxTokens }} · Temperature: {{ config.temperature }}
+                  </p>
                 </div>
                 <div class="config-actions">
-                  <el-tag v-if="config.isDefault" type="success">默认</el-tag>
-                  <el-button text size="small">编辑</el-button>
-                  <el-button text size="small" type="danger">删除</el-button>
+                  <el-button
+                    v-if="!config.isDefault"
+                    size="small"
+                    @click="handleSetDefault(config)"
+                  >
+                    设为默认
+                  </el-button>
+                  <el-button
+                    size="small"
+                    :loading="testing && testingConfigId === config.id"
+                    @click="handleTestConnection(config)"
+                  >
+                    测试连接
+                  </el-button>
+                  <el-button size="small" @click="handleEditConfig(config)">编辑</el-button>
+                  <el-button size="small" type="danger" @click="handleDeleteConfig(config)">
+                    删除
+                  </el-button>
                 </div>
               </div>
             </div>
@@ -160,7 +355,7 @@ function resetConfigForm(): void {
 
             <el-form label-width="120px" class="settings-form">
               <el-form-item label="主题模式">
-                <el-radio-group v-model="uiStore.themeMode" @change="uiStore.setThemeMode">
+                <el-radio-group v-model="uiStore.themeMode" @change="handleThemeChange">
                   <el-radio value="light">浅色</el-radio>
                   <el-radio value="dark">深色</el-radio>
                   <el-radio value="auto">跟随系统</el-radio>
@@ -184,19 +379,24 @@ function resetConfigForm(): void {
       </el-tabs>
     </main>
 
-    <!-- 添加AI配置对话框 -->
+    <!-- 添加/编辑AI配置对话框 -->
     <el-dialog
-      v-model="showAddConfigDialog"
-      title="添加AI配置"
-      width="500px"
+      v-model="showConfigDialog"
+      :title="isEditing ? '编辑AI配置' : '添加AI配置'"
+      width="560px"
       @close="resetConfigForm"
     >
-      <el-form :model="newConfigForm" label-width="100px">
+      <el-form :model="configForm" label-width="100px">
         <el-form-item label="配置名称" required>
-          <el-input v-model="newConfigForm.name" placeholder="如：GPT-4创作" />
+          <el-input v-model="configForm.name" placeholder="如：GPT-4创作" />
         </el-form-item>
+
         <el-form-item label="AI提供商" required>
-          <el-select v-model="newConfigForm.provider" placeholder="请选择">
+          <el-select
+            v-model="configForm.provider"
+            placeholder="请选择"
+            @change="onProviderChange"
+          >
             <el-option
               v-for="option in providerOptions"
               :key="option.value"
@@ -205,30 +405,78 @@ function resetConfigForm(): void {
             />
           </el-select>
         </el-form-item>
+
         <el-form-item label="API Key" required>
           <el-input
-            v-model="newConfigForm.apiKey"
+            v-model="configForm.apiKey"
             type="password"
             show-password
-            placeholder="请输入API Key"
+            :placeholder="isEditing ? '留空保持不变' : '请输入API Key'"
           />
         </el-form-item>
+
         <el-form-item label="API地址">
-          <el-input v-model="newConfigForm.baseUrl" placeholder="留空使用默认地址" />
+          <el-input v-model="configForm.baseUrl" placeholder="留空使用默认地址" />
+          <div class="form-tip">
+            默认地址：{{ providerBaseUrls[configForm.provider] || '无' }}
+          </div>
         </el-form-item>
+
         <el-form-item label="模型名称" required>
-          <el-input v-model="newConfigForm.model" placeholder="如：gpt-4" />
+          <el-select
+            v-if="getCurrentModelOptions().length > 0"
+            v-model="configForm.model"
+            filterable
+            allow-create
+            placeholder="选择或输入模型名称"
+          >
+            <el-option
+              v-for="model in getCurrentModelOptions()"
+              :key="model"
+              :label="model"
+              :value="model"
+            />
+          </el-select>
+          <el-input v-else v-model="configForm.model" placeholder="请输入模型名称" />
         </el-form-item>
+
         <el-form-item label="最大Token">
-          <el-input-number v-model="newConfigForm.maxTokens" :min="256" :max="128000" />
+          <el-input-number v-model="configForm.maxTokens" :min="256" :max="128000" :step="256" />
         </el-form-item>
+
         <el-form-item label="Temperature">
-          <el-slider v-model="newConfigForm.temperature" :min="0" :max="2" :step="0.1" />
+          <el-slider
+            v-model="configForm.temperature"
+            :min="0"
+            :max="2"
+            :step="0.1"
+            show-input
+            :show-input-controls="false"
+          />
+          <div class="form-tip">控制输出的随机性，值越大创造性越强</div>
+        </el-form-item>
+
+        <el-form-item label="Top P">
+          <el-slider
+            v-model="configForm.topP"
+            :min="0"
+            :max="1"
+            :step="0.05"
+            show-input
+            :show-input-controls="false"
+          />
+        </el-form-item>
+
+        <el-form-item label="设为默认">
+          <el-switch v-model="configForm.isDefault" />
         </el-form-item>
       </el-form>
+
       <template #footer>
-        <el-button @click="showAddConfigDialog = false">取消</el-button>
-        <el-button type="primary" @click="submitConfig">保存</el-button>
+        <el-button @click="showConfigDialog = false">取消</el-button>
+        <el-button type="primary" @click="submitConfig" :loading="aiStore.loading">
+          {{ isEditing ? '保存' : '添加' }}
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -304,6 +552,15 @@ function resetConfigForm(): void {
   }
 }
 
+.loading-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px;
+  color: $text-secondary;
+}
+
 .empty-state {
   padding: 48px;
 }
@@ -318,18 +575,49 @@ function resetConfigForm(): void {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px;
+  padding: 16px 20px;
   background-color: $bg-base;
   border: 1px solid $border-light;
   border-radius: $border-radius-base;
+  transition: all 0.2s ease;
 
-  h3 {
-    font-size: 14px;
-    font-weight: 600;
-    margin-bottom: 4px;
+  &:hover {
+    border-color: $primary-color;
   }
 
-  p {
+  &.is-default {
+    border-color: $success-color;
+    background-color: rgba($success-color, 0.02);
+  }
+}
+
+.config-info {
+  flex: 1;
+
+  .config-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+
+    h3 {
+      font-size: 15px;
+      font-weight: 600;
+    }
+  }
+
+  .config-detail {
+    font-size: 13px;
+    color: $text-regular;
+    margin-bottom: 4px;
+
+    .divider {
+      margin: 0 8px;
+      color: $border-light;
+    }
+  }
+
+  .config-params {
     font-size: 12px;
     color: $text-secondary;
   }
@@ -350,5 +638,11 @@ function resetConfigForm(): void {
     margin-bottom: 8px;
     color: $text-regular;
   }
+}
+
+.form-tip {
+  font-size: 12px;
+  color: $text-secondary;
+  margin-top: 4px;
 }
 </style>

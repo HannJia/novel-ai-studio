@@ -65,6 +65,13 @@
             <version>${okhttp.version}</version>
         </dependency>
 
+        <!-- OkHttp SSE (用于流式响应) -->
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>okhttp-sse</artifactId>
+            <version>${okhttp.version}</version>
+        </dependency>
+
         <!-- Hutool工具包 -->
         <dependency>
             <groupId>cn.hutool</groupId>

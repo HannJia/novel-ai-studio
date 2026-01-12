@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-
 const props = withDefaults(defineProps<{
   type?: 'primary' | 'success' | 'warning' | 'danger' | 'info' | 'default'
   size?: 'large' | 'default' | 'small'

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { countWords } from '@/utils/wordCount'
 
 export interface EditorState {
   content: string
@@ -17,16 +18,19 @@ export const useEditorStore = defineStore('editor', () => {
   const lastSavedAt = ref<string | null>(null)
   const autoSaveEnabled = ref(true)
   const autoSaveInterval = ref(30000)  // 30秒
+  const currentChapterId = ref<string | null>(null)
 
   // 计算属性
   const hasUnsavedChanges = computed(() => content.value !== originalContent.value)
 
   const wordCount = computed(() => {
-    // 使用字数统计工具（待实现）
-    return 0
+    return countWords(content.value)
   })
 
-  const selectionLength = computed(() => selection.value.end - selection.value.start)
+  const selectionLength = computed(() => {
+    const selectedText = content.value.slice(selection.value.start, selection.value.end)
+    return countWords(selectedText)
+  })
 
   // 方法
   function setContent(newContent: string): void {
@@ -45,6 +49,10 @@ export const useEditorStore = defineStore('editor', () => {
     selection.value = { start, end }
   }
 
+  function setCurrentChapterId(id: string | null): void {
+    currentChapterId.value = id
+  }
+
   function insertText(text: string): void {
     const before = content.value.slice(0, selection.value.start)
     const after = content.value.slice(selection.value.end)
@@ -55,6 +63,14 @@ export const useEditorStore = defineStore('editor', () => {
 
   function replaceSelection(text: string): void {
     insertText(text)
+  }
+
+  function loadChapterContent(chapterContent: string, chapterId: string): void {
+    content.value = chapterContent
+    originalContent.value = chapterContent
+    currentChapterId.value = chapterId
+    lastSavedAt.value = null
+    selection.value = { start: 0, end: 0 }
   }
 
   function undo(): void {
@@ -76,6 +92,7 @@ export const useEditorStore = defineStore('editor', () => {
     selection.value = { start: 0, end: 0 }
     scrollPosition.value = 0
     lastSavedAt.value = null
+    currentChapterId.value = null
   }
 
   return {
@@ -88,6 +105,7 @@ export const useEditorStore = defineStore('editor', () => {
     lastSavedAt,
     autoSaveEnabled,
     autoSaveInterval,
+    currentChapterId,
     // 计算属性
     hasUnsavedChanges,
     wordCount,
@@ -97,8 +115,10 @@ export const useEditorStore = defineStore('editor', () => {
     setOriginalContent,
     updateContent,
     setSelection,
+    setCurrentChapterId,
     insertText,
     replaceSelection,
+    loadChapterContent,
     undo,
     redo,
     markAsSaved,

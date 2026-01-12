@@ -2,7 +2,7 @@
  * API服务基础配置
  */
 import axios from 'axios'
-import type { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
+import type { AxiosInstance, AxiosResponse } from 'axios'
 import type { ApiResponse } from '@/types'
 
 // 创建axios实例

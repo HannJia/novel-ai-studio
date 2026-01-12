@@ -41,6 +41,11 @@ public class Book {
     private String description;
 
     /**
+     * 全书大纲
+     */
+    private String outline;
+
+    /**
      * 封面图片路径
      */
     private String coverImage;

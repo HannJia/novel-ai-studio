@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useBookStore } from '@/stores'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { Book, BookGenre, BookStyle } from '@/types'
 import { BOOK_GENRE_MAP, BOOK_STYLE_MAP, BOOK_STATUS_MAP } from '@/types'
 
@@ -38,6 +39,29 @@ function handleOpenBook(book: Book): void {
 
 function handleCreateBook(): void {
   showCreateDialog.value = true
+}
+
+async function handleDeleteBook(book: Book, event: Event): Promise<void> {
+  event.stopPropagation()
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除书籍《${book.title}》吗？此操作将同时删除所有章节，且不可恢复。`,
+      '删除确认',
+      {
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    const success = await bookStore.deleteBook(book.id)
+    if (success) {
+      ElMessage.success('书籍已删除')
+    } else {
+      ElMessage.error('删除失败')
+    }
+  } catch {
+    // 用户取消删除
+  }
 }
 
 async function submitCreateBook(): Promise<void> {
@@ -118,6 +142,15 @@ function goToSettings(): void {
             <div v-else class="cover-placeholder">
               <el-icon><Document /></el-icon>
             </div>
+            <el-button
+              class="delete-btn"
+              type="danger"
+              size="small"
+              circle
+              @click="handleDeleteBook(book, $event)"
+            >
+              <el-icon><Delete /></el-icon>
+            </el-button>
           </div>
           <div class="book-info">
             <h3 class="book-title">{{ book.title }}</h3>
@@ -272,6 +305,7 @@ function goToSettings(): void {
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
 
   img {
     width: 100%;
@@ -283,6 +317,18 @@ function goToSettings(): void {
     font-size: 48px;
     color: $text-placeholder;
   }
+
+  .delete-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    opacity: 0;
+    transition: opacity $transition-duration $transition-ease;
+  }
+}
+
+.book-card:hover .delete-btn {
+  opacity: 1;
 }
 
 .book-info {

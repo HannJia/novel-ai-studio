@@ -37,6 +37,7 @@ export interface Book {
   genre: BookGenre
   style: BookStyle
   description: string
+  outline?: string              // 全书大纲
   coverImage?: string
   status: BookStatus
   wordCount: number           // 不含标点的总字数
@@ -65,6 +66,7 @@ export interface UpdateBookInput {
   genre?: BookGenre
   style?: BookStyle
   description?: string
+  outline?: string
   status?: BookStatus
   coverImage?: string
 }

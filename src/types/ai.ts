@@ -55,14 +55,15 @@ export interface GenerateOptions {
  */
 export interface GenerateResult {
   content: string
-  tokensUsed: {
-    prompt: number
-    completion: number
-    total: number
+  tokenUsage: {
+    promptTokens: number
+    completionTokens: number
+    totalTokens: number
   }
   finishReason: 'stop' | 'length' | 'error'
   model: string
   duration: number            // 耗时（毫秒）
+  errorMessage?: string       // 错误信息
 }
 
 /**

@@ -1,29 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Book, BookStatus, CreateBookInput, UpdateBookInput } from '@/types'
-
-// 本地存储 key
-const STORAGE_KEY = 'novel-ai-studio-books'
-
-// 生成唯一ID
-function generateId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2)
-}
-
-// 从 localStorage 读取书籍
-function loadBooksFromStorage(): Book[] {
-  try {
-    const data = localStorage.getItem(STORAGE_KEY)
-    return data ? JSON.parse(data) : []
-  } catch {
-    return []
-  }
-}
-
-// 保存书籍到 localStorage
-function saveBooksToStorage(books: Book[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(books))
-}
+import * as bookApi from '@/services/api/bookApi'
 
 export const useBookStore = defineStore('book', () => {
   // 状态
@@ -48,8 +26,7 @@ export const useBookStore = defineStore('book', () => {
     loading.value = true
     error.value = null
     try {
-      // 使用本地存储
-      books.value = loadBooksFromStorage()
+      books.value = await bookApi.getBooks()
     } catch (e) {
       error.value = e instanceof Error ? e.message : '获取书籍列表失败'
     } finally {
@@ -61,8 +38,7 @@ export const useBookStore = defineStore('book', () => {
     loading.value = true
     error.value = null
     try {
-      const allBooks = loadBooksFromStorage()
-      const book = allBooks.find(b => b.id === id) || null
+      const book = await bookApi.getBook(id)
       currentBook.value = book
       return book
     } catch (e) {
@@ -77,22 +53,8 @@ export const useBookStore = defineStore('book', () => {
     loading.value = true
     error.value = null
     try {
-      const now = new Date().toISOString()
-      const book: Book = {
-        id: generateId(),
-        title: input.title,
-        author: input.author || '',
-        genre: input.genre,
-        style: input.style,
-        description: input.description || '',
-        status: 'writing',
-        wordCount: 0,
-        chapterCount: 0,
-        createdAt: now,
-        updatedAt: now
-      }
+      const book = await bookApi.createBook(input)
       books.value.push(book)
-      saveBooksToStorage(books.value)
       return book
     } catch (e) {
       error.value = e instanceof Error ? e.message : '创建书籍失败'
@@ -106,17 +68,11 @@ export const useBookStore = defineStore('book', () => {
     loading.value = true
     error.value = null
     try {
+      const book = await bookApi.updateBook(id, input)
       const index = books.value.findIndex(b => b.id === id)
-      if (index === -1) {
-        throw new Error('书籍不存在')
+      if (index !== -1) {
+        books.value[index] = book
       }
-      const book = {
-        ...books.value[index],
-        ...input,
-        updatedAt: new Date().toISOString()
-      }
-      books.value[index] = book
-      saveBooksToStorage(books.value)
       if (currentBook.value?.id === id) {
         currentBook.value = book
       }
@@ -133,8 +89,8 @@ export const useBookStore = defineStore('book', () => {
     loading.value = true
     error.value = null
     try {
+      await bookApi.deleteBook(id)
       books.value = books.value.filter(b => b.id !== id)
-      saveBooksToStorage(books.value)
       if (currentBook.value?.id === id) {
         currentBook.value = null
       }

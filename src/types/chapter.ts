@@ -28,6 +28,7 @@ export interface CreateChapterInput {
   bookId: string
   volumeId?: string
   title: string
+  content?: string
   outline?: string
   order?: number
 }
