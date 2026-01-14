@@ -4,6 +4,46 @@
 export type ChapterStatus = 'draft' | 'completed' | 'reviewing'
 
 /**
+ * 细纲步骤类型
+ */
+export type DetailOutlineStepType = 'scene' | 'characters' | 'conflict' | 'climax' | 'ending'
+
+/**
+ * 细纲步骤配置
+ */
+export const DETAIL_OUTLINE_STEPS: {
+  type: DetailOutlineStepType
+  label: string
+  description: string
+}[] = [
+  { type: 'scene', label: '场景铺设', description: '设定本章的场景环境、时间地点' },
+  { type: 'characters', label: '角色出场', description: '本章出场的角色及其状态' },
+  { type: 'conflict', label: '冲突展开', description: '本章的核心冲突或矛盾' },
+  { type: 'climax', label: '高潮推进', description: '情节的高潮部分' },
+  { type: 'ending', label: '本章收尾', description: '本章的结尾和留白' },
+]
+
+/**
+ * 细纲单步内容
+ */
+export interface DetailOutlineStep {
+  type: DetailOutlineStepType
+  content: string             // 该步骤的具体内容
+  completed: boolean          // 是否已完成
+}
+
+/**
+ * 章节细纲
+ */
+export interface ChapterDetailOutline {
+  chapterId: string
+  steps: DetailOutlineStep[]
+  status: 'draft' | 'confirmed' | 'generated'  // 草稿/已确认/已生成章节
+  generatedAt?: string
+  confirmedAt?: string
+}
+
+/**
  * 章节接口
  */
 export interface Chapter {
@@ -14,6 +54,7 @@ export interface Chapter {
   content: string
   outline: string             // 章节大纲
   summary?: string            // AI生成的摘要（记忆系统用）
+  detailOutline?: ChapterDetailOutline  // 细纲数据
   wordCount: number           // 不含标点
   order: number
   status: ChapterStatus

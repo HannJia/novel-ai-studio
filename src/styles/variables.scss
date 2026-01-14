@@ -5,6 +5,11 @@ $warning-color: #e6a23c;
 $danger-color: #f56c6c;
 $info-color: #909399;
 
+// 强调色 - 方案B清爽蓝
+$accent-blue: #2eaadc;
+$accent-green: #0f7b6c;
+$accent-purple: #7c3aed;
+
 // 文字颜色
 $text-primary: #303133;
 $text-regular: #606266;
@@ -22,7 +27,18 @@ $bg-page: #f5f7fa;
 $bg-sidebar: #304156;
 $bg-sidebar-light: #3a4a61;
 
-// 暗色主题变量
+// ========== 方案B - 浅色清爽风格 (Notion风格) ==========
+$light-bg-panel: #f7f7f7;
+$light-bg-card: #ffffff;
+$light-bg-hover: #f0f0f0;
+$light-bg-active: #e8f4fc;
+$light-border-card: #e8e8e8;
+$light-text-title: #37352f;
+$light-card-radius: 12px;
+$light-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+$light-card-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.12);
+
+// ========== 方案A - 暗色主题变量 (VS Code风格) ==========
 $dark-text-primary: #e5eaf3;
 $dark-text-regular: #cfd3dc;
 $dark-text-secondary: #a3a6ad;
@@ -35,13 +51,19 @@ $dark-border-lighter: #363637;
 $dark-bg-base: #1d1e1f;
 $dark-bg-page: #141414;
 $dark-bg-overlay: #262727;
+$dark-bg-panel: #252526;
+$dark-bg-card: #2d2d2d;
+$dark-bg-hover: #3c3c3c;
+$dark-bg-active: #094771;
+$dark-card-radius: 4px;
+$dark-card-shadow: none;
 
 // 布局尺寸
 $header-height: 50px;
-$sidebar-width: 240px;
-$sidebar-collapsed-width: 64px;
-$right-panel-width: 320px;
-$status-bar-height: 24px;
+$sidebar-width: 260px;
+$sidebar-collapsed-width: 48px;
+$right-panel-width: 340px;
+$status-bar-height: 28px;
 
 // 字体
 $font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
@@ -59,9 +81,11 @@ $shadow-dark: 0 2px 4px rgba(0, 0, 0, 0.12), 0 0 6px rgba(0, 0, 0, 0.12);
 $border-radius-base: 4px;
 $border-radius-small: 2px;
 $border-radius-large: 8px;
+$border-radius-card: 12px;
 
 // 过渡动画
 $transition-duration: 0.3s;
+$transition-duration-fast: 0.15s;
 $transition-ease: cubic-bezier(0.4, 0, 0.2, 1);
 
 // z-index层级
@@ -70,3 +94,4 @@ $z-sidebar: 100;
 $z-right-panel: 90;
 $z-modal: 1000;
 $z-tooltip: 2000;
+$z-thinking-panel: 80;

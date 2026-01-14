@@ -178,7 +178,14 @@ novel-ai-studio/
 │   │   │   ├── MainEditor.vue
 │   │   │   ├── EditorToolbar.vue
 │   │   │   ├── OutlineEditor.vue
-│   │   │   └── VersionHistory.vue
+│   │   │   ├── VersionHistory.vue
+│   │   │   ├── EditorHeader.vue      # 顶部工具栏（含主题切换）
+│   │   │   ├── EditorSidebar.vue     # 左侧故事结构面板
+│   │   │   ├── EditorMain.vue        # 中间主编辑区
+│   │   │   ├── EditorRightPanel.vue  # 右侧面板容器
+│   │   │   ├── AIThinkingProcess.vue # AI思考过程实时显示
+│   │   │   ├── CharacterPanel.vue    # 角色面板
+│   │   │   └── KnowledgePanel.vue    # 知识库/视觉素材面板
 │   │   ├── character/           # 角色相关组件
 │   │   │   ├── CharacterList.vue
 │   │   │   ├── CharacterCard.vue
@@ -1697,6 +1704,13 @@ mybatis-plus:
 - 大纲系统（全书大纲和章节大纲管理）
 - 编辑器增强（专注模式、全屏模式）
 - 大纲AI生成功能
+- **编辑器UI重构**（2026-01-14完成）：
+  - 三栏布局：左侧目录 | 中间编辑器 | 右侧功能面板
+  - 主题切换：方案B(浅色Notion风格) ↔ 方案A(深色VS Code风格)
+  - AI思考过程实时显示组件
+  - 知识库面板（支持视觉素材管理和AI识别标签）
+  - 角色面板
+  - 专注模式优化
 
 ### 阶段三：世界观与知识库（P1.5）
 
@@ -1899,7 +1913,167 @@ git commit -m "[1.2] 字数统计工具
 | 版本 | 日期 | 修改内容 |
 |------|------|----------|
 | 1.0 | 2024-01-XX | 初始版本 |
+| 1.1 | 2026-01-14 | 添加编辑器UI重构相关组件文档 |
+| 1.2 | 2026-01-15 | AI辅助创建书籍向导、封面上传功能 |
+| 1.3 | 2026-01-15 | 细纲系统实现（五步生成法） |
+
+---
+
+## 十一、最新开发进展
+
+### 2026-01-15 新增功能
+
+#### 1. AI辅助新建小说流程
+
+**功能概述**：三步骤向导，使用AI生成小说简介、大纲和角色设定
+
+**后端实现**：
+- `POST /api/ai/initialize-novel` - AI初始化小说接口
+- `POST /api/ai/refine-novel` - AI修改小说设定接口
+- 位置：`java-backend/src/main/java/com/novelai/studio/controller/AiGenerateController.java`
+
+**前端实现**：
+- 新增类型：`NovelInitInput`、`NovelInitResult`、`GeneratedCharacter`、`NovelRefineInput`
+- 位置：`src/types/book.ts`
+- 新增API方法：`initializeNovel()`、`refineNovel()`
+- 位置：`src/services/api/aiApi.ts`
+- 新增组件：`CreateBookWizard.vue`
+- 位置：`src/components/book/CreateBookWizard.vue`
+- 集成到 `HomeView.vue`，通过下拉菜单选择"AI辅助创建"或"快速创建"
+
+**使用流程**：
+1. 步骤1 - 基本信息：输入书名、类型、风格、主角设定、世界观关键词、核心冲突
+2. 步骤2 - AI生成：AI根据输入生成简介、大纲、角色，支持修改要求重新生成
+3. 步骤3 - 预览确认：确认生成内容后创建书籍
+
+#### 2. 书籍封面上传
+
+**功能概述**：支持上传、预览、删除书籍封面图片
+
+**后端实现**：
+- 新增控制器：`FileController.java`
+- 位置：`java-backend/src/main/java/com/novelai/studio/controller/FileController.java`
+- API接口：
+  - `POST /api/files/cover` - 上传封面
+  - `GET /api/files/cover/{filename}` - 获取封面
+  - `DELETE /api/files/cover/{filename}` - 删除封面
+- 配置：`application.yml` 添加文件上传配置
+
+**前端实现**：
+- 新增API服务：`fileApi.ts`
+- 位置：`src/services/api/fileApi.ts`
+- 新增组件：`CoverUploader.vue`
+- 位置：`src/components/book/CoverUploader.vue`
+- 功能：点击/拖拽上传、图片预览、更换、删除
+- 更新 `CreateBookInput` 类型，添加 `coverImage` 字段
+- 集成到 `HomeView.vue` 的快速创建对话框
+
+**文件存储**：
+- 默认路径：`${user.home}/.novel-ai-studio/uploads/covers`
+- 限制：仅支持图片文件，最大5MB
 
 ---
 
 **文档维护**：每完成一个阶段后更新任务状态
+
+### 2026-01-15 细纲系统
+
+#### 3. 章节细纲五步生成系统
+
+**功能概述**：实现章节细纲的五步生成法，支持查看已完成章节细纲、AI推演生成下一章细纲、确认修改后生成章节内容。
+
+**细纲五步结构**：
+1. **场景铺设** - 设定本章的场景环境、时间地点
+2. **角色出场** - 本章出场的角色及其状态、情绪
+3. **冲突展开** - 本章的核心冲突或矛盾
+4. **高潮推进** - 情节如何推向高潮
+5. **本章收尾** - 本章如何结尾，留下什么悬念
+
+**类型定义扩展**：
+
+`src/types/chapter.ts` 新增：
+```typescript
+// 细纲步骤类型
+export type DetailOutlineStepType = 'scene' | 'characters' | 'conflict' | 'climax' | 'ending'
+
+// 细纲步骤配置
+export const DETAIL_OUTLINE_STEPS: {...}[]
+
+// 细纲单步内容
+export interface DetailOutlineStep {
+  type: DetailOutlineStepType
+  content: string
+  completed: boolean
+}
+
+// 章节细纲
+export interface ChapterDetailOutline {
+  chapterId: string
+  steps: DetailOutlineStep[]
+  status: 'draft' | 'confirmed' | 'generated'
+  generatedAt?: string
+  confirmedAt?: string
+}
+```
+
+`src/types/book.ts` 新增：
+```typescript
+// 分卷大纲章节
+export interface VolumeOutlineChapter {
+  id: string
+  title: string
+  chapterId?: string
+}
+
+// 分卷大纲
+export interface VolumeOutline {
+  id: string
+  title: string
+  summary?: string
+  chapters: VolumeOutlineChapter[]
+}
+
+// Book 接口新增 volumes 字段
+volumes?: VolumeOutline[]
+```
+
+**Store 扩展**：
+
+`src/stores/chapterStore.ts` 新增：
+- 状态：`detailOutlineLoading`、`detailOutlineError`、`selectedChapterForOutline`、`pendingDetailOutline`
+- 计算属性：`completedChapters`、`nextChapterNumber`
+- 方法：
+  - `getChapterDetailOutline(chapterId)` - 获取章节细纲
+  - `getChapterSummary(chapterId)` - 获取章节摘要
+  - `selectChapterForOutline(chapterId)` - 选择要查看的章节
+  - `createEmptyDetailOutline(chapterId)` - 创建空白细纲模板
+  - `setPendingDetailOutline(outline)` - 设置待确认细纲
+  - `confirmDetailOutline(chapterId)` - 确认细纲
+  - `saveDetailOutlineToChapter(chapterId, outline)` - 保存细纲到章节
+  - `getPreviousChaptersContext(beforeOrder)` - 获取前面章节上下文
+
+**UI 实现**：
+
+`src/components/editor/EditorSidebar.vue` 细纲面板重构：
+- **模式切换**：查看已完成 / 生成下一章
+- **查看模式**：
+  - 已完成章节列表（可选择查看）
+  - 选中章节显示摘要和五步细纲内容
+  - 每步可折叠展开显示具体内容
+- **生成模式**：
+  - 显示下一章信息
+  - "AI推演生成细纲"按钮
+  - AI根据总大纲+分卷大纲+前面章节内容生成五步细纲
+  - 生成后可"重新生成"、"修改"、"确认细纲"
+  - 确认后显示"根据细纲生成章节"按钮
+  - 生成章节后自动创建新章节并保存细纲
+
+**使用流程**：
+1. 点击"细纲"标签进入细纲面板
+2. 选择"生成下一章"模式
+3. 点击"AI推演生成细纲"
+4. AI根据总大纲、分卷大纲、已完成章节内容生成五步细纲
+5. 查看细纲内容，可点击"修改"进行编辑
+6. 满意后点击"确认细纲"
+7. 点击"根据细纲生成章节"生成完整章节内容
+8. 章节生成后自动保存并切换到编辑器

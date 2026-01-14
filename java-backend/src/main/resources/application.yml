@@ -5,6 +5,11 @@ spring:
   application:
     name: novel-ai-studio
 
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/novel_ai_studio?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
@@ -60,3 +65,8 @@ logging:
     root: INFO
     com.novelai.studio: DEBUG
     com.baomidou.mybatisplus: DEBUG
+
+# 文件上传配置
+upload:
+  path: ${user.home}/.novel-ai-studio/uploads
+  cover-path: covers

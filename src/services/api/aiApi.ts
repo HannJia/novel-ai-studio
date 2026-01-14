@@ -1,7 +1,7 @@
 /**
  * AI配置API服务
  */
-import { get, post, put, del } from './index'
+import { get, post, put, del, aiPost } from './index'
 import type { AIConfig, GenerateResult } from '@/types'
 
 const CONFIG_BASE_URL = '/ai-configs'
@@ -166,7 +166,7 @@ export async function getAvailableModels(id: string): Promise<string[]> {
  * 同步生成内容
  */
 export async function generate(request: GenerateRequest): Promise<GenerateResult> {
-  return post<GenerateResult>(`${AI_BASE_URL}/generate`, request)
+  return aiPost<GenerateResult>(`${AI_BASE_URL}/generate`, request)
 }
 
 /**
@@ -180,7 +180,7 @@ export function generateStreamUrl(): string {
  * 多轮对话
  */
 export async function chat(request: ChatRequest): Promise<GenerateResult> {
-  return post<GenerateResult>(`${AI_BASE_URL}/chat`, request)
+  return aiPost<GenerateResult>(`${AI_BASE_URL}/chat`, request)
 }
 
 /**
@@ -194,12 +194,30 @@ export function chatStreamUrl(): string {
  * 小说续写
  */
 export async function continueWriting(request: ContinueWritingRequest): Promise<GenerateResult> {
-  return post<GenerateResult>(`${AI_BASE_URL}/continue-writing`, request)
+  return aiPost<GenerateResult>(`${AI_BASE_URL}/continue-writing`, request)
 }
 
 /**
  * 大纲生成
  */
 export async function generateOutline(request: GenerateOutlineRequest): Promise<GenerateResult> {
-  return post<GenerateResult>(`${AI_BASE_URL}/generate-outline`, request)
+  return aiPost<GenerateResult>(`${AI_BASE_URL}/generate-outline`, request)
+}
+
+// ========== AI小说初始化相关API ==========
+
+import type { NovelInitInput, NovelInitResult, NovelRefineInput } from '@/types'
+
+/**
+ * AI初始化小说 - 生成简介、大纲、角色
+ */
+export async function initializeNovel(input: NovelInitInput): Promise<NovelInitResult> {
+  return aiPost<NovelInitResult>(`${AI_BASE_URL}/initialize-novel`, input)
+}
+
+/**
+ * AI修改小说设定
+ */
+export async function refineNovel(input: NovelRefineInput): Promise<NovelInitResult> {
+  return aiPost<NovelInitResult>(`${AI_BASE_URL}/refine-novel`, input)
 }

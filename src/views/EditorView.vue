@@ -4,6 +4,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { useBookStore, useChapterStore, useEditorStore, useUiStore, useAiStore } from '@/stores'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
+// 导入新组件
+import EditorHeader from '@/components/editor/EditorHeader.vue'
+import EditorSidebar from '@/components/editor/EditorSidebar.vue'
+import EditorMain from '@/components/editor/EditorMain.vue'
+import EditorRightPanel from '@/components/editor/EditorRightPanel.vue'
+
 const route = useRoute()
 const router = useRouter()
 const bookStore = useBookStore()
@@ -48,11 +54,12 @@ onMounted(async () => {
   await loadBookData()
   await aiStore.fetchConfigs()
   startAutoSave()
+  document.addEventListener('keydown', handleKeyDown)
 })
 
 onUnmounted(() => {
   stopAutoSave()
-  // 离开时如果有未保存更改，提示保存
+  document.removeEventListener('keydown', handleKeyDown)
   if (editorStore.hasUnsavedChanges) {
     saveContent()
   }
@@ -65,7 +72,6 @@ watch(() => route.params.bookId, async (newId) => {
   }
 })
 
-// 监听当前章节变化，加载内容到编辑器
 watch(() => chapterStore.currentChapter, (newChapter) => {
   if (newChapter) {
     editorStore.loadChapterContent(newChapter.content || '', newChapter.id)
@@ -79,22 +85,12 @@ watch(() => chapterStore.currentChapter, (newChapter) => {
 async function loadBookData(): Promise<void> {
   await bookStore.fetchBookById(bookId.value)
   await chapterStore.fetchChaptersByBook(bookId.value)
-  // 加载全书大纲
   if (bookStore.currentBook) {
     bookOutline.value = bookStore.currentBook.outline || ''
   }
 }
 
-function goHome(): void {
-  // 离开前保存
-  if (editorStore.hasUnsavedChanges) {
-    saveContent()
-  }
-  router.push('/')
-}
-
 async function handleChapterSelect(id: string): Promise<void> {
-  // 切换章节前保存当前内容
   if (editorStore.hasUnsavedChanges && editorStore.currentChapterId) {
     await saveContent()
   }
@@ -117,7 +113,6 @@ async function handleDeleteChapter(chapterId: string, chapterTitle: string, even
     const success = await chapterStore.deleteChapter(chapterId)
     if (success) {
       ElMessage.success('章节已删除')
-      // 如果删除的是当前编辑的章节，清空编辑器
       if (editorStore.currentChapterId === chapterId) {
         editorStore.reset()
       }
@@ -148,7 +143,6 @@ async function submitCreateChapter(): Promise<void> {
   }
 }
 
-// 保存内容到后端
 async function saveContent(): Promise<void> {
   if (!editorStore.currentChapterId || !editorStore.hasUnsavedChanges) {
     return
@@ -156,11 +150,17 @@ async function saveContent(): Promise<void> {
 
   editorStore.isSaving = true
   try {
+    // 计算字数并一起保存
     const result = await chapterStore.updateChapter(editorStore.currentChapterId, {
-      content: editorStore.content
+      content: editorStore.content,
+      wordCount: editorStore.wordCount  // 保存时同步更新字数
     })
     if (result) {
       editorStore.markAsSaved()
+      // 刷新书籍信息以更新总字数
+      if (bookId.value) {
+        await bookStore.fetchBookById(bookId.value)
+      }
     }
   } catch (e) {
     console.error('保存失败:', e)
@@ -169,7 +169,6 @@ async function saveContent(): Promise<void> {
   }
 }
 
-// 手动保存（Ctrl+S）
 async function handleManualSave(): Promise<void> {
   if (!editorStore.hasUnsavedChanges) {
     ElMessage.info('没有需要保存的更改')
@@ -183,7 +182,6 @@ async function handleManualSave(): Promise<void> {
   }
 }
 
-// 自动保存
 function startAutoSave(): void {
   if (autoSaveTimer.value) {
     clearInterval(autoSaveTimer.value)
@@ -202,28 +200,29 @@ function stopAutoSave(): void {
   }
 }
 
-// 键盘快捷键
 function handleKeyDown(event: KeyboardEvent): void {
   if ((event.ctrlKey || event.metaKey) && event.key === 's') {
     event.preventDefault()
     handleManualSave()
   }
-  // ESC 退出专注模式
   if (event.key === 'Escape' && focusMode.value) {
     focusMode.value = false
+    uiStore.sidebarCollapsed = false
+    uiStore.rightPanelVisible = true
   }
 }
 
-// 专注模式
 function toggleFocusMode(): void {
   focusMode.value = !focusMode.value
   if (focusMode.value) {
     uiStore.sidebarCollapsed = true
     uiStore.rightPanelVisible = false
+  } else {
+    uiStore.sidebarCollapsed = false
+    uiStore.rightPanelVisible = true
   }
 }
 
-// 全屏模式
 function toggleFullscreen(): void {
   if (!document.fullscreenElement) {
     document.documentElement.requestFullscreen()
@@ -234,7 +233,6 @@ function toggleFullscreen(): void {
   }
 }
 
-// AI 续写功能
 async function handleContinueWriting(): Promise<void> {
   if (!editorStore.content.trim()) {
     ElMessage.warning('请先输入一些内容再进行续写')
@@ -254,7 +252,6 @@ async function handleContinueWriting(): Promise<void> {
   })
 
   if (result && result.content) {
-    // 将生成的内容追加到编辑器
     editorStore.content = editorStore.content + '\n\n' + result.content
     ElMessage.success(`续写完成，生成约${result.tokenUsage?.completionTokens || 0}个token`)
   } else {
@@ -262,18 +259,8 @@ async function handleContinueWriting(): Promise<void> {
   }
 }
 
-// 应用生成的内容
-function applyGeneratedContent(): void {
-  if (!aiStore.generatedContent) return
-  editorStore.content = editorStore.content + '\n\n' + aiStore.generatedContent
-  aiStore.generatedContent = ''
-  ElMessage.success('内容已应用')
-}
-
-// 保存大纲
 async function saveOutline(): Promise<void> {
   if (outlineTab.value === 'chapter') {
-    // 保存章节大纲
     if (!editorStore.currentChapterId) {
       ElMessage.warning('请先选择一个章节')
       return
@@ -287,7 +274,6 @@ async function saveOutline(): Promise<void> {
       ElMessage.error('保存大纲失败')
     }
   } else {
-    // 保存全书大纲
     if (!bookStore.currentBook) return
     const result = await bookStore.updateBook(bookStore.currentBook.id, {
       outline: bookOutline.value
@@ -300,7 +286,6 @@ async function saveOutline(): Promise<void> {
   }
 }
 
-// 生成大纲
 async function generateOutline(): Promise<void> {
   if (!bookStore.currentBook) return
 
@@ -332,297 +317,70 @@ async function generateOutline(): Promise<void> {
 </script>
 
 <template>
-  <div class="editor-view" :class="{ 'focus-mode': focusMode }" @keydown="handleKeyDown">
+  <div class="editor-view" :class="{ 'focus-mode': focusMode }">
     <!-- 顶部工具栏 -->
-    <header class="editor-header">
-      <div class="header-left">
-        <el-button text @click="goHome">
-          <el-icon><ArrowLeft /></el-icon>
-          返回
-        </el-button>
-        <span class="book-title">{{ bookStore.currentBook?.title || '加载中...' }}</span>
-      </div>
-      <div class="header-center">
-        <!-- 编辑器工具栏 -->
-        <el-button-group v-if="chapterStore.currentChapter" class="editor-toolbar">
-          <el-tooltip content="保存 (Ctrl+S)" placement="bottom">
-            <el-button size="small" @click="handleManualSave" :loading="editorStore.isSaving">
-              <el-icon><DocumentChecked /></el-icon>
-            </el-button>
-          </el-tooltip>
-          <el-tooltip content="AI续写" placement="bottom">
-            <el-button
-              size="small"
-              type="primary"
-              @click="handleContinueWriting"
-              :loading="aiStore.generating"
-              :disabled="!aiStore.hasConfig"
-            >
-              <el-icon><MagicStick /></el-icon>
-            </el-button>
-          </el-tooltip>
-          <el-tooltip content="专注模式" placement="bottom">
-            <el-button size="small" @click="toggleFocusMode" :type="focusMode ? 'success' : ''">
-              <el-icon><View /></el-icon>
-            </el-button>
-          </el-tooltip>
-          <el-tooltip content="全屏" placement="bottom">
-            <el-button size="small" @click="toggleFullscreen">
-              <el-icon><FullScreen /></el-icon>
-            </el-button>
-          </el-tooltip>
-        </el-button-group>
-      </div>
-      <div class="header-right">
-        <span v-if="uiStore.showWordCount" class="word-count">
-          {{ editorStore.wordCount }} 字
-        </span>
-        <el-button text @click="uiStore.toggleRightPanel">
-          <el-icon><Setting /></el-icon>
-        </el-button>
-      </div>
-    </header>
+    <EditorHeader
+      :focus-mode="focusMode"
+      :is-fullscreen="isFullscreen"
+      @save="handleManualSave"
+      @continue-writing="handleContinueWriting"
+      @toggle-focus="toggleFocusMode"
+      @toggle-fullscreen="toggleFullscreen"
+    />
 
+    <!-- 主体区域 -->
     <div class="editor-body">
-      <!-- 左侧边栏 - 章节树 -->
-      <aside class="editor-sidebar" :class="{ collapsed: uiStore.sidebarCollapsed }">
-        <div class="sidebar-header">
-          <span>章节目录</span>
-          <el-button text size="small" @click="uiStore.toggleSidebar">
-            <el-icon><Fold /></el-icon>
-          </el-button>
-        </div>
-        <div class="sidebar-content">
-          <div class="sidebar-actions">
-            <el-button type="primary" size="small" @click="handleCreateChapter">
-              <el-icon><Plus /></el-icon>
-              新建章节
-            </el-button>
-          </div>
-          <div v-if="chapterStore.loading" class="loading-state">
-            <el-icon class="is-loading"><Loading /></el-icon>
-          </div>
-          <div v-else-if="chapterStore.chapters.length === 0" class="empty-state">
-            <p>暂无章节</p>
-            <el-button type="primary" size="small" @click="handleCreateChapter">新建章节</el-button>
-          </div>
-          <div v-else class="chapter-tree">
-            <div
-              v-for="chapter in chapterStore.chapterTree"
-              :key="chapter.id"
-              class="chapter-item"
-              :class="{ active: chapterStore.currentChapter?.id === chapter.id }"
-              @click="handleChapterSelect(chapter.id)"
-            >
-              <span class="chapter-title">{{ chapter.title }}</span>
-              <div class="chapter-actions"><span class="chapter-word-count">{{ chapter.wordCount }}字</span><el-button class="delete-chapter-btn" type="danger" size="small" text @click="handleDeleteChapter(chapter.id, chapter.title, $event)"><el-icon><Delete /></el-icon></el-button></div>
-            </div>
-          </div>
-        </div>
-      </aside>
+      <!-- 左侧边栏 -->
+      <EditorSidebar
+        @select-chapter="handleChapterSelect"
+        @create-chapter="handleCreateChapter"
+        @delete-chapter="handleDeleteChapter"
+      />
 
       <!-- 主编辑区 -->
-      <main class="editor-main">
-        <div v-if="!chapterStore.currentChapter" class="no-chapter-selected">
-          <el-empty description="请从左侧选择一个章节开始编辑" />
-        </div>
-        <div v-else class="editor-container" :style="{ maxWidth: uiStore.editorWidth + 'px' }">
-          <h2 class="chapter-title-display">{{ chapterStore.currentChapter.title }}</h2>
-          <textarea
-            v-model="editorStore.content"
-            class="main-textarea"
-            :style="{
-              fontSize: uiStore.fontSize + 'px',
-              lineHeight: uiStore.lineHeight
-            }"
-            placeholder="开始写作..."
-          ></textarea>
-        </div>
-      </main>
+      <EditorMain :show-thinking="aiStore.generating" />
 
       <!-- 右侧面板 -->
-      <aside class="editor-right-panel" v-show="uiStore.rightPanelVisible">
-        <div class="panel-header">
-          <el-tabs v-model="uiStore.rightPanelTab">
-            <el-tab-pane label="AI助手" name="ai" />
-            <el-tab-pane label="大纲" name="outline" />
-            <el-tab-pane label="角色" name="character" />
-          </el-tabs>
-        </div>
-        <div class="panel-content">
-          <!-- AI助手面板 -->
-          <div v-if="uiStore.rightPanelTab === 'ai'" class="ai-panel">
-            <div v-if="!aiStore.hasConfig" class="no-config-tip">
-              <el-icon><WarningFilled /></el-icon>
-              <p>尚未配置AI</p>
-              <el-button type="primary" size="small" @click="router.push('/config')">
-                前往配置
-              </el-button>
-            </div>
-
-            <template v-else>
-              <!-- 续写设置 -->
-              <div class="ai-section">
-                <h4>AI续写</h4>
-                <el-form label-position="top" size="small">
-                  <el-form-item label="续写字数">
-                    <el-slider
-                      v-model="continueWordCount"
-                      :min="100"
-                      :max="2000"
-                      :step="100"
-                      show-input
-                      :show-input-controls="false"
-                    />
-                  </el-form-item>
-                  <el-form-item>
-                    <el-button
-                      type="primary"
-                      @click="handleContinueWriting"
-                      :loading="aiStore.generating"
-                      :disabled="!editorStore.content.trim()"
-                      style="width: 100%"
-                    >
-                      <el-icon><MagicStick /></el-icon>
-                      开始续写
-                    </el-button>
-                  </el-form-item>
-                </el-form>
-              </div>
-
-              <!-- 生成结果预览 -->
-              <div v-if="aiStore.generatedContent" class="ai-section generated-content">
-                <h4>生成结果</h4>
-                <div class="content-preview">
-                  {{ aiStore.generatedContent }}
-                </div>
-                <div class="content-actions">
-                  <el-button size="small" @click="aiStore.generatedContent = ''">
-                    放弃
-                  </el-button>
-                  <el-button type="primary" size="small" @click="applyGeneratedContent">
-                    应用到正文
-                  </el-button>
-                </div>
-              </div>
-
-              <!-- 生成状态 -->
-              <div v-if="aiStore.generating" class="ai-section generating-status">
-                <el-icon class="is-loading"><Loading /></el-icon>
-                <span>正在生成中...</span>
-              </div>
-
-              <!-- AI配置信息 -->
-              <div class="ai-section ai-config-info">
-                <h4>当前配置</h4>
-                <p v-if="aiStore.defaultConfig">
-                  {{ aiStore.defaultConfig.name }} ({{ aiStore.defaultConfig.model }})
-                </p>
-                <el-button text size="small" @click="router.push('/config')">
-                  管理配置
-                </el-button>
-              </div>
-            </template>
-          </div>
-
-          <!-- 大纲面板 -->
-          <div v-else-if="uiStore.rightPanelTab === 'outline'" class="outline-panel">
-            <!-- 大纲类型切换 -->
-            <div class="outline-tabs">
-              <el-radio-group v-model="outlineTab" size="small">
-                <el-radio-button value="book">全书大纲</el-radio-button>
-                <el-radio-button value="chapter">章节大纲</el-radio-button>
-              </el-radio-group>
-            </div>
-
-            <!-- 操作按钮 -->
-            <div class="outline-actions">
-              <el-button
-                size="small"
-                @click="generateOutline"
-                :loading="aiStore.generating"
-                :disabled="!aiStore.hasConfig"
-              >
-                <el-icon><MagicStick /></el-icon>
-                AI生成
-              </el-button>
-              <el-button size="small" type="primary" @click="saveOutline">
-                <el-icon><DocumentChecked /></el-icon>
-                保存
-              </el-button>
-            </div>
-
-            <!-- 全书大纲 -->
-            <div v-if="outlineTab === 'book'" class="outline-content">
-              <el-input
-                v-model="bookOutline"
-                type="textarea"
-                :rows="16"
-                placeholder="在此编写全书大纲，包括故事主线、主要角色、重要事件等..."
-                resize="none"
-              />
-              <p class="outline-tip">
-                全书大纲帮助把控整体故事走向，确保剧情连贯
-              </p>
-            </div>
-
-            <!-- 章节大纲 -->
-            <div v-else class="outline-content">
-              <div v-if="!chapterStore.currentChapter" class="no-chapter-tip">
-                <el-icon><InfoFilled /></el-icon>
-                <span>请先选择一个章节</span>
-              </div>
-              <template v-else>
-                <div class="current-chapter-info">
-                  当前章节：{{ chapterStore.currentChapter.title }}
-                </div>
-                <el-input
-                  v-model="chapterOutline"
-                  type="textarea"
-                  :rows="14"
-                  placeholder="在此编写本章大纲，包括情节发展、人物互动等..."
-                  resize="none"
-                />
-                <p class="outline-tip">
-                  章节大纲将帮助AI续写时更好地理解创作意图
-                </p>
-              </template>
-            </div>
-          </div>
-
-          <!-- 角色面板 -->
-          <div v-else-if="uiStore.rightPanelTab === 'character'" class="character-panel">
-            <p class="placeholder-text">角色功能开发中...</p>
-          </div>
-        </div>
-      </aside>
+      <EditorRightPanel
+        v-model:continue-word-count="continueWordCount"
+        :chapter-outline="chapterOutline"
+        :book-outline="bookOutline"
+        :outline-tab="outlineTab"
+        @continue-writing="handleContinueWriting"
+        @save-outline="saveOutline"
+        @generate-outline="generateOutline"
+      />
     </div>
 
     <!-- 状态栏 -->
     <footer class="editor-status-bar">
       <div class="status-left">
-        <span v-if="editorStore.isSaving" class="saving-indicator">
+        <span v-if="editorStore.isSaving" class="status-item saving">
           <el-icon class="is-loading"><Loading /></el-icon>
           保存中...
         </span>
-        <span v-else-if="editorStore.hasUnsavedChanges" class="unsaved-indicator">
+        <span v-else-if="editorStore.hasUnsavedChanges" class="status-item unsaved">
           <el-icon><WarningFilled /></el-icon>
           未保存
         </span>
-        <span v-else-if="editorStore.lastSavedAt" class="saved-indicator">
+        <span v-else-if="editorStore.lastSavedAt" class="status-item saved">
           <el-icon><CircleCheckFilled /></el-icon>
           已保存
         </span>
-        <span v-if="aiStore.generating" class="ai-status">
+        <span v-if="aiStore.generating" class="status-item ai">
           <el-icon class="is-loading"><Loading /></el-icon>
           AI生成中
         </span>
       </div>
-      <div class="status-right">
-        <span>字数：{{ editorStore.wordCount }}</span>
-        <span v-if="editorStore.selectionLength > 0">
-          选中：{{ editorStore.selectionLength }}
+      <div class="status-center">
+        <span class="status-item">
+          今日: {{ bookStore.currentBook?.wordCount || 0 }} 字
         </span>
+      </div>
+      <div class="status-right">
+        <span class="status-item">字数: {{ editorStore.wordCount }}</span>
+        <span class="status-item shortcut">Ctrl+S 保存</span>
+        <span class="status-item shortcut">Ctrl+G 生成</span>
       </div>
     </footer>
 
@@ -631,6 +389,7 @@ async function generateOutline(): Promise<void> {
       v-model="showCreateChapterDialog"
       title="新建章节"
       width="400px"
+      class="create-chapter-dialog"
     >
       <el-form>
         <el-form-item label="章节标题" required>
@@ -650,80 +409,39 @@ async function generateOutline(): Promise<void> {
     </el-dialog>
   </div>
 </template>
+
 <style scoped lang="scss">
 .editor-view {
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
-  background-color: $bg-page;
+  background-color: var(--page-bg, $bg-page);
+  transition: all $transition-duration $transition-ease;
 
   // 专注模式
   &.focus-mode {
-    .editor-header {
+    :deep(.editor-header) {
       opacity: 0.3;
-      transition: opacity 0.3s ease;
-
-      &:hover {
-        opacity: 1;
-      }
+      &:hover { opacity: 1; }
     }
 
-    .editor-sidebar {
+    :deep(.editor-sidebar) {
       width: 0;
+      opacity: 0;
       overflow: hidden;
     }
 
-    .editor-right-panel {
+    :deep(.editor-right-panel) {
       width: 0;
+      opacity: 0;
       overflow: hidden;
     }
 
     .editor-status-bar {
       opacity: 0.3;
-      transition: opacity 0.3s ease;
-
-      &:hover {
-        opacity: 1;
-      }
+      &:hover { opacity: 1; }
     }
-
-    .editor-main {
-      background-color: $bg-base;
-    }
-  }
-}
-
-.editor-header {
-  height: $header-height;
-  padding: 0 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background-color: $bg-base;
-  border-bottom: 1px solid $border-light;
-  z-index: $z-header;
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-
-  .book-title {
-    font-weight: 600;
-    color: $text-primary;
-  }
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-
-  .word-count {
-    font-size: 12px;
-    color: $text-secondary;
   }
 }
 
@@ -733,345 +451,69 @@ async function generateOutline(): Promise<void> {
   overflow: hidden;
 }
 
-.editor-sidebar {
-  width: $sidebar-width;
-  background-color: $bg-base;
-  border-right: 1px solid $border-light;
-  display: flex;
-  flex-direction: column;
-  transition: width $transition-duration $transition-ease;
-
-  &.collapsed {
-    width: $sidebar-collapsed-width;
-
-    .sidebar-content {
-      display: none;
-    }
-  }
-}
-
-.sidebar-header {
-  height: 40px;
-  padding: 0 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid $border-lighter;
-  font-weight: 500;
-}
-
-.sidebar-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px;
-}
-
-.sidebar-actions {
-  padding: 8px;
-  margin-bottom: 8px;
-  border-bottom: 1px solid $border-lighter;
-}
-
-.loading-state,
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  color: $text-secondary;
-  gap: 12px;
-}
-
-.chapter-tree {
-  display: flex;
-  flex-direction: column;
-}
-
-.chapter-item {
-  padding: 8px 12px;
-  border-radius: $border-radius-base;
-  cursor: pointer;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  transition: background-color $transition-duration $transition-ease;
-
-  &:hover {
-    .delete-chapter-btn { opacity: 1; }
-    background-color: $bg-page;
-  }
-
-  &.active {
-    background-color: rgba($primary-color, 0.1);
-    color: $primary-color;
-  }
-
-  .chapter-title {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .chapter-word-count {
-    font-size: 12px;
-    color: $text-secondary;
-    margin-left: 8px;
-  }
-}
-
-.editor-main {
-  flex: 1;
-  display: flex;
-  justify-content: center;
-  overflow-y: auto;
-  padding: 24px;
-}
-
-.no-chapter-selected {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-}
-
-.editor-container {
-  width: 100%;
-  max-width: 800px;
-}
-
-.chapter-title-display {
-  font-size: 24px;
-  font-weight: 600;
-  margin-bottom: 24px;
-  color: $text-primary;
-}
-
-.main-textarea {
-  width: 100%;
-  min-height: 500px;
-  padding: 16px;
-  border: 1px solid $border-light;
-  border-radius: $border-radius-base;
-  resize: vertical;
-  font-family: $font-family;
-  background-color: $bg-base;
-
-  &:focus {
-    outline: none;
-    border-color: $primary-color;
-  }
-
-  &::placeholder {
-    color: $text-placeholder;
-  }
-}
-
-.editor-right-panel {
-  width: $right-panel-width;
-  background-color: $bg-base;
-  border-left: 1px solid $border-light;
-  display: flex;
-  flex-direction: column;
-}
-
-.panel-header {
-  border-bottom: 1px solid $border-lighter;
-}
-
-.panel-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
-}
-
-.placeholder-text {
-  color: $text-secondary;
-  text-align: center;
-  padding: 24px;
-}
-
 .editor-status-bar {
   height: $status-bar-height;
   padding: 0 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background-color: $bg-base;
-  border-top: 1px solid $border-light;
+  background-color: var(--status-bg, $bg-base);
+  border-top: 1px solid var(--border-color, $border-light);
   font-size: 12px;
-  color: $text-secondary;
+  transition: all $transition-duration $transition-ease;
 }
 
 .status-left,
+.status-center,
 .status-right {
   display: flex;
   align-items: center;
   gap: 16px;
 }
 
-.unsaved-indicator {
-  color: $warning-color;
+.status-item {
   display: flex;
   align-items: center;
   gap: 4px;
-}
+  color: var(--text-secondary, $text-secondary);
 
-.saved-indicator {
-  color: $success-color;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
+  &.saving {
+    color: $primary-color;
+  }
 
-.saving-indicator {
-  color: $primary-color;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
+  &.unsaved {
+    color: $warning-color;
+  }
 
-.ai-status {
-  color: $primary-color;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
+  &.saved {
+    color: $success-color;
+  }
 
-.chapter-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
+  &.ai {
+    color: $primary-color;
+  }
 
-.delete-chapter-btn {
-  opacity: 0;
-  transition: opacity 0.2s ease;
-  padding: 2px;
-}
-
-// AI 面板样式
-.ai-panel {
-  .no-config-tip {
-    text-align: center;
-    padding: 32px 16px;
-    color: $text-secondary;
-
-    .el-icon {
-      font-size: 32px;
-      margin-bottom: 12px;
-      color: $warning-color;
-    }
-
-    p {
-      margin-bottom: 16px;
-    }
+  &.shortcut {
+    padding: 2px 8px;
+    background-color: var(--shortcut-bg, $light-bg-panel);
+    border-radius: $border-radius-small;
+    font-size: 11px;
   }
 }
 
-.ai-section {
-  margin-bottom: 20px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid $border-lighter;
-
-  &:last-child {
-    border-bottom: none;
-  }
-
-  h4 {
-    font-size: 13px;
-    font-weight: 600;
-    margin-bottom: 12px;
-    color: $text-primary;
-  }
+// 深色主题适配
+:global(html.dark) .editor-view {
+  --page-bg: #{$dark-bg-page};
+  --status-bg: #{$dark-bg-base};
+  --border-color: #{$dark-border-light};
+  --text-secondary: #{$dark-text-secondary};
+  --shortcut-bg: #{$dark-bg-panel};
 }
 
-.generated-content {
-  .content-preview {
-    max-height: 200px;
-    overflow-y: auto;
-    padding: 12px;
-    background-color: $bg-page;
-    border-radius: $border-radius-base;
-    font-size: 13px;
-    line-height: 1.6;
-    margin-bottom: 12px;
-    white-space: pre-wrap;
-  }
-
-  .content-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-  }
-}
-
-.generating-status {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 16px;
-  color: $primary-color;
-}
-
-.ai-config-info {
-  p {
-    font-size: 12px;
-    color: $text-regular;
-    margin-bottom: 8px;
-  }
-}
-
-// 大纲面板样式
-.outline-panel {
-  .outline-tabs {
-    margin-bottom: 16px;
-
-    .el-radio-group {
-      width: 100%;
-
-      .el-radio-button {
-        flex: 1;
-      }
-    }
-  }
-
-  .outline-actions {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 12px;
-  }
-
-  .outline-content {
-    margin-top: 8px;
-  }
-
-  .no-chapter-tip {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 32px 16px;
-    color: $text-secondary;
-    background-color: $bg-page;
-    border-radius: $border-radius-base;
-  }
-
-  .current-chapter-info {
-    font-size: 12px;
-    color: $text-secondary;
-    margin-bottom: 8px;
-    padding: 8px 12px;
-    background-color: $bg-page;
-    border-radius: $border-radius-base;
-  }
-
-  .outline-tip {
-    font-size: 12px;
-    color: $text-secondary;
-    margin-top: 8px;
+// 对话框样式
+.create-chapter-dialog {
+  :deep(.el-dialog) {
+    border-radius: $border-radius-card;
   }
 }
 </style>

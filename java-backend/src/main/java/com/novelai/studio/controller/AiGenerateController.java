@@ -338,4 +338,190 @@ public class AiGenerateController {
             default: return "章节大纲";
         }
     }
+
+    /**
+     * AI初始化小说接口 - 生成简介、大纲、角色
+     */
+    @PostMapping("/initialize-novel")
+    public Result<Map<String, Object>> initializeNovel(@RequestBody Map<String, Object> request) {
+        String title = (String) request.get("title");
+        String genre = (String) request.get("genre");
+        String style = (String) request.get("style");
+        String protagonist = (String) request.get("protagonist");
+        String worldKeywords = (String) request.get("worldKeywords");
+        String coreConflict = (String) request.get("coreConflict");
+        String configId = (String) request.get("configId");
+
+        if (title == null || title.isEmpty()) {
+            return Result.badRequest("书名不能为空");
+        }
+
+        // 构建生成提示词
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("请为以下小说生成完整的初始设定，包括简介、大纲和主要角色。\n\n");
+        prompt.append("【书名】").append(title).append("\n");
+        prompt.append("【类型】").append(getGenreName(genre)).append("\n");
+        prompt.append("【风格】").append(getStyleName(style)).append("\n");
+
+        if (protagonist != null && !protagonist.isEmpty()) {
+            prompt.append("【主角设定】").append(protagonist).append("\n");
+        }
+        if (worldKeywords != null && !worldKeywords.isEmpty()) {
+            prompt.append("【世界观关键词】").append(worldKeywords).append("\n");
+        }
+        if (coreConflict != null && !coreConflict.isEmpty()) {
+            prompt.append("【核心冲突】").append(coreConflict).append("\n");
+        }
+
+        prompt.append("\n请按以下JSON格式输出，不要输出其他内容：\n");
+        prompt.append("```json\n");
+        prompt.append("{\n");
+        prompt.append("  \"description\": \"小说简介（150-300字，吸引读者的简介）\",\n");
+        prompt.append("  \"outline\": \"全书大纲（500-800字，包含主线剧情、关键转折点、高潮和结局方向）\",\n");
+        prompt.append("  \"characters\": [\n");
+        prompt.append("    {\"name\": \"角色名\", \"role\": \"protagonist/supporting/antagonist\", \"description\": \"角色简介（50-100字）\"},\n");
+        prompt.append("    ...\n");
+        prompt.append("  ]\n");
+        prompt.append("}\n");
+        prompt.append("```\n");
+        prompt.append("请生成3-5个主要角色。");
+
+        GenerateOptions options = GenerateOptions.builder()
+                .systemPrompt("你是一位专业的网络小说策划师，擅长设计引人入胜的故事。请严格按照JSON格式输出，确保输出是有效的JSON。")
+                .maxTokens(4096)
+                .temperature(0.8)
+                .build();
+
+        GenerateResult result = aiService.generate(prompt.toString(), configId, options);
+
+        if ("error".equals(result.getFinishReason())) {
+            return Result.error(result.getErrorMessage());
+        }
+
+        // 解析JSON结果
+        try {
+            String content = result.getContent();
+            // 提取JSON部分
+            int jsonStart = content.indexOf("{");
+            int jsonEnd = content.lastIndexOf("}") + 1;
+            if (jsonStart >= 0 && jsonEnd > jsonStart) {
+                String jsonStr = content.substring(jsonStart, jsonEnd);
+                com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                Map<String, Object> parsed = mapper.readValue(jsonStr, Map.class);
+                return Result.success(parsed);
+            } else {
+                // 如果无法解析JSON，返回原始内容
+                return Result.success(Map.of(
+                        "description", content,
+                        "outline", "",
+                        "characters", List.of()
+                ));
+            }
+        } catch (Exception e) {
+            // JSON解析失败，返回原始内容
+            return Result.success(Map.of(
+                    "description", result.getContent(),
+                    "outline", "",
+                    "characters", List.of()
+            ));
+        }
+    }
+
+    /**
+     * AI修改小说设定接口
+     */
+    @PostMapping("/refine-novel")
+    public Result<Map<String, Object>> refineNovel(@RequestBody Map<String, Object> request) {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> currentContent = (Map<String, Object>) request.get("currentContent");
+        String userRequest = (String) request.get("userRequest");
+        String configId = (String) request.get("configId");
+
+        if (currentContent == null) {
+            return Result.badRequest("当前内容不能为空");
+        }
+        if (userRequest == null || userRequest.isEmpty()) {
+            return Result.badRequest("修改要求不能为空");
+        }
+
+        String currentDescription = (String) currentContent.getOrDefault("description", "");
+        String currentOutline = (String) currentContent.getOrDefault("outline", "");
+        @SuppressWarnings("unchecked")
+        List<Map<String, String>> currentCharacters = (List<Map<String, String>>) currentContent.getOrDefault("characters", List.of());
+
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("请根据用户的修改要求，修改以下小说设定。\n\n");
+        prompt.append("【当前简介】\n").append(currentDescription).append("\n\n");
+        prompt.append("【当前大纲】\n").append(currentOutline).append("\n\n");
+        prompt.append("【当前角色】\n");
+        for (Map<String, String> character : currentCharacters) {
+            prompt.append("- ").append(character.get("name")).append("（").append(character.get("role")).append("）：").append(character.get("description")).append("\n");
+        }
+        prompt.append("\n【用户修改要求】\n").append(userRequest).append("\n\n");
+
+        prompt.append("请按以下JSON格式输出修改后的内容：\n");
+        prompt.append("```json\n");
+        prompt.append("{\n");
+        prompt.append("  \"description\": \"修改后的简介\",\n");
+        prompt.append("  \"outline\": \"修改后的大纲\",\n");
+        prompt.append("  \"characters\": [{\"name\": \"角色名\", \"role\": \"protagonist/supporting/antagonist\", \"description\": \"角色简介\"}, ...]\n");
+        prompt.append("}\n");
+        prompt.append("```");
+
+        GenerateOptions options = GenerateOptions.builder()
+                .systemPrompt("你是一位专业的网络小说策划师。请根据用户的修改要求调整小说设定，保持整体风格一致。请严格按照JSON格式输出。")
+                .maxTokens(4096)
+                .temperature(0.7)
+                .build();
+
+        GenerateResult result = aiService.generate(prompt.toString(), configId, options);
+
+        if ("error".equals(result.getFinishReason())) {
+            return Result.error(result.getErrorMessage());
+        }
+
+        // 解析JSON结果
+        try {
+            String content = result.getContent();
+            int jsonStart = content.indexOf("{");
+            int jsonEnd = content.lastIndexOf("}") + 1;
+            if (jsonStart >= 0 && jsonEnd > jsonStart) {
+                String jsonStr = content.substring(jsonStart, jsonEnd);
+                com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                Map<String, Object> parsed = mapper.readValue(jsonStr, Map.class);
+                return Result.success(parsed);
+            } else {
+                return Result.success(currentContent);
+            }
+        } catch (Exception e) {
+            return Result.success(currentContent);
+        }
+    }
+
+    private String getGenreName(String genre) {
+        if (genre == null) return "其他";
+        switch (genre) {
+            case "xuanhuan": return "玄幻";
+            case "xiuzhen": return "修真";
+            case "dushi": return "都市";
+            case "kehuan": return "科幻";
+            case "lishi": return "历史";
+            case "yanqing": return "言情";
+            case "xuanyi": return "悬疑";
+            default: return "其他";
+        }
+    }
+
+    private String getStyleName(String style) {
+        if (style == null) return "轻松";
+        switch (style) {
+            case "qingsong": return "轻松";
+            case "yansu": return "严肃";
+            case "rexue": return "热血";
+            case "nuexin": return "虐心";
+            case "huaji": return "搞笑";
+            case "heian": return "黑暗";
+            default: return "轻松";
+        }
+    }
 }

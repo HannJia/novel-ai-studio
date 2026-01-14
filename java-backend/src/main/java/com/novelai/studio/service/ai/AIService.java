@@ -143,6 +143,10 @@ public class AIService {
 
         switch (provider) {
             case OPENAI:
+            case CUSTOM:
+            case QIANWEN:
+            case ZHIPU:
+                // OpenAI 兼容的 API（包括火山引擎、通义千问、智谱等）
                 return new OpenAIAdapter(
                         config.getApiKey(),
                         config.getBaseUrl(),

@@ -347,3 +347,221 @@ a {
 .slide-leave-to {
   transform: translateX(100%);
 }
+
+// ========== 新编辑器布局全局样式 ==========
+
+// 方案B - 浅色清爽风格 (Notion风格) - 默认
+:root {
+  // 布局颜色
+  --layout-bg: #{$bg-page};
+  --panel-bg: #{$bg-base};
+  --card-bg: #{$light-bg-panel};
+  --hover-bg: #{$light-bg-hover};
+  --active-bg: #{$light-bg-active};
+
+  // 文字颜色
+  --text-title: #{$light-text-title};
+  --text-body: #{$text-primary};
+  --text-muted: #{$text-secondary};
+  --text-hint: #{$text-placeholder};
+
+  // 边框和阴影
+  --border-subtle: #{$light-border-card};
+  --card-shadow: #{$light-card-shadow};
+  --card-shadow-hover: #{$light-card-shadow-hover};
+  --card-radius: #{$light-card-radius};
+}
+
+// 方案A - 暗色主题 (VS Code风格)
+html.dark {
+  // 布局颜色
+  --layout-bg: #{$dark-bg-page};
+  --panel-bg: #{$dark-bg-base};
+  --card-bg: #{$dark-bg-panel};
+  --hover-bg: #{$dark-bg-hover};
+  --active-bg: #{$dark-bg-active};
+
+  // 文字颜色
+  --text-title: #{$dark-text-primary};
+  --text-body: #{$dark-text-regular};
+  --text-muted: #{$dark-text-secondary};
+  --text-hint: #{$dark-text-placeholder};
+
+  // 边框和阴影
+  --border-subtle: #{$dark-border-lighter};
+  --card-shadow: #{$dark-card-shadow};
+  --card-shadow-hover: none;
+  --card-radius: #{$dark-card-radius};
+}
+
+// 主题切换平滑过渡
+* {
+  transition-property: background-color, border-color, color, box-shadow;
+  transition-duration: 0.2s;
+  transition-timing-function: ease;
+}
+
+// 图标旋转动画 - 只对图标元素生效，避免整个按钮旋转
+.el-icon.is-loading {
+  animation: rotating 1.5s linear infinite;
+}
+
+// 确保按钮本身不会旋转
+.el-button.is-loading {
+  animation: none !important;
+  transform: none !important;
+}
+
+@keyframes rotating {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+// 编辑器三栏布局的通用样式
+.editor-layout {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
+// 侧边栏通用样式
+.sidebar-panel {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--panel-bg);
+  border-right: 1px solid var(--border-subtle);
+  transition: width $transition-duration $transition-ease;
+}
+
+// 右侧面板通用样式
+.right-panel {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--panel-bg);
+  border-left: 1px solid var(--border-subtle);
+  transition: width $transition-duration $transition-ease;
+}
+
+// 卡片通用样式
+.card {
+  background-color: var(--card-bg);
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
+  transition: box-shadow $transition-duration-fast $transition-ease;
+
+  &:hover {
+    box-shadow: var(--card-shadow-hover);
+  }
+}
+
+// 按钮通用样式增强
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border: none;
+  border-radius: $border-radius-large;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all $transition-duration-fast $transition-ease;
+
+  &:hover {
+    background-color: var(--hover-bg);
+    color: var(--text-body);
+  }
+
+  &.active {
+    background-color: var(--active-bg);
+    color: $primary-color;
+  }
+}
+
+// 标签页通用样式
+.tab-group {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background-color: var(--card-bg);
+  border-radius: $border-radius-large;
+
+  .tab-item {
+    flex: 1;
+    padding: 8px 16px;
+    border: none;
+    border-radius: $border-radius-base;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all $transition-duration-fast $transition-ease;
+
+    &:hover {
+      color: var(--text-body);
+    }
+
+    &.active {
+      background-color: var(--panel-bg);
+      color: var(--text-body);
+      box-shadow: var(--card-shadow);
+    }
+  }
+}
+
+// 输入框通用样式增强
+.input-clean {
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-body);
+  font-size: inherit;
+
+  &::placeholder {
+    color: var(--text-hint);
+  }
+}
+
+// 修复 Element Plus 按钮 loading 状态样式 - 防止整个按钮旋转
+.el-button.is-loading {
+  // 禁止按钮本身旋转
+  animation: none !important;
+  transform: none !important;
+  pointer-events: none;
+  opacity: 0.85;
+
+  // 确保按钮内容不旋转
+  > span,
+  > .el-icon:not(.is-loading) {
+    animation: none !important;
+    transform: none !important;
+  }
+
+  // 只让 loading 图标旋转
+  .el-icon.is-loading {
+    animation: rotating 1.5s linear infinite !important;
+  }
+
+  // 工具栏按钮特殊处理
+  &.toolbar-btn.primary {
+    background-color: $primary-color !important;
+    color: #fff !important;
+  }
+}
+
+// 自定义 loading 按钮样式（不改变按钮整体外观）
+.btn-loading {
+  position: relative;
+  pointer-events: none;
+
+  .btn-spinner {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    animation: rotating 1.5s linear infinite;
+  }
+}

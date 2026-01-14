@@ -5,17 +5,21 @@ import { useBookStore } from '@/stores'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { Book, BookGenre, BookStyle } from '@/types'
 import { BOOK_GENRE_MAP, BOOK_STYLE_MAP, BOOK_STATUS_MAP } from '@/types'
+import CreateBookWizard from '@/components/book/CreateBookWizard.vue'
+import CoverUploader from '@/components/book/CoverUploader.vue'
 
 const router = useRouter()
 const bookStore = useBookStore()
 
 const showCreateDialog = ref(false)
+const showWizardDialog = ref(false)
 const createForm = ref({
   title: '',
   author: '',
   genre: 'xuanhuan' as BookGenre,
   style: 'qingsong' as BookStyle,
-  description: ''
+  description: '',
+  coverImage: ''
 })
 
 const genreOptions = Object.entries(BOOK_GENRE_MAP).map(([value, label]) => ({
@@ -78,7 +82,8 @@ function resetCreateForm(): void {
     author: '',
     genre: 'xuanhuan',
     style: 'qingsong',
-    description: ''
+    description: '',
+    coverImage: ''
   }
 }
 
@@ -92,6 +97,28 @@ function formatWordCount(count: number): string {
 function goToSettings(): void {
   router.push('/config')
 }
+
+function handleCreateWithAI(): void {
+  showWizardDialog.value = true
+}
+
+function handleWizardClose(): void {
+  showWizardDialog.value = false
+}
+
+function handleWizardCreated(bookId: string): void {
+  showWizardDialog.value = false
+  bookStore.fetchBooks()
+  router.push(`/editor/${bookId}`)
+}
+
+function handleCreateCommand(command: string): void {
+  if (command === 'wizard') {
+    showWizardDialog.value = true
+  } else {
+    showCreateDialog.value = true
+  }
+}
 </script>
 
 <template>
@@ -102,10 +129,25 @@ function goToSettings(): void {
         <h1 class="app-title">NovelAI Studio</h1>
       </div>
       <div class="header-right">
-        <el-button type="primary" @click="handleCreateBook">
-          <el-icon><Plus /></el-icon>
-          新建书籍
-        </el-button>
+        <el-dropdown @command="handleCreateCommand">
+          <el-button type="primary">
+            <el-icon><Plus /></el-icon>
+            新建书籍
+            <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="wizard">
+                <el-icon><MagicStick /></el-icon>
+                AI 辅助创建
+              </el-dropdown-item>
+              <el-dropdown-item command="simple">
+                <el-icon><Edit /></el-icon>
+                快速创建
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-button @click="goToSettings">
           <el-icon><Setting /></el-icon>
           设置
@@ -121,8 +163,17 @@ function goToSettings(): void {
       </div>
 
       <div v-else-if="bookStore.books.length === 0" class="empty-state">
-        <el-empty description="还没有书籍，点击上方按钮创建一本吧">
-          <el-button type="primary" @click="handleCreateBook">新建书籍</el-button>
+        <el-empty description="还没有书籍，开始创作你的第一本吧">
+          <div class="empty-actions">
+            <el-button type="primary" @click="showWizardDialog = true">
+              <el-icon><MagicStick /></el-icon>
+              AI 辅助创建
+            </el-button>
+            <el-button @click="showCreateDialog = true">
+              <el-icon><Edit /></el-icon>
+              快速创建
+            </el-button>
+          </div>
         </el-empty>
       </div>
 
@@ -174,51 +225,72 @@ function goToSettings(): void {
     <el-dialog
       v-model="showCreateDialog"
       title="新建书籍"
-      width="500px"
+      width="600px"
       @close="resetCreateForm"
     >
-      <el-form :model="createForm" label-width="80px">
-        <el-form-item label="书名" required>
-          <el-input v-model="createForm.title" placeholder="请输入书名" />
-        </el-form-item>
-        <el-form-item label="作者">
-          <el-input v-model="createForm.author" placeholder="请输入作者名" />
-        </el-form-item>
-        <el-form-item label="类型" required>
-          <el-select v-model="createForm.genre" placeholder="请选择类型">
-            <el-option
-              v-for="option in genreOptions"
-              :key="option.value"
-              :label="option.label"
-              :value="option.value"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="风格" required>
-          <el-select v-model="createForm.style" placeholder="请选择风格">
-            <el-option
-              v-for="option in styleOptions"
-              :key="option.value"
-              :label="option.label"
-              :value="option.value"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="简介">
-          <el-input
-            v-model="createForm.description"
-            type="textarea"
-            :rows="4"
-            placeholder="请输入书籍简介"
-          />
-        </el-form-item>
-      </el-form>
+      <div class="create-book-form">
+        <div class="form-left">
+          <CoverUploader v-model="createForm.coverImage" />
+        </div>
+        <div class="form-right">
+          <el-form :model="createForm" label-width="80px">
+            <el-form-item label="书名" required>
+              <el-input v-model="createForm.title" placeholder="请输入书名" />
+            </el-form-item>
+            <el-form-item label="作者">
+              <el-input v-model="createForm.author" placeholder="请输入作者名" />
+            </el-form-item>
+            <el-form-item label="类型" required>
+              <el-select v-model="createForm.genre" placeholder="请选择类型">
+                <el-option
+                  v-for="option in genreOptions"
+                  :key="option.value"
+                  :label="option.label"
+                  :value="option.value"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="风格" required>
+              <el-select v-model="createForm.style" placeholder="请选择风格">
+                <el-option
+                  v-for="option in styleOptions"
+                  :key="option.value"
+                  :label="option.label"
+                  :value="option.value"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="简介">
+              <el-input
+                v-model="createForm.description"
+                type="textarea"
+                :rows="4"
+                placeholder="请输入书籍简介"
+              />
+            </el-form-item>
+          </el-form>
+        </div>
+      </div>
       <template #footer>
         <el-button @click="showCreateDialog = false">取消</el-button>
         <el-button type="primary" @click="submitCreateBook" :loading="bookStore.loading">
           创建
         </el-button>
       </template>
+    </el-dialog>
+
+    <!-- AI 辅助创建书籍对话框 -->
+    <el-dialog
+      v-model="showWizardDialog"
+      title="AI 辅助创建书籍"
+      width="800px"
+      :close-on-click-modal="false"
+      destroy-on-close
+    >
+      <CreateBookWizard
+        @close="handleWizardClose"
+        @created="handleWizardCreated"
+      />
     </el-dialog>
   </div>
 </template>
@@ -276,6 +348,12 @@ function goToSettings(): void {
   .el-icon {
     font-size: 32px;
   }
+}
+
+.empty-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
 }
 
 .book-grid {
@@ -384,6 +462,23 @@ function goToSettings(): void {
 
   &.completed {
     color: $success-color;
+  }
+}
+
+.create-book-form {
+  display: flex;
+  gap: 24px;
+
+  .form-left {
+    flex-shrink: 0;
+  }
+
+  .form-right {
+    flex: 1;
+
+    .el-select {
+      width: 100%;
+    }
   }
 }
 </style>
