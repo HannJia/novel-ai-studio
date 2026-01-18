@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed, watchEffect, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUiStore, useAiStore, useChapterStore, useBookStore } from '@/stores'
 import CharacterPanel from './panels/CharacterPanel.vue'
 import KnowledgePanel from './panels/KnowledgePanel.vue'
+import ForeshadowPanel from './panels/ForeshadowPanel.vue'
+import TimelinePanel from './panels/TimelinePanel.vue'
+import SummaryPanel from './panels/SummaryPanel.vue'
 import AIThinkingProcess from './ai/AIThinkingProcess.vue'
 
 const router = useRouter()
@@ -13,43 +16,74 @@ const chapterStore = useChapterStore()
 const bookStore = useBookStore()
 
 const emit = defineEmits<{
-  continueWriting: []
+  continueWriting: [wordRange: [number, number]]
+  generateChapter: [wordRange: [number, number]]
   saveOutline: []
   generateOutline: []
+  'update:chapterWordMin': [value: number]
+  'update:chapterWordMax': [value: number]
+  'update:continueWordMin': [value: number]
+  'update:continueWordMax': [value: number]
+  'update:temperature': [value: number]
 }>()
 
 const props = defineProps<{
-  continueWordCount: number
   chapterOutline: string
   bookOutline: string
   outlineTab: 'book' | 'chapter'
+  chapterWordMin?: number
+  chapterWordMax?: number
+  continueWordMin?: number
+  continueWordMax?: number
+  temperature?: number
 }>()
 
-// 本地状态
-const activeTab = ref<'character' | 'knowledge' | 'ai' | 'config'>('character')
-const commandInput = ref('')
-const chatMessages = ref<Array<{role: 'user' | 'assistant', content: string}>>([
-  { role: 'assistant', content: '有什么可以帮您的？' }
-])
+// 本地状态 - 添加记忆系统标签
+const activeTab = ref<'character' | 'knowledge' | 'memory' | 'ai'>('character')
 
-// AI 指令对话
-function sendCommand(): void {
-  if (!commandInput.value.trim()) return
+// 记忆系统子标签
+const memorySubTab = ref<'summary' | 'timeline' | 'foreshadow'>('foreshadow')
 
-  chatMessages.value.push({
-    role: 'user',
-    content: commandInput.value
-  })
+// 使用 watchEffect 确保响应式更新嵌入面板可见状态
+watchEffect(() => {
+  aiStore.embeddedPanelVisible = activeTab.value === 'ai' && uiStore.rightPanelVisible
+})
 
-  // 模拟AI回复
-  setTimeout(() => {
-    chatMessages.value.push({
-      role: 'assistant',
-      content: '好的，我会根据您的要求调整生成内容的风格。'
-    })
-  }, 500)
+// 组件卸载时重置状态
+onUnmounted(() => {
+  aiStore.embeddedPanelVisible = false
+})
 
-  commandInput.value = ''
+// 生成配置 - 使用计算属性绑定到 props，支持双向绑定
+const chapterWordMinValue = computed({
+  get: () => props.chapterWordMin ?? 2000,
+  set: (v) => emit('update:chapterWordMin', v)
+})
+const chapterWordMaxValue = computed({
+  get: () => props.chapterWordMax ?? 4000,
+  set: (v) => emit('update:chapterWordMax', v)
+})
+const continueWordMinValue = computed({
+  get: () => props.continueWordMin ?? 300,
+  set: (v) => emit('update:continueWordMin', v)
+})
+const continueWordMaxValue = computed({
+  get: () => props.continueWordMax ?? 800,
+  set: (v) => emit('update:continueWordMax', v)
+})
+const temperatureValue = computed({
+  get: () => props.temperature ?? 0.7,
+  set: (v) => emit('update:temperature', v)
+})
+
+// 触发续写
+function handleContinueWriting(): void {
+  emit('continueWriting', [continueWordMinValue.value, continueWordMaxValue.value])
+}
+
+// 触发章节生成
+function handleGenerateChapter(): void {
+  emit('generateChapter', [chapterWordMinValue.value, chapterWordMaxValue.value])
 }
 </script>
 
@@ -75,19 +109,19 @@ function sendCommand(): void {
       </button>
       <button
         class="tab-btn"
+        :class="{ active: activeTab === 'memory' }"
+        @click="activeTab = 'memory'"
+      >
+        <el-icon><Memo /></el-icon>
+        <span>记忆</span>
+      </button>
+      <button
+        class="tab-btn"
         :class="{ active: activeTab === 'ai' }"
         @click="activeTab = 'ai'"
       >
         <el-icon><MagicStick /></el-icon>
         <span>生成</span>
-      </button>
-      <button
-        class="tab-btn"
-        :class="{ active: activeTab === 'config' }"
-        @click="activeTab = 'config'"
-      >
-        <el-icon><ChatLineRound /></el-icon>
-        <span>对话</span>
       </button>
     </div>
 
@@ -98,6 +132,24 @@ function sendCommand(): void {
 
       <!-- 知识库面板 -->
       <KnowledgePanel v-else-if="activeTab === 'knowledge'" />
+
+      <!-- 记忆系统面板 -->
+      <div v-else-if="activeTab === 'memory'" class="memory-panel">
+        <!-- 记忆子标签 -->
+        <div class="memory-sub-tabs">
+          <el-radio-group v-model="memorySubTab" size="small">
+            <el-radio-button value="foreshadow">伏笔</el-radio-button>
+            <el-radio-button value="timeline">事件</el-radio-button>
+            <el-radio-button value="summary">摘要</el-radio-button>
+          </el-radio-group>
+        </div>
+        <!-- 子面板内容 -->
+        <div class="memory-content">
+          <ForeshadowPanel v-if="memorySubTab === 'foreshadow'" />
+          <TimelinePanel v-else-if="memorySubTab === 'timeline'" />
+          <SummaryPanel v-else-if="memorySubTab === 'summary'" />
+        </div>
+      </div>
 
       <!-- 生成配置面板 -->
       <div v-else-if="activeTab === 'ai'" class="generate-panel">
@@ -118,30 +170,67 @@ function sendCommand(): void {
               生成配置
             </h4>
             <div class="config-form">
+              <!-- 章节生成字数区间 -->
               <div class="form-item">
-                <label>目标字数</label>
-                <div class="range-input">
-                  <el-slider
-                    :model-value="continueWordCount"
-                    @update:model-value="$emit('update:continueWordCount', $event)"
-                    :min="100"
-                    :max="3000"
+                <label>章节生成字数</label>
+                <div class="range-inputs">
+                  <el-input-number
+                    v-model="chapterWordMinValue"
+                    :min="500"
+                    :max="chapterWordMaxValue - 100"
                     :step="100"
+                    size="small"
+                    controls-position="right"
                   />
-                  <span class="range-value">{{ continueWordCount }} 字</span>
+                  <span class="range-separator">~</span>
+                  <el-input-number
+                    v-model="chapterWordMaxValue"
+                    :min="chapterWordMinValue + 100"
+                    :max="10000"
+                    :step="100"
+                    size="small"
+                    controls-position="right"
+                  />
+                  <span class="range-unit">字</span>
                 </div>
               </div>
 
+              <!-- 续写字数区间 -->
+              <div class="form-item">
+                <label>续写字数</label>
+                <div class="range-inputs">
+                  <el-input-number
+                    v-model="continueWordMinValue"
+                    :min="100"
+                    :max="continueWordMaxValue - 50"
+                    :step="50"
+                    size="small"
+                    controls-position="right"
+                  />
+                  <span class="range-separator">~</span>
+                  <el-input-number
+                    v-model="continueWordMaxValue"
+                    :min="continueWordMinValue + 50"
+                    :max="3000"
+                    :step="50"
+                    size="small"
+                    controls-position="right"
+                  />
+                  <span class="range-unit">字</span>
+                </div>
+              </div>
+
+              <!-- 创意温度 -->
               <div class="form-item">
                 <label>创意温度</label>
                 <div class="range-input">
                   <el-slider
-                    :model-value="0.7"
+                    v-model="temperatureValue"
                     :min="0"
                     :max="1"
                     :step="0.1"
                   />
-                  <span class="range-value">0.7</span>
+                  <span class="range-value">{{ temperatureValue }}</span>
                 </div>
               </div>
             </div>
@@ -152,7 +241,7 @@ function sendCommand(): void {
             <el-button
               type="primary"
               class="generate-btn"
-              @click="$emit('continueWriting')"
+              @click="handleContinueWriting"
               :loading="aiStore.generating"
             >
               <el-icon><MagicStick /></el-icon>
@@ -166,41 +255,9 @@ function sendCommand(): void {
             <span class="info-value">{{ aiStore.defaultConfig?.model || '未配置' }}</span>
           </div>
 
-          <!-- AI 思考过程（嵌入模式） -->
-          <AIThinkingProcess :embedded="true" />
+          <!-- AI 思考过程和对话（常驻显示） -->
+          <AIThinkingProcess :embedded="true" :always-show-chat="true" />
         </template>
-      </div>
-
-      <!-- AI 指令对话面板 -->
-      <div v-else-if="activeTab === 'config'" class="chat-panel">
-        <div class="chat-messages">
-          <div
-            v-for="(msg, index) in chatMessages"
-            :key="index"
-            class="chat-message"
-            :class="msg.role"
-          >
-            <div class="message-avatar">
-              <el-icon v-if="msg.role === 'assistant'"><MagicStick /></el-icon>
-              <el-icon v-else><User /></el-icon>
-            </div>
-            <div class="message-content">{{ msg.content }}</div>
-          </div>
-        </div>
-
-        <div class="chat-input">
-          <el-input
-            v-model="commandInput"
-            placeholder="输入指令..."
-            @keyup.enter="sendCommand"
-          >
-            <template #append>
-              <el-button @click="sendCommand">
-                <el-icon><Promotion /></el-icon>
-              </el-button>
-            </template>
-          </el-input>
-        </div>
       </div>
     </div>
   </aside>
@@ -325,6 +382,33 @@ function sendCommand(): void {
           text-align: right;
         }
       }
+
+      .range-inputs {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+
+        :deep(.el-input-number) {
+          width: 90px;
+
+          .el-input__inner {
+            padding-left: 8px;
+            padding-right: 8px;
+          }
+        }
+
+        .range-separator {
+          color: var(--text-secondary, $text-secondary);
+          font-size: 14px;
+        }
+
+        .range-unit {
+          color: var(--text-secondary, $text-secondary);
+          font-size: 12px;
+          margin-left: 4px;
+        }
+      }
     }
   }
 
@@ -356,79 +440,32 @@ function sendCommand(): void {
   }
 }
 
-// AI 对话面板
-.chat-panel {
+// 记忆系统面板
+.memory-panel {
+  height: 100%;
   display: flex;
   flex-direction: column;
-  height: 100%;
 
-  .chat-messages {
-    flex: 1;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    padding-bottom: 12px;
-  }
+  .memory-sub-tabs {
+    margin-bottom: 16px;
 
-  .chat-message {
-    display: flex;
-    gap: 8px;
-
-    &.user {
-      flex-direction: row-reverse;
-
-      .message-content {
-        background-color: $primary-color;
-        color: #fff;
-      }
-    }
-
-    &.assistant {
-      .message-content {
-        background-color: var(--msg-bg, $light-bg-panel);
-        color: var(--text-primary, $text-primary);
-      }
-    }
-
-    .message-avatar {
-      width: 28px;
-      height: 28px;
-      border-radius: 50%;
-      background-color: var(--avatar-bg, $light-bg-panel);
+    :deep(.el-radio-group) {
       display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
+      width: 100%;
 
-      .el-icon {
-        font-size: 14px;
-        color: var(--text-secondary, $text-secondary);
+      .el-radio-button {
+        flex: 1;
+
+        .el-radio-button__inner {
+          width: 100%;
+        }
       }
-    }
-
-    .message-content {
-      max-width: 80%;
-      padding: 10px 14px;
-      border-radius: $border-radius-card;
-      font-size: 13px;
-      line-height: 1.5;
     }
   }
 
-  .chat-input {
-    padding-top: 12px;
-    border-top: 1px solid var(--border-color, $border-lighter);
-
-    :deep(.el-input-group__append) {
-      padding: 0;
-
-      .el-button {
-        margin: 0;
-        border: none;
-        background: transparent;
-      }
-    }
+  .memory-content {
+    flex: 1;
+    overflow: hidden;
   }
 }
 
@@ -442,7 +479,5 @@ function sendCommand(): void {
   --hover-bg: #{$dark-bg-hover};
   --active-bg: #{$dark-bg-active};
   --info-bg: #{$dark-bg-panel};
-  --msg-bg: #{$dark-bg-panel};
-  --avatar-bg: #{$dark-bg-panel};
 }
 </style>

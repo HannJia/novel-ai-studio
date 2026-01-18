@@ -7,6 +7,7 @@ export {}
 
 declare module 'vue' {
   export interface GlobalComponents {
+    AiChat: typeof import('./components/ai/AiChat.vue')['default']
     AIThinkingProcess: typeof import('./components/editor/ai/AIThinkingProcess.vue')['default']
     AppButton: typeof import('./components/common/AppButton.vue')['default']
     AppContent: typeof import('./components/layout/AppContent.vue')['default']
@@ -16,6 +17,9 @@ declare module 'vue' {
     AppRightPanel: typeof import('./components/layout/AppRightPanel.vue')['default']
     AppSidebar: typeof import('./components/layout/AppSidebar.vue')['default']
     AppStatusBar: typeof import('./components/layout/AppStatusBar.vue')['default']
+    CharacterCard: typeof import('./components/character/CharacterCard.vue')['default']
+    CharacterEdit: typeof import('./components/character/CharacterEdit.vue')['default']
+    CharacterList: typeof import('./components/character/CharacterList.vue')['default']
     CharacterPanel: typeof import('./components/editor/panels/CharacterPanel.vue')['default']
     CoverUploader: typeof import('./components/book/CoverUploader.vue')['default']
     CreateBookWizard: typeof import('./components/book/CreateBookWizard.vue')['default']
@@ -28,6 +32,8 @@ declare module 'vue' {
     ElCol: typeof import('element-plus/es')['ElCol']
     ElCollapse: typeof import('element-plus/es')['ElCollapse']
     ElCollapseItem: typeof import('element-plus/es')['ElCollapseItem']
+    ElDescriptions: typeof import('element-plus/es')['ElDescriptions']
+    ElDescriptionsItem: typeof import('element-plus/es')['ElDescriptionsItem']
     ElDialog: typeof import('element-plus/es')['ElDialog']
     ElDivider: typeof import('element-plus/es')['ElDivider']
     ElDropdown: typeof import('element-plus/es')['ElDropdown']
@@ -53,9 +59,21 @@ declare module 'vue' {
     ElTabPane: typeof import('element-plus/es')['ElTabPane']
     ElTabs: typeof import('element-plus/es')['ElTabs']
     ElTag: typeof import('element-plus/es')['ElTag']
+    ElTimeline: typeof import('element-plus/es')['ElTimeline']
+    ElTimelineItem: typeof import('element-plus/es')['ElTimelineItem']
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
+    ForeshadowPanel: typeof import('./components/editor/panels/ForeshadowPanel.vue')['default']
     KnowledgePanel: typeof import('./components/editor/panels/KnowledgePanel.vue')['default']
+    RelationshipGraph: typeof import('./components/character/RelationshipGraph.vue')['default']
+    ReviewIssueItem: typeof import('./components/review/ReviewIssueItem.vue')['default']
+    ReviewNotification: typeof import('./components/review/ReviewNotification.vue')['default']
+    ReviewPanel: typeof import('./components/review/ReviewPanel.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    SummaryPanel: typeof import('./components/editor/panels/SummaryPanel.vue')['default']
+    TimelinePanel: typeof import('./components/editor/panels/TimelinePanel.vue')['default']
+  }
+  export interface ComponentCustomProperties {
+    vLoading: typeof import('element-plus/es')['ElLoadingDirective']
   }
 }

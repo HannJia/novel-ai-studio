@@ -1,0 +1,82 @@
+/**
+ * NovelAI Studio 深色主题（方案A - VS Code风格）
+ * 适合夜间使用，护眼舒适
+ */
+
+@import '../variables.scss';
+
+.theme-dark {
+  // 背景色
+  --bg-primary: #{$dark-bg-primary};
+  --bg-secondary: #{$dark-bg-secondary};
+  --bg-tertiary: #{$dark-bg-tertiary};
+  --bg-hover: #{$dark-bg-hover};
+
+  // 文字颜色
+  --text-primary: #{$dark-text-primary};
+  --text-secondary: #{$dark-text-secondary};
+  --text-muted: #{$dark-text-muted};
+  --text-placeholder: #{$dark-text-muted};
+
+  // 边框颜色
+  --border-base: #{$dark-border-base};
+  --border-light: #{$dark-border-light};
+  --border-lighter: #5c5c5c;
+
+  // 主色调
+  --color-primary: #{$primary-color};
+  --color-primary-light: #{$primary-light};
+  --color-primary-dark: #{$primary-dark};
+
+  // 状态颜色
+  --color-success: #{$success-color};
+  --color-warning: #{$warning-color};
+  --color-danger: #{$danger-color};
+  --color-info: #6e6e6e;
+
+  // 阴影
+  --shadow-base: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-light: 0 4px 12px rgba(0, 0, 0, 0.3);
+
+  // 侧边栏
+  --sidebar-bg: #{$dark-bg-secondary};
+  --sidebar-border: #{$dark-border-base};
+  --sidebar-item-hover: #{$dark-bg-hover};
+  --sidebar-item-active: rgba(64, 158, 255, 0.15);
+
+  // 编辑器
+  --editor-bg: #{$dark-bg-primary};
+  --editor-line-number: #{$dark-text-muted};
+  --editor-selection: rgba(64, 158, 255, 0.3);
+  --editor-cursor: #{$dark-text-primary};
+
+  // 面板
+  --panel-bg: #{$dark-bg-secondary};
+  --panel-header-bg: #{$dark-bg-tertiary};
+  --panel-border: #{$dark-border-base};
+
+  // 卡片
+  --card-bg: #{$dark-bg-secondary};
+  --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --card-hover-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+
+  // 输入框
+  --input-bg: #{$dark-bg-tertiary};
+  --input-border: #{$dark-border-base};
+  --input-focus-border: #{$primary-color};
+
+  // 按钮
+  --button-default-bg: #{$dark-bg-tertiary};
+  --button-default-border: #{$dark-border-base};
+  --button-default-text: #{$dark-text-primary};
+  --button-primary-bg: #{$primary-color};
+  --button-primary-text: #ffffff;
+
+  // Element Plus 暗色覆盖
+  --el-bg-color: #{$dark-bg-primary};
+  --el-bg-color-overlay: #{$dark-bg-secondary};
+  --el-text-color-primary: #{$dark-text-primary};
+  --el-text-color-regular: #{$dark-text-secondary};
+  --el-border-color: #{$dark-border-base};
+  --el-fill-color-light: #{$dark-bg-tertiary};
+}

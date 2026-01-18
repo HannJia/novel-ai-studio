@@ -6,7 +6,7 @@ export type ChapterStatus = 'draft' | 'completed' | 'reviewing'
 /**
  * 细纲步骤类型
  */
-export type DetailOutlineStepType = 'scene' | 'characters' | 'conflict' | 'climax' | 'ending'
+export type DetailOutlineStepType = 'scene' | 'characters' | 'plot' | 'climax' | 'ending'
 
 /**
  * 细纲步骤配置
@@ -18,7 +18,7 @@ export const DETAIL_OUTLINE_STEPS: {
 }[] = [
   { type: 'scene', label: '场景铺设', description: '设定本章的场景环境、时间地点' },
   { type: 'characters', label: '角色出场', description: '本章出场的角色及其状态' },
-  { type: 'conflict', label: '冲突展开', description: '本章的核心冲突或矛盾' },
+  { type: 'plot', label: '剧情展开', description: '本章的核心剧情发展' },
   { type: 'climax', label: '高潮推进', description: '情节的高潮部分' },
   { type: 'ending', label: '本章收尾', description: '本章的结尾和留白' },
 ]

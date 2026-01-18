@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { Search, User, Edit, Clock, Plus } from '@element-plus/icons-vue'
 
 // 模拟角色数据
 interface Character {

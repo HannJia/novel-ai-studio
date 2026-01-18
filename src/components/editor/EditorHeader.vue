@@ -27,6 +27,23 @@ const progress = computed(() => {
   return Math.min((total / target) * 100, 100)
 })
 
+// AI生成进度
+const generatingProgress = computed(() => aiStore.generatingProgress)
+const isGenerating = computed(() => aiStore.generating)
+// 进度百分比
+const progressPercent = computed(() => {
+  const { current, total } = generatingProgress.value
+  if (total <= 0) return 0
+  return Math.round((current / total) * 100)
+})
+// 续写按钮显示文字
+const continueButtonText = computed(() => {
+  if (!isGenerating.value) return '续写'
+  const stage = generatingProgress.value.stage
+  if (stage) return stage
+  return '生成中...'
+})
+
 function goHome(): void {
   if (editorStore.hasUnsavedChanges) {
     emit('save')
@@ -83,12 +100,13 @@ function toggleTheme(): void {
         <el-tooltip content="AI续写" placement="bottom">
           <el-button
             class="toolbar-btn primary"
+            :class="{ generating: aiStore.generating }"
             @click="$emit('continueWriting')"
             :loading="aiStore.generating"
             :disabled="!aiStore.hasConfig"
           >
             <el-icon><MagicStick /></el-icon>
-            <span class="btn-text">续写</span>
+            <span class="btn-text">{{ continueButtonText }}</span>
           </el-button>
         </el-tooltip>
 
@@ -240,6 +258,16 @@ function toggleTheme(): void {
       .btn-text {
         margin-left: 4px;
       }
+
+      &.generating {
+        min-width: 100px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        animation: pulse-generating 2s ease-in-out infinite;
+
+        .btn-text {
+          font-size: 12px;
+        }
+      }
     }
 
     &.has-changes {
@@ -294,5 +322,15 @@ function toggleTheme(): void {
   --hover-bg: #{$dark-bg-hover};
   --active-bg: #{$dark-bg-active};
   --toolbar-bg: #{$dark-bg-panel};
+}
+
+// 生成中的脉冲动画
+@keyframes pulse-generating {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.85;
+  }
 }
 </style>

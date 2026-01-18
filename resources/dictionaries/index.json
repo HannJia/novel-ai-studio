@@ -1,0 +1,49 @@
+{
+  "version": "1.0",
+  "description": "NovelAI Studio 敏感词库",
+  "lastUpdate": "2026-01-17",
+  "categories": [
+    {
+      "id": "politics",
+      "name": "政治敏感",
+      "description": "政治相关敏感词汇",
+      "level": "forbidden"
+    },
+    {
+      "id": "violence",
+      "name": "暴力血腥",
+      "description": "暴力血腥描写相关词汇",
+      "level": "warning"
+    },
+    {
+      "id": "adult",
+      "name": "成人内容",
+      "description": "成人/色情相关词汇",
+      "level": "warning"
+    },
+    {
+      "id": "platform",
+      "name": "平台禁用",
+      "description": "各平台特定禁用词汇",
+      "level": "warning"
+    }
+  ],
+  "levels": {
+    "forbidden": "禁止使用，必须修改",
+    "warning": "警告，建议修改或谨慎使用"
+  },
+  "files": [
+    {
+      "category": "platform",
+      "platform": "qidian",
+      "file": "qidian-words.txt",
+      "description": "起点中文网禁用词"
+    },
+    {
+      "category": "platform",
+      "platform": "zongheng",
+      "file": "zongheng-words.txt",
+      "description": "纵横中文网禁用词"
+    }
+  ]
+}

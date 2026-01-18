@@ -1,21 +1,45 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { useChapterStore, useUiStore, useBookStore, useAiStore } from '@/stores'
-import { DETAIL_OUTLINE_STEPS } from '@/types/chapter'
-import type { ChapterDetailOutline, VolumeOutlineChapter } from '@/types'
+import { useChapterStore, useUiStore, useBookStore, useAiStore, useEditorStore } from '@/stores'
+import type { VolumeOutlineChapter, DetailOutlineStep } from '@/types'
+import { DETAIL_OUTLINE_STEPS } from '@/types'
 import { Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { generateChapterTitleAndSummary } from '@/services/api/aiApi'
 
 const chapterStore = useChapterStore()
+const editorStore = useEditorStore()
 const uiStore = useUiStore()
 const bookStore = useBookStore()
 const aiStore = useAiStore()
+
+// 中文数字转换
+const chineseNumbers = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十',
+  '十一', '十二', '十三', '十四', '十五', '十六', '十七', '十八', '十九', '二十',
+  '二十一', '二十二', '二十三', '二十四', '二十五', '二十六', '二十七', '二十八', '二十九', '三十',
+  '三十一', '三十二', '三十三', '三十四', '三十五', '三十六', '三十七', '三十八', '三十九', '四十',
+  '四十一', '四十二', '四十三', '四十四', '四十五', '四十六', '四十七', '四十八', '四十九', '五十']
+
+function toChineseNumber(num: number): string {
+  if (num <= 50) return chineseNumbers[num]
+  return num.toString()
+}
 
 const emit = defineEmits<{
   selectChapter: [id: string]
   createChapter: []
   deleteChapter: [id: string, title: string, event: Event]
 }>()
+
+// Props - 章节生成字数配置
+const props = defineProps<{
+  chapterWordMin?: number
+  chapterWordMax?: number
+}>()
+
+// 默认字数配置
+const minWords = computed(() => props.chapterWordMin || 2000)
+const maxWords = computed(() => props.chapterWordMax || 4000)
 
 // 本地状态
 const searchQuery = ref('')
@@ -27,13 +51,26 @@ const selectedOutlineIndex = ref<number | null>(null)
 // 是否显示总大纲
 const showTotalOutline = ref(false)
 
+// 展开的分卷列表
+const expandedVolumes = ref<string[]>([])
+
+// 切换分卷展开/折叠
+function toggleVolume(volumeId: string) {
+  const index = expandedVolumes.value.indexOf(volumeId)
+  if (index === -1) {
+    expandedVolumes.value.push(volumeId)
+  } else {
+    expandedVolumes.value.splice(index, 1)
+  }
+}
+
 // 细纲相关状态
-const detailOutlineMode = ref<'view' | 'generate' | 'edit'>('view')  // 查看/生成/编辑模式
-const selectedChapterForDetail = ref<string | null>(null)  // 选中查看细纲的章节
-const isGeneratingOutline = ref(false)  // 是否正在生成细纲
+const detailOutlineMode = ref<'view' | 'generate'>('view')  // 查看/生成模式
+const selectedChapterForDetail = ref<string | null>(null)  // 选中查看的章节
 const isGeneratingChapter = ref(false)  // 是否正在生成章节内容
-const editingOutline = ref<ChapterDetailOutline | null>(null)  // 正在编辑的细纲
-const expandedSteps = ref<string[]>([])  // 展开的步骤列表
+const isGeneratingOutline = ref(false)  // 是否正在生成细纲
+const pendingDetailOutline = ref<DetailOutlineStep[]>([])  // 待确认的细纲
+const outlineConfirmed = ref(false)  // 细纲是否已确认
 
 // 章节搜索过滤
 const filteredChapters = computed(() => {
@@ -51,18 +88,29 @@ const bookOutlineData = computed(() => {
   const book = bookStore.currentBook
   const chapters = chapterStore.chapterTree
 
-  // 如果书籍有分卷大纲数据，直接使用
+  // 如果书籍有分卷大纲数据，使用大纲结构但关联实际章节
   if (book?.volumes && book.volumes.length > 0) {
-    return book.volumes.map((vol: any, vIndex: number) => ({
-      id: vol.id || `vol_${vIndex + 1}`,
-      title: vol.title,
-      summary: vol.summary || '',
-      chapters: vol.chapters || chapters.slice(vIndex * 10, (vIndex + 1) * 10).map((ch, i) => ({
-        id: `ch_${vIndex}_${i}`,
-        title: ch.title,
-        chapterId: ch.id
-      }))
-    }))
+    let chapterIndex = 0
+    return book.volumes.map((vol: any, vIndex: number) => {
+      // 计算当前卷应该包含的章节数量
+      const volChapterCount = vol.chapters?.length || 10
+      // 从实际章节中取出对应数量的章节
+      const actualChapters = chapters.slice(chapterIndex, chapterIndex + volChapterCount)
+      chapterIndex += volChapterCount
+
+      return {
+        id: vol.id || `vol_${vIndex + 1}`,
+        title: vol.title,
+        summary: vol.summary || '',
+        // 使用实际章节数据，保留大纲章节的brief信息
+        chapters: actualChapters.map((ch, i) => ({
+          id: `ch_${vIndex}_${i}`,
+          title: ch.title,
+          chapterId: ch.id,
+          brief: vol.chapters?.[i]?.brief || ''  // 保留大纲中的章节简介
+        }))
+      }
+    })
   }
 
   // 没有分卷数据时，根据章节自动分组（每10章一卷）
@@ -98,72 +146,25 @@ const totalOutline = computed(() => {
   return bookStore.currentBook?.outline || '暂无总大纲'
 })
 
-// 当前分卷大纲（根据当前章节所在分卷）
+// 当前分卷大纲（根据下一章序号计算所属分卷）
 const currentVolumeOutline = computed(() => {
-  if (!chapterStore.currentChapter) return null
-  const currentChapterId = chapterStore.currentChapter.id
-  for (const vol of bookOutlineData.value) {
-    if (vol.chapters.some((ch: VolumeOutlineChapter) => ch.chapterId === currentChapterId)) {
+  const book = bookStore.currentBook
+  if (!book?.volumes || book.volumes.length === 0) return null
+
+  const nextOrder = chapterStore.nextChapterNumber
+  let chapterCount = 0
+
+  // 根据章节序号找到对应的分卷
+  for (const vol of book.volumes) {
+    const volChapterCount = vol.chapters?.length || 10
+    chapterCount += volChapterCount
+    if (nextOrder <= chapterCount) {
       return vol
     }
   }
-  return bookOutlineData.value[0] || null
-})
 
-// 当前章节的细纲数据
-const chapterDetailOutline = computed(() => {
-  // 如果有正在编辑的细纲，优先显示
-  if (editingOutline.value) {
-    return editingOutline.value.steps.map((step, index) => ({
-      id: String(index + 1),
-      type: step.type,
-      label: DETAIL_OUTLINE_STEPS.find(s => s.type === step.type)?.label || '',
-      content: step.content,
-      completed: step.completed
-    }))
-  }
-
-  // 如果有待确认的细纲
-  if (chapterStore.pendingDetailOutline) {
-    return chapterStore.pendingDetailOutline.steps.map((step, index) => ({
-      id: String(index + 1),
-      type: step.type,
-      label: DETAIL_OUTLINE_STEPS.find(s => s.type === step.type)?.label || '',
-      content: step.content,
-      completed: step.completed
-    }))
-  }
-
-  // 查看已选章节的细纲
-  if (selectedChapterForDetail.value) {
-    const outline = chapterStore.getChapterDetailOutline(selectedChapterForDetail.value)
-    if (outline) {
-      return outline.steps.map((step, index) => ({
-        id: String(index + 1),
-        type: step.type,
-        label: DETAIL_OUTLINE_STEPS.find(s => s.type === step.type)?.label || '',
-        content: step.content,
-        completed: step.completed
-      }))
-    }
-  }
-
-  // 默认显示空模板
-  return DETAIL_OUTLINE_STEPS.map((step, index) => ({
-    id: String(index + 1),
-    type: step.type,
-    label: step.label,
-    content: '',
-    completed: false
-  }))
-})
-
-// 计算当前章节进度
-const chapterProgress = computed(() => {
-  const items = chapterDetailOutline.value
-  if (items.length === 0) return { completed: 0, total: 0 }
-  const completed = items.filter(item => item.completed).length
-  return { completed, total: items.length }
+  // 默认返回最后一卷
+  return book.volumes[book.volumes.length - 1] || null
 })
 
 // 已完成章节列表（用于选择查看）
@@ -180,9 +181,9 @@ const nextChapterInfo = computed(() => {
   }
 })
 
-// 是否可以生成下一章细纲
-const canGenerateNextOutline = computed(() => {
-  return !isGeneratingOutline.value && !isGeneratingChapter.value
+// 检查细纲是否有任何内容
+const hasAnyOutlineContent = computed(() => {
+  return pendingDetailOutline.value.some(step => step.content && step.content.trim().length > 0)
 })
 
 // 联动：当选择章节时，自动选中对应的大纲项
@@ -208,124 +209,97 @@ function selectOutlineChapter(chapterId: string | undefined) {
   }
 }
 
-// 切换步骤展开/折叠
-function toggleStepExpand(stepType: string) {
-  const index = expandedSteps.value.indexOf(stepType)
-  if (index === -1) {
-    expandedSteps.value.push(stepType)
-  } else {
-    expandedSteps.value.splice(index, 1)
-  }
-}
-
-// 是否步骤已展开
-function isStepExpanded(stepType: string): boolean {
-  return expandedSteps.value.includes(stepType)
-}
-
-// 选择已完成章节查看细纲
+// 选择已完成章节查看
 function selectCompletedChapter(chapterId: string) {
   selectedChapterForDetail.value = chapterId
   detailOutlineMode.value = 'view'
-  editingOutline.value = null
-  chapterStore.setPendingDetailOutline(null)
 }
 
 // 切换到生成下一章模式
 function switchToGenerateMode() {
   detailOutlineMode.value = 'generate'
   selectedChapterForDetail.value = null
-  editingOutline.value = null
-  chapterStore.setPendingDetailOutline(null)
+  // 始终确保细纲数组有5个元素
+  if (pendingDetailOutline.value.length !== 5) {
+    pendingDetailOutline.value = DETAIL_OUTLINE_STEPS.map(step => ({
+      type: step.type,
+      content: '',
+      completed: false
+    }))
+  }
+  outlineConfirmed.value = false
 }
 
-// 生成下一章细纲
-async function generateNextChapterOutline() {
+// AI生成细纲
+async function generateDetailOutline() {
   if (isGeneratingOutline.value) return
 
   isGeneratingOutline.value = true
+  outlineConfirmed.value = false
 
   try {
-    // 构建生成细纲的上下文
     const book = bookStore.currentBook
     const nextOrder = chapterStore.nextChapterNumber
     const previousContext = chapterStore.getPreviousChaptersContext(nextOrder)
-    const volumeOutline = currentVolumeOutline.value?.summary || ''
+    // 优先使用 plotLine（详细分卷大纲），其次 summary
+    const volumeOutline = currentVolumeOutline.value?.plotLine || currentVolumeOutline.value?.summary || ''
+    const volumeTitle = currentVolumeOutline.value?.title || ''
 
-    // 构建 prompt
-    const prompt = `你是一位专业的小说写作助手。请根据以下信息，为小说的下一章生成详细的章节细纲。
+    const result = await aiStore.generate({
+      prompt: `请为《${book?.title || '未命名'}》第${nextOrder}章生成五步细纲。
 
-【小说信息】
-书名：${book?.title || '未命名'}
+【背景信息】
 总大纲：${totalOutline.value}
-当前分卷大纲：${volumeOutline}
+${volumeTitle ? `当前卷：${volumeTitle}` : ''}
+${volumeOutline ? `分卷大纲：${volumeOutline}` : ''}
+前文概要：${previousContext || '（第一章开篇）'}
 
-【已完成章节摘要】
-${previousContext || '这是第一章，暂无之前章节'}
-
-【要生成的章节】
-第${nextOrder}章
-
-请按以下五个步骤生成细纲内容，每个步骤的内容要具体、详细：
-
+【请按以下五个步骤生成细纲】
 1. 场景铺设：设定本章的场景环境、时间地点
 2. 角色出场：本章出场的角色及其状态、情绪
-3. 冲突展开：本章的核心冲突或矛盾是什么
+3. 剧情展开：本章的核心剧情发展
 4. 高潮推进：情节如何推向高潮
 5. 本章收尾：本章如何结尾，留下什么悬念
 
-请用 JSON 格式返回，格式如下：
+请以JSON格式返回：
 {
-  "scene": "场景铺设内容",
-  "characters": "角色出场内容",
-  "conflict": "冲突展开内容",
-  "climax": "高潮推进内容",
-  "ending": "本章收尾内容"
-}`
-
-    const result = await aiStore.generate({
-      prompt,
-      systemPrompt: '你是一位专业的小说细纲生成助手，擅长根据大纲和前文内容生成连贯、吸引人的章节细纲。请只返回JSON格式的内容。'
+  "scene": "场景铺设内容...",
+  "characters": "角色出场内容...",
+  "plot": "剧情展开内容...",
+  "climax": "高潮推进内容...",
+  "ending": "本章收尾内容..."
+}`,
+      systemPrompt: '你是专业的小说策划编辑，擅长设计章节结构。请直接返回JSON格式的细纲内容，不要有其他解释。',
+      temperature: 0.7,
+      // 推理模型思考过程会消耗大量 token，需要给足够上限
+      maxTokens: aiStore.isReasoningModel ? 32000 : 4000
     })
 
-    if (result?.content) {
-      // 解析返回的内容
-      let outlineData: any = {}
-      try {
-        // 尝试提取 JSON
-        const jsonMatch = result.content.match(/\{[\s\S]*\}/)
-        if (jsonMatch) {
-          outlineData = JSON.parse(jsonMatch[0])
-        }
-      } catch (e) {
-        console.error('解析细纲JSON失败:', e)
-        // 如果解析失败，尝试简单分割
-        outlineData = {
-          scene: '解析失败，请重新生成',
-          characters: '',
-          conflict: '',
-          climax: '',
-          ending: ''
-        }
-      }
+    console.log('AI返回结果:', result)
+    console.log('AI返回内容:', result?.content)
+    if (!result?.content) {
+      throw new Error('生成细纲失败，请重试')
+    }
 
-      // 创建待确认的细纲
-      const newOutline: ChapterDetailOutline = {
-        chapterId: `pending_${nextOrder}`,
-        steps: [
-          { type: 'scene', content: outlineData.scene || '', completed: false },
-          { type: 'characters', content: outlineData.characters || '', completed: false },
-          { type: 'conflict', content: outlineData.conflict || '', completed: false },
-          { type: 'climax', content: outlineData.climax || '', completed: false },
-          { type: 'ending', content: outlineData.ending || '', completed: false }
-        ],
-        status: 'draft',
-        generatedAt: new Date().toISOString()
+    // 解析JSON结果
+    try {
+      const jsonMatch = result.content.match(/\{[\s\S]*\}/)
+      if (jsonMatch) {
+        const outlineData = JSON.parse(jsonMatch[0])
+        pendingDetailOutline.value = [
+          { type: 'scene', content: outlineData.scene || '', completed: true },
+          { type: 'characters', content: outlineData.characters || '', completed: true },
+          { type: 'plot', content: outlineData.plot || '', completed: true },
+          { type: 'climax', content: outlineData.climax || '', completed: true },
+          { type: 'ending', content: outlineData.ending || '', completed: true }
+        ]
+        ElMessage.success('细纲生成成功，请查看并确认')
+      } else {
+        throw new Error('无法解析细纲JSON')
       }
-
-      chapterStore.setPendingDetailOutline(newOutline)
-      // 展开所有步骤
-      expandedSteps.value = ['scene', 'characters', 'conflict', 'climax', 'ending']
+    } catch (parseError) {
+      console.error('解析细纲失败:', parseError)
+      ElMessage.error('解析细纲失败，请重试')
     }
   } catch (e) {
     console.error('生成细纲失败:', e)
@@ -335,56 +309,132 @@ ${previousContext || '这是第一章，暂无之前章节'}
   }
 }
 
-// 进入编辑模式
-function enterEditMode() {
-  if (chapterStore.pendingDetailOutline) {
-    editingOutline.value = JSON.parse(JSON.stringify(chapterStore.pendingDetailOutline))
-  }
-  detailOutlineMode.value = 'edit'
-}
-
-// 更新编辑中的步骤内容
-function updateEditingStep(stepType: string, content: string) {
-  if (!editingOutline.value) return
-  const step = editingOutline.value.steps.find(s => s.type === stepType)
-  if (step) {
-    step.content = content
-  }
-}
-
 // 确认细纲
 function confirmOutline() {
-  if (editingOutline.value) {
-    chapterStore.setPendingDetailOutline(editingOutline.value)
-  }
-
-  if (chapterStore.pendingDetailOutline) {
-    // 标记为已确认
-    const confirmedOutline = {
-      ...chapterStore.pendingDetailOutline,
-      status: 'confirmed' as const,
-      confirmedAt: new Date().toISOString()
-    }
-    chapterStore.setPendingDetailOutline(confirmedOutline)
-    editingOutline.value = null
-    detailOutlineMode.value = 'generate'
-    ElMessage.success('细纲已确认，可以生成章节内容')
-  }
-}
-
-// 取消编辑
-function cancelEdit() {
-  editingOutline.value = null
-  detailOutlineMode.value = chapterStore.pendingDetailOutline ? 'generate' : 'view'
-}
-
-// 根据细纲生成章节内容
-async function generateChapterContent() {
-  const outline = chapterStore.pendingDetailOutline
-  if (!outline || outline.status !== 'confirmed') {
-    ElMessage.warning('请先确认细纲')
+  if (pendingDetailOutline.value.length === 0) {
+    ElMessage.warning('请先生成细纲')
     return
   }
+  outlineConfirmed.value = true
+  ElMessage.success('细纲已确认，可以生成章节内容了')
+}
+
+// 重置细纲
+function resetOutline() {
+  pendingDetailOutline.value = []
+  outlineConfirmed.value = false
+}
+
+// 清理AI输出中的元数据和思考过程
+function cleanAIOutput(text: string): string {
+  if (!text || text.length === 0) return text
+
+  let cleaned = text
+
+  // 检测是否包含大量元数据特征
+  const metadataIndicators = ['分析要求', '起草', '润色', '场景设置', '动作:', '事件:', '角色：', '输出：', '限制：', '字数：']
+  let hasMetadata = false
+  for (const indicator of metadataIndicators) {
+    if (cleaned.includes(indicator)) {
+      hasMetadata = true
+      break
+    }
+  }
+
+  if (hasMetadata) {
+    // 尝试找到真正的故事内容开始位置
+    // 查找第一个看起来像故事开头的段落（通常以场景描写或人物动作开始）
+    const storyStartPatterns = [
+      /(?:^|\n)[\u4e00-\u9fa5]{2,}(?:的|着|了|在|是|上|下|中|里|外)[\u4e00-\u9fa5]/m,  // 常见中文句式
+      /(?:^|\n)"[^"]+"/m,  // 以对话开头
+      /(?:^|\n)[\u4e00-\u9fa5]+(?:说道|问道|喊道|叫道|笑道)/m,  // 以对话标记开头
+    ]
+
+    for (const pattern of storyStartPatterns) {
+      const match = cleaned.match(pattern)
+      if (match && match.index !== undefined && match.index > 50) {
+        // 从故事内容开始处截取
+        cleaned = cleaned.substring(match.index).trim()
+        break
+      }
+    }
+
+    // 如果还有元数据，逐行过滤
+    const lines = cleaned.split('\n')
+    const storyLines: string[] = []
+    let inStory = false
+
+    for (const line of lines) {
+      const trimmedLine = line.trim()
+      // 跳过明显是元数据的行
+      if (trimmedLine.match(/^\d+\.\s*\*{0,2}(分析|起草|润色|撰写|解构|拆解)/)) continue
+      if (trimmedLine.match(/^\*{0,2}(角色|输出|限制|字数|背景|设定|情节|场景)[：:]/)) continue
+      if (trimmedLine.match(/^[-*]\s*\*{0,2}[^：:]+[：:]/)) continue
+      if (trimmedLine === '') {
+        if (inStory) storyLines.push('')
+        continue
+      }
+
+      // 一旦开始故事内容，后续都是故事
+      inStory = true
+      storyLines.push(line)
+    }
+
+    cleaned = storyLines.join('\n').trim()
+  }
+
+  return cleaned
+}
+
+// 确保文本在完整句子处结束（后处理函数）
+function ensureCompleteSentence(text: string): string {
+  if (!text || text.length === 0) return text
+
+  const trimmed = text.trim()
+
+  // 中英文句子结束符号 (使用 Unicode 避免解析问题)
+  const sentenceEnders = ['。', '！', '？', '…', '"', '\u2019', '.', '!', '?']
+
+  // 如果已经以句子结束符结尾，直接返回
+  const lastChar = trimmed[trimmed.length - 1]
+  if (sentenceEnders.includes(lastChar)) {
+    return trimmed
+  }
+
+  // 查找最后一个完整句子的位置
+  let lastSentenceEnd = -1
+  for (const ender of sentenceEnders) {
+    const pos = trimmed.lastIndexOf(ender)
+    if (pos > lastSentenceEnd) {
+      lastSentenceEnd = pos
+    }
+  }
+
+  // 如果找到了句子结束符，截取到该位置
+  if (lastSentenceEnd > trimmed.length * 0.5) {
+    // 只有当截取后保留超过50%内容时才截取，避免丢失太多内容
+    return trimmed.substring(0, lastSentenceEnd + 1)
+  }
+
+  // 如果没找到合适的结束位置，尝试添加省略号使其看起来更自然
+  // 检查是否在对话中间被截断（中文引号）
+  const closeQuotes = '"\u2019'  // " 和 '
+  const openQuotes = '"\u2018'   // " 和 '
+  const lastQuoteClose = Math.max(trimmed.lastIndexOf(closeQuotes[0]), trimmed.lastIndexOf(closeQuotes[1]))
+  const lastQuoteOpen = Math.max(trimmed.lastIndexOf(openQuotes[0]), trimmed.lastIndexOf(openQuotes[1]))
+
+  if (lastQuoteOpen > lastQuoteClose) {
+    // 在对话中间被截断，添加结束引号和省略
+    return trimmed + '……"'
+  }
+
+  // 普通文本被截断，添加省略号
+  return trimmed + '……'
+}
+
+// 分段生成章节内容：每个部分单独生成，确保内容完整
+async function generateChapterContent() {
+  if (isGeneratingChapter.value) return
 
   isGeneratingChapter.value = true
 
@@ -392,84 +442,261 @@ async function generateChapterContent() {
     const book = bookStore.currentBook
     const nextOrder = chapterStore.nextChapterNumber
     const previousContext = chapterStore.getPreviousChaptersContext(nextOrder)
+    // 优先使用 plotLine（详细分卷大纲），其次 summary
+    const volumeOutline = currentVolumeOutline.value?.plotLine || currentVolumeOutline.value?.summary || ''
 
-    // 构建步骤内容
-    const stepsContent = outline.steps.map(step => {
-      const stepConfig = DETAIL_OUTLINE_STEPS.find(s => s.type === step.type)
-      return `【${stepConfig?.label || step.type}】${step.content}`
-    }).join('\n')
+    // 使用配置的字数范围
+    const wordMin = minWords.value
+    const wordMax = maxWords.value
+    const targetWords = Math.floor((wordMin + wordMax) / 2)
 
-    const prompt = `你是一位专业的小说作家。请根据以下细纲，撰写小说的第${nextOrder}章。
+    // 推理模型（如 Gemini 3 Pro）倾向于生成更详细的内容
+    // 根据测试，实际输出约为目标字数的 1.5-1.6 倍
+    // 因此需要动态计算系数，让最终结果落在 [wordMin, wordMax] 区间内
+    const isReasoning = aiStore.isReasoningModel
+    let adjustedTargetWords: number
+    if (isReasoning) {
+      // 推理模型：目标区间中点除以膨胀系数（约1.5），确保结果落在区间内
+      // 例：区间 2000-3000，中点 2500，调整后 2500/1.5 ≈ 1667，实际输出约 2500
+      const expansionFactor = 1.5
+      adjustedTargetWords = Math.floor(targetWords / expansionFactor)
+    } else {
+      adjustedTargetWords = targetWords
+    }
 
-【小说信息】
-书名：${book?.title || '未命名'}
-总大纲：${totalOutline.value}
+    // 分配每个部分的字数（4个部分）
+    const partDistribution = [
+      { part: '开篇', ratio: 0.2 },   // 20% - 场景铺设
+      { part: '发展', ratio: 0.3 },   // 30% - 情节推进
+      { part: '高潮', ratio: 0.3 },   // 30% - 冲突高潮
+      { part: '收尾', ratio: 0.2 }    // 20% - 自然结束
+    ]
 
-【已完成章节摘要】
-${previousContext || '这是第一章'}
+    const sections = partDistribution.map(p => ({
+      ...p,
+      targetWords: Math.floor(adjustedTargetWords * p.ratio)
+    }))
 
-【本章细纲】
-${stepsContent}
+    aiStore.resetProgress()
 
-请根据细纲撰写完整的章节内容，要求：
-1. 内容要紧扣细纲，但可以适当发挥
-2. 文笔流畅，描写生动
-3. 人物对话自然
-4. 字数在2000-4000字左右
-5. 只输出小说正文内容，不要输出标题或其他说明
+    // 逐段生成
+    const generatedParts: string[] = []
+    let accumulatedContent = ''
 
-开始撰写：`
+    for (let i = 0; i < sections.length; i++) {
+      const section = sections[i]
+      const isFirst = i === 0
+      const isLast = i === sections.length - 1
 
-    const result = await aiStore.generate({
-      prompt,
-      systemPrompt: '你是一位专业的小说作家，擅长根据细纲撰写引人入胜的小说章节。',
-      maxTokens: 4000
-    })
+      // 更新进度（使用新的步骤更新方法）
+      aiStore.updateProgress(i + 1, section.part)
 
-    if (result?.content) {
-      // 创建新章节
-      const newChapter = await chapterStore.createChapter({
-        bookId: book?.id || '',
-        title: `第${nextOrder}章`,
-        content: result.content,
-        order: nextOrder
+      // 构建当前段落的 prompt - 传入段落索引用于匹配五步细纲
+      const sectionPrompt = buildSectionPrompt({
+        book,
+        nextOrder,
+        totalOutline: totalOutline.value,
+        volumeOutline,
+        previousContext,
+        section,
+        isFirst,
+        isLast,
+        previousParts: generatedParts,
+        accumulatedContent,
+        sectionIndex: i  // 传入当前段落索引
       })
 
-      if (newChapter) {
-        // 保存细纲到章节
-        const finalOutline = {
-          ...outline,
-          chapterId: newChapter.id,
-          status: 'generated' as const
-        }
-        chapterStore.saveDetailOutlineToChapter(newChapter.id, finalOutline)
+      // 推理模型（如 Gemini 3 Pro）的思考过程会消耗大量 token
+      // 需要给足够的 maxTokens 上限，实际输出长度由 prompt 中的字数要求控制
+      const isReasoning = aiStore.isReasoningModel
+      // 推理模型：给足够空间让思考完成（32000）；非推理模型：正常限制
+      const maxTokens = isReasoning ? 32000 : Math.ceil(section.targetWords * 1.5)
 
-        // 清除待确认细纲
-        chapterStore.setPendingDetailOutline(null)
+      const result = await aiStore.generate({
+        prompt: sectionPrompt,
+        systemPrompt: `【核心规则】你是小说作家，必须直接输出小说正文。
 
-        // 选中新章节
-        emit('selectChapter', newChapter.id)
+【绝对禁止】以下内容一旦出现即为失败：
+× 任何带有星号*的内容
+× 任何编号列表（1. 2. 3.）
+× 任何分析/思考/计划/推理过程
+× 任何标记如【分析】【起草】【润色】
+× 任何元描述如"场景设置"、"角色："、"动作："
+× 任何大纲/笔记/草稿格式
 
-        ElMessage.success(`第${nextOrder}章已生成`)
+【正确输出示例】
+云雾缭绕的青云门广场上，数百名少年少女正紧张地等待着。韩立站在人群中，手心微微冒汗，偷偷摸了摸怀里那本破旧的小册子...
 
-        // 重置状态
-        detailOutlineMode.value = 'view'
-        selectedChapterForDetail.value = newChapter.id
+【严格字数限制】⚠️
+- 本段必须控制在 ${section.targetWords} 字左右（允许±10%误差）
+- 超过 ${Math.ceil(section.targetWords * 1.1)} 字视为失败
+- ${isFirst ? '自然引入场景' : '承接前文'}
+- ${isLast ? '自然收尾' : '为下文铺垫'}
+- 以完整句子结束
+- 从第一个字就是故事内容`,
+        maxTokens
+      })
+
+      if (!result?.content) {
+        throw new Error(`生成【${section.part}】失败`)
       }
+
+      // 后处理：清理元数据并确保句子完整性
+      const cleanedContent = cleanAIOutput(result.content.trim())
+      const partContent = ensureCompleteSentence(cleanedContent)
+      generatedParts.push(partContent)
+      accumulatedContent += (accumulatedContent ? '\n\n' : '') + partContent
+
+      console.log(`【${section.part}】生成完成，字数：${partContent.replace(/\s/g, '').length}`)
+    }
+
+    // 合并所有部分
+    const finalContent = generatedParts.join('\n\n')
+    const actualWordCount = finalContent.replace(/\s/g, '').length
+
+    // 创建章节
+    const tempTitle = `第${toChineseNumber(nextOrder)}章`
+    const newChapter = await chapterStore.createChapter({
+      bookId: book?.id || '',
+      title: tempTitle,
+      content: finalContent,
+      order: nextOrder
+    })
+
+    if (newChapter) {
+      // 直接设置当前章节并加载内容到编辑器
+      chapterStore.setCurrentChapter(newChapter)
+      // 确保编辑器内容被更新（双重保险）
+      editorStore.loadChapterContent(finalContent, newChapter.id)
+
+      // 根据实际字数给出提示
+      if (actualWordCount < wordMin) {
+        ElMessage.warning(`第${toChineseNumber(nextOrder)}章已生成（${actualWordCount}字，略少于目标${wordMin}字）`)
+      } else if (actualWordCount > wordMax) {
+        ElMessage.warning(`第${toChineseNumber(nextOrder)}章已生成（${actualWordCount}字，略多于目标${wordMax}字）`)
+      } else {
+        ElMessage.success(`第${toChineseNumber(nextOrder)}章已生成（${actualWordCount}字）`)
+      }
+
+      // 异步生成章节标题和总结
+      try {
+        const { title: generatedTitle, summary } = await generateChapterTitleAndSummary({
+          chapterContent: finalContent,
+          chapterNumber: nextOrder,
+          bookTitle: book?.title,
+          isReasoningModel: aiStore.isReasoningModel
+        })
+        const fullTitle = `第${toChineseNumber(nextOrder)}章 ${generatedTitle}`
+        // 同时更新标题和总结
+        await chapterStore.updateChapter(newChapter.id, {
+          title: fullTitle,
+          summary: summary || undefined
+        })
+        ElMessage.success(`章节标题已更新为：${fullTitle}`)
+        if (summary) {
+          console.log('章节总结已保存:', summary.slice(0, 50) + '...')
+        }
+      } catch (titleError) {
+        console.error('生成章节标题和总结失败:', titleError)
+      }
+
+      // 刷新章节列表以更新字数显示
+      await chapterStore.fetchChaptersByBook(book?.id || '')
+      // 重置细纲状态
+      resetOutline()
+      detailOutlineMode.value = 'view'
+      selectedChapterForDetail.value = newChapter.id
     }
   } catch (e) {
     console.error('生成章节失败:', e)
     ElMessage.error('生成章节失败，请重试')
   } finally {
     isGeneratingChapter.value = false
+    aiStore.resetProgress()
   }
 }
 
-// 重新生成细纲
-function regenerateOutline() {
-  chapterStore.setPendingDetailOutline(null)
-  editingOutline.value = null
-  generateNextChapterOutline()
+// 构建单个段落的 prompt - 根据五步细纲编排正文
+function buildSectionPrompt(params: {
+  book: typeof bookStore.currentBook
+  nextOrder: number
+  totalOutline: string
+  volumeOutline: string
+  previousContext: string
+  section: { part: string; targetWords: number; ratio: number }
+  isFirst: boolean
+  isLast: boolean
+  previousParts: string[]
+  accumulatedContent: string
+  sectionIndex: number  // 当前段落索引 0-3
+}): string {
+  const { book, nextOrder, totalOutline, volumeOutline, previousContext, section, isFirst, accumulatedContent, sectionIndex } = params
+
+  // 获取各步骤细纲内容
+  const sceneOutline = getStepContent('scene')      // 场景铺设
+  const charactersOutline = getStepContent('characters')  // 角色出场
+  const plotOutline = getStepContent('plot')        // 剧情展开
+  const climaxOutline = getStepContent('climax')    // 高潮推进
+  const endingOutline = getStepContent('ending')    // 本章收尾
+
+  // 根据段落索引确定当前应该写的内容
+  // 开篇(0)：场景铺设 + 角色出场
+  // 发展(1)：剧情展开
+  // 高潮(2)：高潮推进
+  // 收尾(3)：本章收尾
+  let currentFocus = ''
+  let currentGuidance = ''
+
+  switch (sectionIndex) {
+    case 0: // 开篇 - 场景铺设 + 角色出场
+      currentFocus = `【本段重点】场景铺设 + 角色出场
+${sceneOutline ? `场景：${sceneOutline}` : ''}
+${charactersOutline ? `角色：${charactersOutline}` : ''}`
+      currentGuidance = '以场景描写开头，自然引入角色，营造氛围'
+      break
+    case 1: // 发展 - 剧情展开
+      currentFocus = `【本段重点】剧情展开
+${plotOutline ? `剧情：${plotOutline}` : '承接上文，展开核心剧情'}`
+      currentGuidance = '推进情节，展开剧情，制造张力'
+      break
+    case 2: // 高潮 - 高潮推进
+      currentFocus = `【本段重点】高潮推进
+${climaxOutline ? `高潮：${climaxOutline}` : '将情节推向高潮'}`
+      currentGuidance = '情节高潮，情感爆发，关键转折'
+      break
+    case 3: // 收尾 - 本章收尾
+      currentFocus = `【本段重点】本章收尾
+${endingOutline ? `收尾：${endingOutline}` : '自然收尾，可留悬念'}`
+      currentGuidance = '情节收束，留下悬念或伏笔，为下章铺垫'
+      break
+  }
+
+  // 构建提示词
+  let prompt = `【任务】直接撰写《${book?.title || '未命名'}》第${nextOrder}章的「${section.part}」部分正文
+
+【背景设定】
+${totalOutline}${volumeOutline ? `\n当前卷：${volumeOutline}` : ''}
+
+${currentFocus}`
+
+  if (isFirst) {
+    prompt += `\n\n【前文概要】\n${previousContext || '（第一章开篇）'}`
+  } else {
+    prompt += `\n\n【已写内容】\n${accumulatedContent}\n\n---\n请紧接上文继续写：`
+  }
+
+  prompt += `
+
+【输出规范】
+字数：约${section.targetWords}字
+重点：${currentGuidance}
+格式：纯小说正文，包含场景描写、人物对话、心理活动
+禁止：任何分析、大纲、注释、星号标记
+
+请直接开始写正文：
+`
+
+  return prompt
 }
 
 // 获取章节标题
@@ -481,6 +708,15 @@ function getChapterTitle(chapterId: string): string {
 // 获取章节摘要
 function getChapterSummary(chapterId: string): string {
   return chapterStore.getChapterSummary(chapterId)
+}
+
+// 获取指定步骤的内容（用于判断是否有内容）
+function getStepContent(stepType: string): string {
+  const stepIndex = DETAIL_OUTLINE_STEPS.findIndex(s => s.type === stepType)
+  if (stepIndex >= 0 && pendingDetailOutline.value[stepIndex]) {
+    return pendingDetailOutline.value[stepIndex].content?.trim() || ''
+  }
+  return ''
 }
 </script>
 
@@ -617,43 +853,29 @@ function getChapterSummary(chapterId: string): string {
           <span>分卷大纲</span>
         </div>
 
-        <div class="volumes-list" v-if="bookOutlineData.length > 0">
+        <div class="volumes-list" v-if="bookStore.currentBook?.volumes?.length > 0">
           <div
-            v-for="volume in bookOutlineData"
+            v-for="volume in bookStore.currentBook.volumes"
             :key="volume.id"
             class="volume-section"
           >
-            <div class="volume-header">
+            <div class="volume-header" @click="toggleVolume(volume.id)">
               <el-icon><FolderOpened /></el-icon>
               <span>{{ volume.title }}</span>
-              <span class="volume-count">({{ volume.chapters?.length || 0 }}章)</span>
+              <el-icon class="expand-icon">
+                <ArrowDown v-if="expandedVolumes.includes(volume.id)" />
+                <ArrowRight v-else />
+              </el-icon>
             </div>
-            <div class="volume-chapters">
-              <div
-                v-for="chapter in volume.chapters"
-                :key="chapter.id"
-                class="outline-chapter-item"
-                :class="{ active: chapter.chapterId === chapterStore.currentChapter?.id }"
-                @click="selectOutlineChapter(chapter.chapterId)"
-              >
-                <el-icon><Document /></el-icon>
-                <span>{{ chapter.title }}</span>
-                <el-icon v-if="chapter.chapterId === chapterStore.currentChapter?.id" class="active-indicator">
-                  <ArrowRight />
-                </el-icon>
-              </div>
+            <div v-if="expandedVolumes.includes(volume.id)" class="volume-outline-content">
+              {{ volume.plotLine || volume.summary || '暂无分卷大纲' }}
             </div>
           </div>
         </div>
 
         <div v-else class="empty-outline">
           <el-icon><InfoFilled /></el-icon>
-          <span>暂无大纲，请先创建章节</span>
-        </div>
-
-        <div class="outline-tip">
-          <el-icon><InfoFilled /></el-icon>
-          <span>点击章节可跳转并查看细纲</span>
+          <span>暂无分卷大纲</span>
         </div>
       </div>
 
@@ -663,7 +885,7 @@ function getChapterSummary(chapterId: string): string {
         <div class="detail-mode-switch">
           <button
             class="mode-btn"
-            :class="{ active: detailOutlineMode === 'view' || detailOutlineMode === 'edit' }"
+            :class="{ active: detailOutlineMode === 'view' }"
             @click="detailOutlineMode = 'view'"
           >
             <el-icon><View /></el-icon>
@@ -713,42 +935,18 @@ function getChapterSummary(chapterId: string): string {
           <div v-if="selectedChapterForDetail" class="selected-chapter-detail">
             <div class="detail-header">
               <el-icon><Document /></el-icon>
-              <span>{{ getChapterTitle(selectedChapterForDetail) }} 细纲</span>
+              <span>{{ getChapterTitle(selectedChapterForDetail) }}</span>
             </div>
 
-            <!-- 章节摘要 -->
+            <!-- 单章总结 -->
             <div class="chapter-summary">
-              <div class="summary-label">章节摘要</div>
-              <div class="summary-content">{{ getChapterSummary(selectedChapterForDetail) }}</div>
-            </div>
-
-            <!-- 细纲步骤 -->
-            <div class="detail-steps">
-              <div
-                v-for="(item, index) in chapterDetailOutline"
-                :key="item.id"
-                class="step-item"
-              >
-                <div class="step-header" @click="toggleStepExpand(item.type)">
-                  <div class="step-label">
-                    <el-icon v-if="item.completed" class="completed-icon"><CircleCheckFilled /></el-icon>
-                    <el-icon v-else class="pending-icon"><Clock /></el-icon>
-                    <span>{{ index + 1 }}. {{ item.label }}</span>
-                  </div>
-                  <el-icon class="expand-icon">
-                    <ArrowDown v-if="isStepExpanded(item.type)" />
-                    <ArrowRight v-else />
-                  </el-icon>
-                </div>
-                <div v-if="isStepExpanded(item.type)" class="step-content">
-                  {{ item.content || '暂无内容' }}
-                </div>
-              </div>
+              <div class="summary-label">单章总结</div>
+              <div class="summary-content">{{ getChapterSummary(selectedChapterForDetail) || '暂无总结' }}</div>
             </div>
           </div>
         </template>
 
-        <!-- 生成模式：生成下一章细纲 -->
+        <!-- 生成模式：生成下一章 -->
         <template v-if="detailOutlineMode === 'generate'">
           <div class="generate-section">
             <div class="next-chapter-info">
@@ -756,125 +954,149 @@ function getChapterSummary(chapterId: string): string {
               <span>准备生成: {{ nextChapterInfo.title }}</span>
             </div>
 
-            <!-- 没有待确认细纲时，显示生成按钮 -->
-            <div v-if="!chapterStore.pendingDetailOutline && !editingOutline" class="generate-action">
-              <div class="generate-tip">
-                <el-icon><InfoFilled /></el-icon>
-                <span>AI将根据总大纲、分卷大纲和前面章节内容生成细纲</span>
-              </div>
+            <!-- AI一键生成按钮 -->
+            <div class="ai-generate-row">
               <el-button
                 type="primary"
                 :loading="isGeneratingOutline"
-                :disabled="!canGenerateNextOutline"
-                @click="generateNextChapterOutline"
+                :disabled="isGeneratingOutline"
+                @click="generateDetailOutline"
               >
                 <el-icon><MagicStick /></el-icon>
-                {{ isGeneratingOutline ? '正在生成...' : 'AI推演生成细纲' }}
+                {{ isGeneratingOutline ? '生成中...' : 'AI智能生成五步细纲' }}
               </el-button>
             </div>
 
-            <!-- 有待确认细纲时，显示细纲内容 -->
-            <div v-else class="pending-outline-section">
-              <div class="outline-status">
-                <el-tag
-                  :type="chapterStore.pendingDetailOutline?.status === 'confirmed' ? 'success' : 'warning'"
-                  size="small"
-                >
-                  {{ chapterStore.pendingDetailOutline?.status === 'confirmed' ? '已确认' : '待确认' }}
-                </el-tag>
-              </div>
-
-              <!-- 细纲步骤（查看/编辑） -->
-              <div class="detail-steps">
-                <div
-                  v-for="(item, index) in chapterDetailOutline"
-                  :key="item.id"
-                  class="step-item"
-                  :class="{ editing: editingOutline !== null }"
-                >
-                  <div class="step-header" @click="toggleStepExpand(item.type)">
-                    <div class="step-label">
-                      <span class="step-number">{{ index + 1 }}</span>
-                      <span>{{ item.label }}</span>
-                    </div>
-                    <el-icon class="expand-icon">
-                      <ArrowDown v-if="isStepExpanded(item.type)" />
-                      <ArrowRight v-else />
-                    </el-icon>
-                  </div>
-                  <div v-if="isStepExpanded(item.type)" class="step-content">
-                    <template v-if="editingOutline !== null">
-                      <el-input
-                        type="textarea"
-                        :rows="3"
-                        :model-value="item.content"
-                        @input="(val: string) => updateEditingStep(item.type, val)"
-                        placeholder="请输入内容..."
-                      />
-                    </template>
-                    <template v-else>
-                      {{ item.content || '暂无内容' }}
-                    </template>
-                  </div>
+            <!-- 五步细纲卡片式输入区 -->
+            <div class="five-steps-editor">
+              <!-- 第1步：场景铺设 -->
+              <div class="step-card" :class="{ 'has-content': getStepContent('scene') }">
+                <div class="step-card-header">
+                  <span class="step-badge">1</span>
+                  <span class="step-title">场景铺设</span>
+                  <el-icon v-if="getStepContent('scene')" class="check-icon"><CircleCheck /></el-icon>
+                </div>
+                <div class="step-card-body">
+                  <el-input
+                    v-model="pendingDetailOutline[0].content"
+                    type="textarea"
+                    :rows="3"
+                    placeholder="设定本章的场景环境、时间地点..."
+                    resize="none"
+                  />
                 </div>
               </div>
 
-              <!-- 操作按钮 -->
-              <div class="outline-actions">
-                <template v-if="editingOutline !== null">
-                  <el-button size="small" @click="cancelEdit">取消</el-button>
-                  <el-button type="primary" size="small" @click="confirmOutline">保存确认</el-button>
-                </template>
-                <template v-else>
-                  <el-button size="small" @click="regenerateOutline" :disabled="isGeneratingOutline">
-                    <el-icon><Refresh /></el-icon>
-                    重新生成
-                  </el-button>
-                  <el-button size="small" @click="enterEditMode">
-                    <el-icon><Edit /></el-icon>
-                    修改
-                  </el-button>
-                  <el-button
-                    v-if="chapterStore.pendingDetailOutline?.status !== 'confirmed'"
-                    type="success"
-                    size="small"
-                    @click="confirmOutline"
-                  >
-                    <el-icon><Check /></el-icon>
-                    确认细纲
-                  </el-button>
-                </template>
+              <!-- 第2步：角色出场 -->
+              <div class="step-card" :class="{ 'has-content': getStepContent('characters') }">
+                <div class="step-card-header">
+                  <span class="step-badge">2</span>
+                  <span class="step-title">角色出场</span>
+                  <el-icon v-if="getStepContent('characters')" class="check-icon"><CircleCheck /></el-icon>
+                </div>
+                <div class="step-card-body">
+                  <el-input
+                    v-model="pendingDetailOutline[1].content"
+                    type="textarea"
+                    :rows="3"
+                    placeholder="本章出场的角色及其状态、情绪..."
+                    resize="none"
+                  />
+                </div>
               </div>
 
-              <!-- 确认后显示生成章节按钮 -->
-              <div
-                v-if="chapterStore.pendingDetailOutline?.status === 'confirmed'"
-                class="generate-chapter-section"
-              >
-                <div class="divider"></div>
-                <el-button
-                  type="primary"
-                  size="default"
-                  :loading="isGeneratingChapter"
-                  @click="generateChapterContent"
-                >
-                  <el-icon><Document /></el-icon>
-                  {{ isGeneratingChapter ? '正在生成章节...' : '根据细纲生成章节' }}
-                </el-button>
+              <!-- 第3步：剧情展开 -->
+              <div class="step-card" :class="{ 'has-content': getStepContent('plot') }">
+                <div class="step-card-header">
+                  <span class="step-badge">3</span>
+                  <span class="step-title">剧情展开</span>
+                  <el-icon v-if="getStepContent('plot')" class="check-icon"><CircleCheck /></el-icon>
+                </div>
+                <div class="step-card-body">
+                  <el-input
+                    v-model="pendingDetailOutline[2].content"
+                    type="textarea"
+                    :rows="3"
+                    placeholder="本章的核心剧情发展..."
+                    resize="none"
+                  />
+                </div>
               </div>
+
+              <!-- 第4步：高潮推进 -->
+              <div class="step-card" :class="{ 'has-content': getStepContent('climax') }">
+                <div class="step-card-header">
+                  <span class="step-badge">4</span>
+                  <span class="step-title">高潮推进</span>
+                  <el-icon v-if="getStepContent('climax')" class="check-icon"><CircleCheck /></el-icon>
+                </div>
+                <div class="step-card-body">
+                  <el-input
+                    v-model="pendingDetailOutline[3].content"
+                    type="textarea"
+                    :rows="3"
+                    placeholder="情节如何推向高潮..."
+                    resize="none"
+                  />
+                </div>
+              </div>
+
+              <!-- 第5步：本章收尾 -->
+              <div class="step-card" :class="{ 'has-content': getStepContent('ending') }">
+                <div class="step-card-header">
+                  <span class="step-badge">5</span>
+                  <span class="step-title">本章收尾</span>
+                  <el-icon v-if="getStepContent('ending')" class="check-icon"><CircleCheck /></el-icon>
+                </div>
+                <div class="step-card-body">
+                  <el-input
+                    v-model="pendingDetailOutline[4].content"
+                    type="textarea"
+                    :rows="3"
+                    placeholder="本章如何结尾，留下什么悬念..."
+                    resize="none"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <!-- 操作按钮区 -->
+            <div class="outline-action-bar">
+              <el-button size="small" @click="resetOutline">
+                <el-icon><RefreshRight /></el-icon>
+                清空
+              </el-button>
+              <el-button
+                size="small"
+                type="success"
+                :disabled="!hasAnyOutlineContent"
+                @click="confirmOutline"
+              >
+                <el-icon><Check /></el-icon>
+                {{ outlineConfirmed ? '已确认 ✓' : '确认细纲' }}
+              </el-button>
+            </div>
+
+            <!-- 生成章节按钮 -->
+            <div class="generate-chapter-section">
+              <div class="divider"></div>
+              <div class="generate-tip">
+                <el-icon><InfoFilled /></el-icon>
+                <span>{{ outlineConfirmed ? '细纲已确认，可以生成章节了' : '请先填写或AI生成细纲，然后确认' }}</span>
+              </div>
+              <el-button
+                type="primary"
+                size="large"
+                :loading="isGeneratingChapter"
+                :disabled="isGeneratingChapter || !outlineConfirmed"
+                @click="generateChapterContent"
+              >
+                <el-icon><MagicStick /></el-icon>
+                {{ isGeneratingChapter ? '正在生成章节...' : '根据细纲生成章节' }}
+              </el-button>
             </div>
           </div>
         </template>
-
-        <!-- 进度条 -->
-        <div v-if="chapterDetailOutline.length > 0 && selectedChapterForDetail" class="detail-progress">
-          <span>进度: {{ chapterProgress.completed }}/{{ chapterProgress.total }}</span>
-          <el-progress
-            :percentage="chapterProgress.total > 0 ? (chapterProgress.completed / chapterProgress.total) * 100 : 0"
-            :stroke-width="4"
-            :show-text="false"
-          />
-        </div>
       </div>
     </div>
 
@@ -1250,11 +1472,16 @@ function getChapterSummary(chapterId: string): string {
       color: var(--text-primary, $text-primary);
       background-color: var(--panel-bg, $light-bg-panel);
       border-radius: $border-radius-base;
+      cursor: pointer;
+      transition: all $transition-duration-fast $transition-ease;
 
-      .volume-count {
+      &:hover {
+        background-color: var(--hover-bg, $light-bg-hover);
+      }
+
+      .expand-icon {
         margin-left: auto;
-        font-size: 11px;
-        font-weight: normal;
+        font-size: 12px;
         color: var(--text-secondary, $text-secondary);
       }
 
@@ -1264,12 +1491,16 @@ function getChapterSummary(chapterId: string): string {
       }
     }
 
-    .volume-chapters {
-      padding-left: 12px;
+    .volume-outline-content {
+      padding: 10px 12px;
       margin-top: 4px;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
+      font-size: 12px;
+      line-height: 1.8;
+      color: var(--text-primary, $text-primary);
+      background-color: var(--panel-bg, $light-bg-panel);
+      border-radius: $border-radius-base;
+      white-space: pre-wrap;
+      word-break: break-word;
     }
   }
 
@@ -1401,7 +1632,7 @@ function getChapterSummary(chapterId: string): string {
       display: flex;
       flex-direction: column;
       gap: 4px;
-      max-height: 200px;
+      max-height: 180px;
       overflow-y: auto;
     }
 
@@ -1480,12 +1711,42 @@ function getChapterSummary(chapterId: string): string {
         font-size: 11px;
         color: var(--text-secondary, $text-secondary);
         margin-bottom: 6px;
+        font-weight: 500;
       }
 
       .summary-content {
         font-size: 12px;
-        line-height: 1.6;
+        line-height: 1.8;
         color: var(--text-primary, $text-primary);
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+    }
+  }
+
+  // 简化的细纲内容显示（查看模式）
+  .detail-content-simple {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+
+    .content-item {
+      padding: 10px 12px;
+      background-color: var(--panel-bg, $light-bg-panel);
+      border-radius: $border-radius-base;
+
+      .content-label {
+        font-size: 12px;
+        font-weight: 500;
+        color: $primary-color;
+        margin-bottom: 6px;
+      }
+
+      .content-text {
+        font-size: 12px;
+        line-height: 1.7;
+        color: var(--text-primary, $text-primary);
+        white-space: pre-wrap;
       }
     }
   }
@@ -1501,8 +1762,12 @@ function getChapterSummary(chapterId: string): string {
       border-radius: $border-radius-base;
       overflow: hidden;
 
-      &.editing {
-        border-color: $primary-color;
+      &.has-content {
+        border-color: $success-color;
+
+        .step-number {
+          background-color: $success-color !important;
+        }
       }
 
       .step-header {
@@ -1585,6 +1850,150 @@ function getChapterSummary(chapterId: string): string {
 
       .el-icon {
         color: $primary-color;
+      }
+    }
+
+    // AI一键生成按钮
+    .ai-generate-row {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 16px;
+
+      .el-button {
+        width: 100%;
+      }
+    }
+
+    // 五步细纲卡片式输入区
+    .five-steps-editor {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+
+      .step-card {
+        border: 1px solid var(--border-color, $border-light);
+        border-radius: $border-radius-base;
+        background-color: var(--bg-base, $bg-base);
+        overflow: hidden;
+        transition: border-color 0.2s;
+
+        &.has-content {
+          border-color: $success-color;
+          border-left: 3px solid $success-color;
+        }
+
+        .step-card-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 8px 12px;
+          background-color: var(--panel-bg, $light-bg-panel);
+          border-bottom: 1px solid var(--border-color, $border-lighter);
+
+          .step-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            background-color: $primary-color;
+            color: white;
+            font-size: 11px;
+            font-weight: 600;
+            border-radius: 50%;
+          }
+
+          .step-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-primary, $text-primary);
+          }
+
+          .check-icon {
+            margin-left: auto;
+            color: $success-color;
+            font-size: 16px;
+          }
+        }
+
+        .step-card-body {
+          padding: 8px;
+
+          :deep(.el-textarea__inner) {
+            font-size: 12px;
+            line-height: 1.6;
+            border: none;
+            background-color: transparent;
+            box-shadow: none;
+            padding: 8px;
+            resize: none;
+
+            &::placeholder {
+              color: var(--text-placeholder, $text-placeholder);
+              font-style: italic;
+            }
+
+            &:focus {
+              box-shadow: none;
+            }
+          }
+        }
+      }
+    }
+
+    // 操作按钮区
+    .outline-action-bar {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px dashed var(--border-color, $border-lighter);
+    }
+
+    // 生成章节区域
+    .generate-chapter-section {
+      margin-top: 16px;
+      text-align: center;
+
+      .divider {
+        height: 1px;
+        background-color: var(--border-color, $border-lighter);
+        margin-bottom: 16px;
+      }
+
+      .generate-tip {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--text-secondary, $text-secondary);
+        margin-bottom: 12px;
+      }
+    }
+
+    // 细纲编辑区（兼容旧样式）
+    .detail-outline-editor {
+      .outline-header-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+
+        .outline-title {
+          font-size: 13px;
+          font-weight: 500;
+          color: var(--text-primary, $text-primary);
+        }
+      }
+
+      .outline-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+        margin-top: 12px;
+        flex-wrap: wrap;
       }
     }
 

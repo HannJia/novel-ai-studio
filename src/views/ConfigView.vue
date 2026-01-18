@@ -29,19 +29,21 @@ const providerBaseUrls: Record<string, string> = {
   qianwen: 'https://dashscope.aliyuncs.com/api/v1',
   wenxin: 'https://aip.baidubce.com',
   zhipu: 'https://open.bigmodel.cn/api/paas/v4',
+  gemini: 'https://generativelanguage.googleapis.com/v1beta',
   ollama: 'http://localhost:11434',
-  custom: ''
+  custom: 'https://api.code-relay.com/v1'
 }
 
 // 根据提供商获取默认模型列表
 const providerModels: Record<string, string[]> = {
-  openai: ['gpt-4-turbo-preview', 'gpt-4', 'gpt-3.5-turbo', 'gpt-3.5-turbo-16k'],
+  openai: ['gpt-4-turbo-preview', 'gpt-4', 'gpt-3.5-turbo', 'gpt-3.5-turbo-16k', 'gemini-3-pro-preview'],
   claude: ['claude-3-opus-20240229', 'claude-3-sonnet-20240229', 'claude-3-haiku-20240307'],
   qianwen: ['qwen-turbo', 'qwen-plus', 'qwen-max'],
   wenxin: ['ernie-bot-4', 'ernie-bot-turbo', 'ernie-bot'],
   zhipu: ['glm-4', 'glm-4v', 'glm-3-turbo'],
+  gemini: ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'],
   ollama: ['llama2', 'mistral', 'codellama'],
-  custom: []
+  custom: ['gemini-3-pro-preview', 'gpt-4-turbo-preview', 'gpt-4', 'claude-3-sonnet']
 }
 
 const configForm = ref({

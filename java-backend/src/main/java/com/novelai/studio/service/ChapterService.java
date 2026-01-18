@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.novelai.studio.entity.Chapter;
 import com.novelai.studio.mapper.ChapterMapper;
+import com.novelai.studio.util.WordCountUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -55,7 +56,12 @@ public class ChapterService extends ServiceImpl<ChapterMapper, Chapter> {
         if (chapter.getStatus() == null) {
             chapter.setStatus("draft");
         }
-        if (chapter.getWordCount() == null) {
+
+        // 自动计算字数（如果有内容）
+        if (chapter.getContent() != null && !chapter.getContent().isEmpty()) {
+            // 使用 WordCountUtil 统计字数（与前端保持一致）
+            chapter.setWordCount(WordCountUtil.countWords(chapter.getContent()));
+        } else if (chapter.getWordCount() == null) {
             chapter.setWordCount(0);
         }
 
@@ -74,6 +80,13 @@ public class ChapterService extends ServiceImpl<ChapterMapper, Chapter> {
         }
 
         chapter.setId(id);
+
+        // 如果内容有变化，自动重新计算字数
+        if (chapter.getContent() != null && !chapter.getContent().isEmpty()) {
+            // 使用 WordCountUtil 统计字数（与前端保持一致）
+            chapter.setWordCount(WordCountUtil.countWords(chapter.getContent()));
+        }
+
         updateById(chapter);
 
         // 如果字数变化，更新书籍统计

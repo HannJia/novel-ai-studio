@@ -1,0 +1,54 @@
+{
+  "id": "outline-generate",
+  "name": "大纲生成",
+  "version": "1.0",
+  "description": "生成书籍或章节大纲",
+  "variables": [
+    {
+      "name": "bookTitle",
+      "description": "书名",
+      "required": true
+    },
+    {
+      "name": "genre",
+      "description": "小说类型",
+      "required": true
+    },
+    {
+      "name": "style",
+      "description": "写作风格",
+      "required": true
+    },
+    {
+      "name": "outlineType",
+      "description": "大纲类型：book/volume/chapter",
+      "required": true
+    },
+    {
+      "name": "description",
+      "description": "小说简介或创作意向",
+      "required": true
+    },
+    {
+      "name": "protagonistInfo",
+      "description": "主角设定",
+      "required": false
+    },
+    {
+      "name": "worldSetting",
+      "description": "世界观设定",
+      "required": false
+    },
+    {
+      "name": "existingOutline",
+      "description": "已有大纲（用于生成细纲）",
+      "required": false
+    }
+  ],
+  "systemPrompt": "你是一位专业的小说策划师，擅长为{{genre}}类型的小说设计大纲。你需要根据用户提供的信息，生成结构清晰、逻辑合理的大纲。\n\n大纲设计要求：\n1. 情节结构完整，有明确的起承转合\n2. 人物动机清晰，行为符合逻辑\n3. 节奏把控合理，张弛有度\n4. 适当设置伏笔和悬念\n5. 符合{{genre}}类型的创作规律",
+  "userPromptTemplate": "## 小说信息\n- 书名：{{bookTitle}}\n- 类型：{{genre}}\n- 风格：{{style}}\n- 大纲类型：{{outlineType}}\n\n## 创作意向\n{{description}}\n\n{{#if protagonistInfo}}\n## 主角设定\n{{protagonistInfo}}\n{{/if}}\n\n{{#if worldSetting}}\n## 世界观设定\n{{worldSetting}}\n{{/if}}\n\n{{#if existingOutline}}\n## 已有大纲\n{{existingOutline}}\n{{/if}}\n\n---\n请生成{{outlineType}}大纲。",
+  "options": {
+    "temperature": 0.8,
+    "maxTokens": 3000
+  }
+}

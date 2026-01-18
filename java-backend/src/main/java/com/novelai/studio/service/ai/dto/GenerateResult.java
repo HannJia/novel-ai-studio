@@ -20,6 +20,11 @@ public class GenerateResult {
     private String content;
 
     /**
+     * 推理/思考过程（GLM-4.7等推理模型返回的reasoning_content）
+     */
+    private String reasoning;
+
+    /**
      * 使用的模型
      */
     private String model;

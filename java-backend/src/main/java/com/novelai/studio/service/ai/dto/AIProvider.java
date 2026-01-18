@@ -30,6 +30,11 @@ public enum AIProvider {
     ZHIPU("zhipu", "智谱AI"),
 
     /**
+     * Google Gemini
+     */
+    GEMINI("gemini", "Gemini"),
+
+    /**
      * 本地 Ollama
      */
     OLLAMA("ollama", "Ollama"),

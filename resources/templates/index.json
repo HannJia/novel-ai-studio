@@ -1,0 +1,61 @@
+{
+  "version": "1.0",
+  "description": "NovelAI Studio Prompt 模板索引",
+  "templates": [
+    {
+      "id": "chapter-continue",
+      "name": "章节续写",
+      "file": "chapter-continue.json",
+      "category": "generate",
+      "description": "根据前文内容续写章节"
+    },
+    {
+      "id": "chapter-generate",
+      "name": "章节生成",
+      "file": "chapter-generate.json",
+      "category": "generate",
+      "description": "根据大纲生成完整章节"
+    },
+    {
+      "id": "outline-generate",
+      "name": "大纲生成",
+      "file": "outline-generate.json",
+      "category": "generate",
+      "description": "生成书籍或章节大纲"
+    },
+    {
+      "id": "summary-generate",
+      "name": "摘要生成",
+      "file": "summary-generate.json",
+      "category": "memory",
+      "description": "生成章节摘要"
+    },
+    {
+      "id": "event-extract",
+      "name": "事件提取",
+      "file": "event-extract.json",
+      "category": "memory",
+      "description": "从章节中提取关键事件"
+    },
+    {
+      "id": "review-logic",
+      "name": "逻辑审查",
+      "file": "review-logic.json",
+      "category": "review",
+      "description": "审查章节逻辑一致性"
+    },
+    {
+      "id": "character-analyze",
+      "name": "角色分析",
+      "file": "character-analyze.json",
+      "category": "analyze",
+      "description": "分析角色性格和状态"
+    }
+  ],
+  "categories": {
+    "generate": "内容生成",
+    "memory": "记忆系统",
+    "review": "逻辑审查",
+    "analyze": "内容分析"
+  }
+}

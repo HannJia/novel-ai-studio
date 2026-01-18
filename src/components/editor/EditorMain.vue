@@ -1,10 +1,79 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import { useChapterStore, useEditorStore, useUiStore } from '@/stores'
+import { ElMessage } from 'element-plus'
+import AIThinkingProcess from './ai/AIThinkingProcess.vue'
 
 const chapterStore = useChapterStore()
 const editorStore = useEditorStore()
 const uiStore = useUiStore()
+
+// 章节标题编辑状态
+const isEditingTitle = ref(false)
+const editingTitle = ref('')
+const titleInputRef = ref<HTMLInputElement | null>(null)
+
+// 监听当前章节变化，重置编辑状态
+watch(() => chapterStore.currentChapter, () => {
+  isEditingTitle.value = false
+  editingTitle.value = ''
+})
+
+// 开始编辑标题
+async function startEditTitle() {
+  if (!chapterStore.currentChapter) return
+  editingTitle.value = chapterStore.currentChapter.title
+  isEditingTitle.value = true
+  await nextTick()
+  titleInputRef.value?.focus()
+  titleInputRef.value?.select()
+}
+
+// 保存标题
+async function saveTitle() {
+  if (!chapterStore.currentChapter) return
+
+  const newTitle = editingTitle.value.trim()
+  if (!newTitle) {
+    ElMessage.warning('章节标题不能为空')
+    editingTitle.value = chapterStore.currentChapter.title
+    isEditingTitle.value = false
+    return
+  }
+
+  if (newTitle !== chapterStore.currentChapter.title) {
+    const result = await chapterStore.updateChapter(chapterStore.currentChapter.id, {
+      title: newTitle
+    })
+    if (result) {
+      ElMessage.success('标题已更新')
+    } else {
+      ElMessage.error('更新标题失败')
+      editingTitle.value = chapterStore.currentChapter.title
+    }
+  }
+
+  isEditingTitle.value = false
+}
+
+// 取消编辑
+function cancelEditTitle() {
+  if (chapterStore.currentChapter) {
+    editingTitle.value = chapterStore.currentChapter.title
+  }
+  isEditingTitle.value = false
+}
+
+// 按键处理
+function handleTitleKeydown(event: KeyboardEvent) {
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    saveTitle()
+  } else if (event.key === 'Escape') {
+    event.preventDefault()
+    cancelEditTitle()
+  }
+}
 </script>
 
 <template>
@@ -23,7 +92,25 @@ const uiStore = useUiStore()
       <!-- 章节信息栏 -->
       <div class="chapter-info-bar">
         <div class="chapter-header">
-          <h2 class="chapter-title">{{ chapterStore.currentChapter.title }}</h2>
+          <!-- 可编辑的章节标题 -->
+          <h2
+            v-if="!isEditingTitle"
+            class="chapter-title editable"
+            @dblclick="startEditTitle"
+            title="双击编辑标题"
+          >
+            {{ chapterStore.currentChapter.title }}
+            <el-icon class="edit-hint"><Edit /></el-icon>
+          </h2>
+          <el-input
+            v-else
+            ref="titleInputRef"
+            v-model="editingTitle"
+            class="title-input"
+            size="large"
+            @blur="saveTitle"
+            @keydown="handleTitleKeydown"
+          />
           <div class="chapter-meta">
             <el-tag size="small" type="info">
               {{ chapterStore.currentChapter.status === 'completed' ? '已完成' : '草稿' }}
@@ -51,6 +138,9 @@ const uiStore = useUiStore()
         ></textarea>
       </div>
     </div>
+
+    <!-- AI思考过程浮窗（非嵌入模式） -->
+    <AIThinkingProcess :embedded="false" />
   </main>
 </template>
 
@@ -62,6 +152,7 @@ const uiStore = useUiStore()
   overflow: hidden;
   background-color: var(--main-bg, $bg-page);
   transition: background-color $transition-duration $transition-ease;
+  position: relative;
 }
 
 .no-chapter-selected {
@@ -119,6 +210,42 @@ const uiStore = useUiStore()
       font-weight: 600;
       color: var(--text-title, $light-text-title);
       margin: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+
+      &.editable {
+        cursor: pointer;
+        padding: 4px 8px;
+        margin: -4px -8px;
+        border-radius: $border-radius-base;
+        transition: background-color 0.2s ease;
+
+        .edit-hint {
+          font-size: 14px;
+          color: var(--text-placeholder, $text-placeholder);
+          opacity: 0;
+          transition: opacity 0.2s ease;
+        }
+
+        &:hover {
+          background-color: var(--hover-bg, $light-bg-hover);
+
+          .edit-hint {
+            opacity: 1;
+          }
+        }
+      }
+    }
+
+    .title-input {
+      width: 300px;
+
+      :deep(.el-input__inner) {
+        font-size: 18px;
+        font-weight: 600;
+        height: 36px;
+      }
     }
   }
 
@@ -187,5 +314,6 @@ const uiStore = useUiStore()
   --textarea-bg: #{$dark-bg-card};
   --textarea-shadow: #{$dark-card-shadow};
   --textarea-shadow-focus: 0 0 0 2px #{$primary-color};
+  --hover-bg: #{$dark-bg-hover};
 }
 </style>

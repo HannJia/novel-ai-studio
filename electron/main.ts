@@ -1,5 +1,6 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { join } from 'path'
+import { registerAllHandlers } from './ipc'
 
 // 禁用硬件加速（可选，解决某些显卡兼容性问题）
 // app.disableHardwareAcceleration()
@@ -50,6 +51,9 @@ if (!gotTheLock) {
 
   // 应用准备就绪
   app.whenReady().then(() => {
+    // 注册所有 IPC 处理器
+    registerAllHandlers()
+
     createWindow()
 
     app.on('activate', () => {
@@ -74,73 +78,5 @@ if (!gotTheLock) {
     if (process.platform !== 'darwin') {
       app.quit()
     }
-  })
-
-  // 注册IPC处理器
-  // 文件系统相关
-  ipcMain.handle('fs:readFile', async (_event, path: string) => {
-    const fs = await import('fs/promises')
-    return fs.readFile(path, 'utf-8')
-  })
-
-  ipcMain.handle('fs:writeFile', async (_event, path: string, content: string) => {
-    const fs = await import('fs/promises')
-    return fs.writeFile(path, content, 'utf-8')
-  })
-
-  ipcMain.handle('fs:exists', async (_event, path: string) => {
-    const fs = await import('fs/promises')
-    try {
-      await fs.access(path)
-      return true
-    } catch {
-      return false
-    }
-  })
-
-  ipcMain.handle('fs:mkdir', async (_event, path: string) => {
-    const fs = await import('fs/promises')
-    return fs.mkdir(path, { recursive: true })
-  })
-
-  ipcMain.handle('fs:readDir', async (_event, path: string) => {
-    const fs = await import('fs/promises')
-    return fs.readdir(path, { withFileTypes: true })
-  })
-
-  ipcMain.handle('fs:stat', async (_event, path: string) => {
-    const fs = await import('fs/promises')
-    const stat = await fs.stat(path)
-    return {
-      isFile: stat.isFile(),
-      isDirectory: stat.isDirectory(),
-      size: stat.size,
-      mtime: stat.mtime.toISOString(),
-      ctime: stat.ctime.toISOString()
-    }
-  })
-
-  ipcMain.handle('fs:delete', async (_event, path: string) => {
-    const fs = await import('fs/promises')
-    return fs.rm(path, { recursive: true, force: true })
-  })
-
-  ipcMain.handle('fs:rename', async (_event, oldPath: string, newPath: string) => {
-    const fs = await import('fs/promises')
-    return fs.rename(oldPath, newPath)
-  })
-
-  ipcMain.handle('fs:copy', async (_event, src: string, dest: string) => {
-    const fs = await import('fs/promises')
-    return fs.copyFile(src, dest)
-  })
-
-  // 应用信息
-  ipcMain.handle('app:getPath', async (_event, name: string) => {
-    return app.getPath(name as Parameters<typeof app.getPath>[0])
-  })
-
-  ipcMain.handle('app:getVersion', async () => {
-    return app.getVersion()
   })
 }

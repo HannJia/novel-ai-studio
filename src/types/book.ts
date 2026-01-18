@@ -88,6 +88,7 @@ export interface UpdateBookInput {
   style?: BookStyle
   description?: string
   outline?: string
+  volumes?: VolumeOutline[]  // 分卷大纲
   status?: BookStatus
   coverImage?: string
 }

@@ -145,21 +145,45 @@ public class AIService {
             case OPENAI:
             case CUSTOM:
             case QIANWEN:
-            case ZHIPU:
-                // OpenAI 兼容的 API（包括火山引擎、通义千问、智谱等）
+                // OpenAI 兼容的 API（包括火山引擎、通义千问等）
                 return new OpenAIAdapter(
                         config.getApiKey(),
                         config.getBaseUrl(),
                         config.getModel()
                 );
+            case ZHIPU:
+                // 智谱 GLM API（使用专用适配器）
+                return new ZhipuAdapter(
+                        config.getApiKey(),
+                        config.getBaseUrl(),
+                        config.getModel()
+                );
+            case GEMINI:
+                // Google Gemini API
+                return new GeminiAdapter(
+                        config.getApiKey(),
+                        config.getBaseUrl(),
+                        config.getModel()
+                );
             case CLAUDE:
-                // TODO: 实现 Claude 适配器
-                log.warn("Claude adapter not implemented yet");
-                return null;
+                return new ClaudeAdapter(
+                        config.getApiKey(),
+                        config.getBaseUrl(),
+                        config.getModel()
+                );
             case OLLAMA:
-                // TODO: 实现 Ollama 适配器
-                log.warn("Ollama adapter not implemented yet");
-                return null;
+                return new OllamaAdapter(
+                        config.getApiKey(),
+                        config.getBaseUrl(),
+                        config.getModel()
+                );
+            case WENXIN:
+                // 文心一言使用OpenAI兼容接口
+                return new OpenAIAdapter(
+                        config.getApiKey(),
+                        config.getBaseUrl(),
+                        config.getModel()
+                );
             default:
                 log.warn("Unknown AI provider: {}", config.getProvider());
                 return null;

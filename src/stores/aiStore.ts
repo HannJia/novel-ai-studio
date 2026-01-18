@@ -12,6 +12,30 @@ export const useAiStore = defineStore('ai', () => {
   const usageRecords = ref<TokenUsageRecord[]>([])
   const generating = ref(false)
   const generatedContent = ref('')
+  // 生成步骤定义
+  interface GenerationStep {
+    id: string
+    name: string
+    description: string
+    status: 'pending' | 'running' | 'completed'
+  }
+  // 生成进度（用于分步生成章节）
+  const generatingProgress = ref({
+    current: 0,      // 当前步骤索引 (0-4)
+    total: 5,        // 总步骤数
+    stage: '',       // 当前阶段名称
+    steps: [
+      { id: 'context', name: '加载上下文', description: '', status: 'pending' as const },
+      { id: 'character', name: '角色分析', description: '', status: 'pending' as const },
+      { id: 'scene', name: '场景理解', description: '', status: 'pending' as const },
+      { id: 'logic', name: '逻辑检查', description: '', status: 'pending' as const },
+      { id: 'generate', name: '内容生成', description: '', status: 'pending' as const }
+    ] as GenerationStep[]
+  })
+  // 推理/思考过程（GLM-4.7等推理模型返回）
+  const currentReasoning = ref<string | null>(null)
+  // 嵌入式思考面板是否可见（用于控制浮窗是否显示）
+  const embeddedPanelVisible = ref(false)
 
   // 计算属性
   const defaultConfig = computed(() =>
@@ -25,6 +49,7 @@ export const useAiStore = defineStore('ai', () => {
       qianwen: [],
       wenxin: [],
       zhipu: [],
+      gemini: [],
       ollama: [],
       custom: []
     }
@@ -44,12 +69,58 @@ export const useAiStore = defineStore('ai', () => {
 
   const hasConfig = computed(() => configs.value.length > 0)
 
+  // 推理模型列表（这些模型会在内部消耗大量 token 进行思考，不应设置严格的 maxTokens 限制）
+  const REASONING_MODELS = [
+    'gemini-3-pro-preview',
+    'gemini-3-pro',
+    'gemini-2.5-pro',
+    'deepseek-r1',
+    'deepseek-reasoner',
+    'o1-preview',
+    'o1-mini',
+    'o1',
+    'o3-mini',
+    'glm-4.7',
+    'qwq'
+  ]
+
+  // 检测指定模型是否为推理模型
+  function checkIsReasoningModel(modelName?: string): boolean {
+    const model = (modelName || currentConfig.value?.model || '').toLowerCase()
+    return REASONING_MODELS.some(rm => model.includes(rm.toLowerCase()))
+  }
+
+  // 检测当前配置是否为推理模型
+  const isReasoningModel = computed(() => checkIsReasoningModel())
+
+  // 默认 Gemini 3 Pro 配置
+  const DEFAULT_GEMINI3_CONFIG: aiApi.CreateAIConfigInput = {
+    name: 'Gemini 3 Pro 创作',
+    provider: 'custom',
+    apiKey: 'sk-iF6IIsU0Yml1qpWQJeSu2dK5JuccSlolrmCJrUQebDI3YhED',
+    baseUrl: 'https://api.code-relay.com/v1',
+    model: 'gemini-3-pro-preview',
+    temperature: 1.0,
+    topP: 1.0,
+    isDefault: true
+  }
+
   // 方法
   async function fetchConfigs(): Promise<void> {
     loading.value = true
     error.value = null
     try {
       configs.value = await aiApi.getAIConfigs()
+
+      // 检查是否已存在 Gemini 3 Pro 配置，如果不存在则创建并设为默认
+      const hasGemini3Pro = configs.value.some(c => c.name === 'Gemini 3 Pro 创作')
+      if (!hasGemini3Pro) {
+        console.log('未发现AI配置，正在创建默认 Gemini 3 Pro 配置...')
+        const newConfig = await aiApi.createAIConfig(DEFAULT_GEMINI3_CONFIG)
+        configs.value.push(newConfig)
+        console.log('默认 Gemini 3 Pro 配置已创建')
+      }
+
       // 设置当前配置为默认配置
       if (!currentConfig.value && defaultConfig.value) {
         currentConfig.value = defaultConfig.value
@@ -180,9 +251,14 @@ export const useAiStore = defineStore('ai', () => {
     generating.value = true
     error.value = null
     generatedContent.value = ''
+    currentReasoning.value = null
     try {
       const result = await aiApi.generate(request)
       generatedContent.value = result.content
+      // 保存推理过程（如果有）
+      if (result.reasoning) {
+        currentReasoning.value = result.reasoning
+      }
       return result
     } catch (e) {
       error.value = e instanceof Error ? e.message : '生成失败'
@@ -196,9 +272,11 @@ export const useAiStore = defineStore('ai', () => {
     generating.value = true
     error.value = null
     generatedContent.value = ''
+    currentReasoning.value = null
     try {
       const result = await aiApi.continueWriting(request)
       generatedContent.value = result.content
+      // 续写正文时不需要显示推理过程，直接输出正文
       return result
     } catch (e) {
       error.value = e instanceof Error ? e.message : '续写失败'
@@ -212,9 +290,13 @@ export const useAiStore = defineStore('ai', () => {
     generating.value = true
     error.value = null
     generatedContent.value = ''
+    currentReasoning.value = null
     try {
       const result = await aiApi.generateOutline(request)
       generatedContent.value = result.content
+      if (result.reasoning) {
+        currentReasoning.value = result.reasoning
+      }
       return result
     } catch (e) {
       error.value = e instanceof Error ? e.message : '生成大纲失败'
@@ -227,8 +309,12 @@ export const useAiStore = defineStore('ai', () => {
   async function chat(request: aiApi.ChatRequest): Promise<GenerateResult | null> {
     generating.value = true
     error.value = null
+    currentReasoning.value = null
     try {
       const result = await aiApi.chat(request)
+      if (result.reasoning) {
+        currentReasoning.value = result.reasoning
+      }
       return result
     } catch (e) {
       error.value = e instanceof Error ? e.message : '对话失败'
@@ -236,6 +322,44 @@ export const useAiStore = defineStore('ai', () => {
     } finally {
       generating.value = false
     }
+  }
+
+  // 清除推理内容
+  function clearReasoning(): void {
+    currentReasoning.value = null
+  }
+
+  // 更新生成步骤状态
+  function updateStep(stepId: string, status: 'pending' | 'running' | 'completed', description?: string): void {
+    const step = generatingProgress.value.steps.find(s => s.id === stepId)
+    if (step) {
+      step.status = status
+      if (description !== undefined) {
+        step.description = description
+      }
+      // 更新当前步骤索引
+      const completedCount = generatingProgress.value.steps.filter(s => s.status === 'completed').length
+      generatingProgress.value.current = completedCount
+      // 更新当前阶段名称
+      const runningStep = generatingProgress.value.steps.find(s => s.status === 'running')
+      generatingProgress.value.stage = runningStep?.name || ''
+    }
+  }
+
+  // 更新生成进度（兼容旧方法）
+  function updateProgress(current: number, stage: string): void {
+    generatingProgress.value.current = current
+    generatingProgress.value.stage = stage
+  }
+
+  // 重置生成进度
+  function resetProgress(): void {
+    generatingProgress.value.current = 0
+    generatingProgress.value.stage = ''
+    generatingProgress.value.steps.forEach(step => {
+      step.status = 'pending'
+      step.description = ''
+    })
   }
 
   return {
@@ -247,12 +371,16 @@ export const useAiStore = defineStore('ai', () => {
     usageRecords,
     generating,
     generatedContent,
+    generatingProgress,
+    currentReasoning,
+    embeddedPanelVisible,
     // 计算属性
     defaultConfig,
     configsByProvider,
     totalTokensUsed,
     totalCost,
     hasConfig,
+    isReasoningModel,
     // 配置管理方法
     fetchConfigs,
     createConfig,
@@ -263,10 +391,15 @@ export const useAiStore = defineStore('ai', () => {
     getModels,
     setCurrentConfig,
     addUsageRecord,
+    checkIsReasoningModel,
     // AI生成方法
     generate,
     continueWriting,
     generateOutline,
-    chat
+    chat,
+    clearReasoning,
+    updateStep,
+    updateProgress,
+    resetProgress
   }
 })

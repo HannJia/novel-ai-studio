@@ -140,4 +140,24 @@ public abstract class AbstractAIAdapter implements AIAdapter {
                         .build())
                 .build();
     }
+
+    /**
+     * 创建成功结果（带推理内容）
+     */
+    protected GenerateResult createSuccessResultWithReasoning(String content, String reasoning, String model,
+                                                               int promptTokens, int completionTokens,
+                                                               String finishReason, long duration) {
+        return GenerateResult.builder()
+                .content(content)
+                .reasoning(reasoning)
+                .model(model)
+                .finishReason(finishReason)
+                .duration(duration)
+                .tokenUsage(GenerateResult.TokenUsage.builder()
+                        .promptTokens(promptTokens)
+                        .completionTokens(completionTokens)
+                        .totalTokens(promptTokens + completionTokens)
+                        .build())
+                .build();
+    }
 }

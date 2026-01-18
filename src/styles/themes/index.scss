@@ -1,0 +1,17 @@
+/**
+ * NovelAI Studio 主题入口
+ * 导出所有主题样式
+ */
+
+@import './light.scss';
+@import './dark.scss';
+
+// 默认使用浅色主题
+:root {
+  @extend .theme-light;
+}
+
+// 暗色主题
+.dark-theme {
+  @extend .theme-dark;
+}

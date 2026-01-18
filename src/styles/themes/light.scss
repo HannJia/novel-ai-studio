@@ -1,0 +1,74 @@
+/**
+ * NovelAI Studio 浅色主题（方案B - Notion风格）
+ * 适合日间使用，清爽简洁
+ */
+
+@import './variables.scss';
+
+.theme-light {
+  // 背景色
+  --bg-primary: #{$bg-white};
+  --bg-secondary: #{$bg-page};
+  --bg-tertiary: #{$border-extra-light};
+  --bg-hover: #{$bg-hover};
+
+  // 文字颜色
+  --text-primary: #{$text-primary};
+  --text-secondary: #{$text-regular};
+  --text-muted: #{$text-secondary};
+  --text-placeholder: #{$text-placeholder};
+
+  // 边框颜色
+  --border-base: #{$border-base};
+  --border-light: #{$border-light};
+  --border-lighter: #{$border-lighter};
+
+  // 主色调
+  --color-primary: #{$primary-color};
+  --color-primary-light: #{$primary-light};
+  --color-primary-dark: #{$primary-dark};
+
+  // 状态颜色
+  --color-success: #{$success-color};
+  --color-warning: #{$warning-color};
+  --color-danger: #{$danger-color};
+  --color-info: #{$info-color};
+
+  // 阴影
+  --shadow-base: #{$box-shadow-base};
+  --shadow-light: #{$box-shadow-light};
+
+  // 侧边栏
+  --sidebar-bg: #{$bg-white};
+  --sidebar-border: #{$border-light};
+  --sidebar-item-hover: #{$bg-hover};
+  --sidebar-item-active: rgba(64, 158, 255, 0.1);
+
+  // 编辑器
+  --editor-bg: #{$bg-white};
+  --editor-line-number: #{$text-placeholder};
+  --editor-selection: rgba(64, 158, 255, 0.2);
+  --editor-cursor: #{$text-primary};
+
+  // 面板
+  --panel-bg: #{$bg-white};
+  --panel-header-bg: #{$bg-page};
+  --panel-border: #{$border-light};
+
+  // 卡片
+  --card-bg: #{$bg-white};
+  --card-shadow: #{$box-shadow-base};
+  --card-hover-shadow: #{$box-shadow-light};
+
+  // 输入框
+  --input-bg: #{$bg-white};
+  --input-border: #{$border-base};
+  --input-focus-border: #{$primary-color};
+
+  // 按钮
+  --button-default-bg: #{$bg-white};
+  --button-default-border: #{$border-base};
+  --button-default-text: #{$text-regular};
+  --button-primary-bg: #{$primary-color};
+  --button-primary-text: #ffffff;
+}

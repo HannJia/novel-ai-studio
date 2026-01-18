@@ -1,15 +1,14 @@
 {
   "name": "novel-ai-studio",
   "version": "1.0.0",
-  "description": "个人AI辅助小说创作工具",
-  "type": "module",
+  "description": "AI Novel Writing Tool",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
     "dev:web": "cross-env ELECTRON_DISABLE=true vite",
     "build": "vue-tsc && vite build && electron-builder",
     "preview": "vite preview",
-    "electron:dev": "concurrently -k \"cross-env ELECTRON_DISABLE=true vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:dev": "concurrently -k \"cross-env ELECTRON_DISABLE=true vite\" \"wait-on http://localhost:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
     "electron:build": "vue-tsc && vite build && electron-builder",
     "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix",
     "format": "prettier --write src/",

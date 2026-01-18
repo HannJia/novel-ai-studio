@@ -1,0 +1,13 @@
+/**
+ * NovelAI Studio 样式入口
+ * 统一导出所有样式
+ */
+
+// 变量定义
+@import './variables.scss';
+
+// 主题样式
+@import './themes/index.scss';
+
+// 全局样式
+@import './global.scss';

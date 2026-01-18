@@ -1712,58 +1712,197 @@ mybatis-plus:
   - 角色面板
   - 专注模式优化
 
-### 阶段三：世界观与知识库（P1.5）
+### 阶段三：世界观与知识库（P1.5）✅ 已完成
 
 | ID | 任务 | 状态 | 依赖 |
 |----|------|------|------|
-| 3.1 | 角色管理服务（Java后端） | ⬜ | 2.1 |
-| 3.2 | 角色管理前端服务 | ⬜ | 3.1 |
-| 3.3 | 角色管理UI | ⬜ | 3.2 |
-| 3.4 | 角色关系图 | ⬜ | 3.3 |
-| 3.5 | 设定百科服务（Java后端） | ⬜ | 2.1 |
-| 3.6 | 设定百科UI | ⬜ | 3.5 |
-| 3.7 | 知识库文件上传（Java后端） | ⬜ | 1.5, 1.7 |
-| 3.8 | 向量数据库集成（Java） | ⬜ | 1.6 |
-| 3.9 | 文件向量化服务（Java） | ⬜ | 3.7, 3.8 |
-| 3.10 | 知识库检索服务 | ⬜ | 3.9 |
-| 3.11 | 知识库UI | ⬜ | 3.10 |
-| 3.12 | AI生成增强 | ⬜ | 2.11, 3.3, 3.6, 3.10 |
+| 3.1 | 角色管理服务（Java后端） | ✅ | 2.1 |
+| 3.2 | 角色管理前端服务 | ✅ | 3.1 |
+| 3.3 | 角色管理UI | ✅ | 3.2 |
+| 3.4 | 角色关系图 | ✅ | 3.3 |
+| 3.5 | 设定百科服务（Java后端） | ✅ | 2.1 |
+| 3.6 | 设定百科UI | ✅ | 3.5 |
+| 3.7 | 知识库文件上传（Java后端） | ✅ | 1.5, 1.7 |
+| 3.8 | 向量数据库集成（Java） | ✅ | 1.6 |
+| 3.9 | 文件向量化服务（Java） | ✅ | 3.7, 3.8 |
+| 3.10 | 知识库检索服务 | ✅ | 3.9 |
+| 3.11 | 知识库UI | ✅ | 3.10 |
+| 3.12 | AI生成增强 | ✅ | 2.11, 3.3, 3.6, 3.10 |
 
-### 阶段四：记忆系统（P2）
+**完成日期**：2026-01-16
+**完成内容**：
+- 角色管理系统（后端CRUD + 前端UI + 关系图谱可视化）
+- 设定百科系统（世界观设定管理 + 分类管理）
+- 知识库系统（文件上传 + 向量化 + 语义检索）
+- AI上下文增强（自动注入角色/设定/知识库信息到AI生成）
 
-| ID | 任务 | 状态 | 依赖 |
-|----|------|------|------|
-| 4.1 | L1即时记忆 | ⬜ | 2.7 |
-| 4.2 | L2章节摘要生成（Java） | ⬜ | 2.11 |
-| 4.3 | 摘要管理UI | ⬜ | 4.2 |
-| 4.4 | L3事件时间线（Java） | ⬜ | 4.2 |
-| 4.5 | L3角色状态追踪（Java） | ⬜ | 3.1, 4.2 |
-| 4.6 | 伏笔手动标记 | ⬜ | 2.7 |
-| 4.7 | 伏笔管理UI | ⬜ | 4.6 |
-| 4.8 | 伏笔提醒功能 | ⬜ | 4.7 |
-| 4.9 | 记忆检索整合 | ⬜ | 4.1-4.8 |
-
-### 阶段五：逻辑审查（P2.5）
+### 阶段四：记忆系统（P2）✅ 已完成
 
 | ID | 任务 | 状态 | 依赖 |
 |----|------|------|------|
-| 5.1 | 规则引擎框架（Java） | ⬜ | 1.6 |
-| 5.2 | Level A规则实现（Java） | ⬜ | 5.1, 4.5 |
-| 5.3 | 审查报告UI | ⬜ | 5.2 |
-| 5.4 | Level B AI审查（Java） | ⬜ | 5.1, 2.9 |
-| 5.5 | Level C建议审查（Java） | ⬜ | 5.4 |
-| 5.6 | 实时审查提醒 | ⬜ | 5.2 |
+| 4.1 | L1即时记忆 | ✅ | 2.7 |
+| 4.2 | L2章节摘要生成（Java） | ✅ | 2.11 |
+| 4.3 | 摘要管理UI | ✅ | 4.2 |
+| 4.4 | L3事件时间线（Java） | ✅ | 4.2 |
+| 4.5 | L3角色状态追踪（Java） | ✅ | 3.1, 4.2 |
+| 4.6 | 伏笔手动标记 | ✅ | 2.7 |
+| 4.7 | 伏笔管理UI | ✅ | 4.6 |
+| 4.8 | 伏笔提醒功能 | ✅ | 4.7 |
+| 4.9 | 记忆检索整合 | ✅ | 4.1-4.8 |
 
-### 阶段六：AI对话与多模型（P3）
+**完成日期**：2026-01-16
+**完成内容**：
+- 数据库迁移：`chapter_summaries`、`story_events`、`character_state_changes`表
+- 后端实体类：ChapterSummary、StoryEvent、CharacterStateChange、Foreshadow
+- 后端Mapper：ChapterSummaryMapper、StoryEventMapper、CharacterStateChangeMapper、ForeshadowMapper
+- 后端服务层：ChapterSummaryService（AI摘要生成）、StoryEventService（AI事件提取）、CharacterStateChangeService、ForeshadowService
+- 后端控制器：ChapterSummaryController、StoryEventController、CharacterStateController、ForeshadowController
+- 前端API服务：memoryApi.ts
+- 前端类型定义：memory.ts扩展
+- 前端Store：memoryStore.ts
+- 前端UI组件：SummaryPanel、TimelinePanel、ForeshadowPanel
+- 编辑器右侧面板：新增"记忆"标签页，包含伏笔/事件/摘要子面板
+- AI上下文增强：整合所有记忆层级到AI生成上下文（buildFullMemoryContext、buildChapterGenerationContext、buildContinueContext）
+
+### 阶段五：逻辑审查（P2.5）✅ 已完成
 
 | ID | 任务 | 状态 | 依赖 |
 |----|------|------|------|
-| 6.1 | AI对话界面 | ⬜ | 2.9 |
-| 6.2 | 对话上下文注入 | ⬜ | 6.1, 4.9 |
-| 6.3 | Claude适配器（Java） | ⬜ | 2.8 |
-| 6.4 | 国产模型适配器（Java） | ⬜ | 2.8 |
-| 6.5 | Ollama适配器（Java） | ⬜ | 2.8 |
-| 6.6 | 多AI任务分配 | ⬜ | 6.3-6.5 |
+| 5.1 | 规则引擎框架（Java） | ✅ | 1.6 |
+| 5.2 | Level A规则实现（Java） | ✅ | 5.1, 4.5 |
+| 5.3 | 审查报告UI | ✅ | 5.2 |
+| 5.4 | Level B AI审查（Java） | ✅ | 5.1, 2.9 |
+| 5.5 | Level C建议审查（Java） | ✅ | 5.4 |
+| 5.6 | 实时审查提醒 | ✅ | 5.2 |
+
+**阶段五完成说明：**
+
+**后端架构（Java）：**
+```
+java-backend/src/main/java/com/novelai/studio/
+├── entity/
+│   └── ReviewIssue.java                    # 审查问题实体
+├── mapper/
+│   └── ReviewIssueMapper.java              # 审查问题Mapper
+├── controller/
+│   └── ReviewController.java               # 审查API控制器
+└── service/review/
+    ├── ReviewRule.java                     # 规则接口
+    ├── ReviewContext.java                  # 规则上下文
+    ├── ReviewLevel.java                    # 级别常量(error/warning/suggestion/info)
+    ├── ReviewType.java                     # 类型常量(15种问题类型)
+    ├── ReviewReport.java                   # 审查报告
+    ├── RuleEngineService.java              # 规则引擎服务
+    ├── RealtimeReviewService.java          # 实时审查服务
+    └── rules/
+        ├── AbstractReviewRule.java         # 规则基类
+        ├── CharacterDeathConflictRule.java # Level A: 角色生死冲突
+        ├── NameInconsistencyRule.java      # Level A: 称呼不一致
+        ├── SettingConflictRule.java        # Level B: 设定冲突(AI辅助)
+        ├── PersonalityDeviationRule.java   # Level B: 性格偏离(AI辅助)
+        └── ForeshadowForgottenRule.java    # Level C: 伏笔遗忘检测
+```
+
+**前端架构（Vue）：**
+```
+src/
+├── types/review.ts                         # 审查类型定义
+├── services/api/reviewApi.ts               # 审查API服务
+├── stores/reviewStore.ts                   # 审查状态管理
+├── composables/useRealtimeReview.ts        # 实时审查Hook
+├── views/ReviewView.vue                    # 审查报告页面
+└── components/review/
+    ├── ReviewPanel.vue                     # 审查面板组件
+    ├── ReviewIssueItem.vue                 # 问题项组件
+    └── ReviewNotification.vue              # 审查通知组件
+```
+
+**数据库：**
+- `database/migrations/005_review_system.sql` - 审查系统表结构
+- 表：`review_issues`（审查问题）、`review_history`（审查历史）
+
+**API端点：**
+- `GET /api/review/rules` - 获取所有规则
+- `POST /api/review/chapter/{bookId}/{chapterId}` - 审查单章
+- `POST /api/review/book/{bookId}` - 审查全书
+- `POST /api/review/quick/{bookId}/{chapterId}` - 快速审查(仅错误)
+- `GET /api/review/issues/book/{bookId}` - 获取书籍问题
+- `GET /api/review/stats/{bookId}` - 获取统计信息
+- `PUT /api/review/issues/{issueId}/status` - 更新问题状态
+- `DELETE /api/review/issues/{issueId}` - 删除问题
+
+**审查级别说明：**
+- **Level A (error)**: 确定性错误 - 角色生死冲突、称呼不一致、时间线冲突、实力等级冲突、地理位置冲突
+- **Level B (warning)**: AI高可信警告 - 性格偏离、能力超限、设定冲突、物品异常
+- **Level C (suggestion)**: 建议 - 因果关系存疑、节奏问题、情感突兀、伏笔遗忘
+- **Level D (info)**: 提示 - 视角漂移、文风不一致
+
+### 阶段六：AI对话与多模型（P3）✅ 已完成
+
+| ID | 任务 | 状态 | 依赖 |
+|----|------|------|------|
+| 6.1 | AI对话界面 | ✅ | 2.9 |
+| 6.2 | 对话上下文注入 | ✅ | 6.1, 4.9 |
+| 6.3 | Claude适配器（Java） | ✅ | 2.8 |
+| 6.4 | 国产模型适配器（Java） | ✅ | 2.8 |
+| 6.5 | Ollama适配器（Java） | ✅ | 2.8 |
+| 6.6 | 多AI任务分配 | ✅ | 6.3-6.5 |
+
+**完成日期**：2026-01-17
+**完成内容**：
+- Claude适配器（支持Claude 3.5 Sonnet等模型）
+- Ollama本地模型适配器（支持Llama、Mistral、Qwen等）
+- AI对话系统（会话管理、消息历史、流式响应）
+- 对话上下文注入（自动注入书籍/角色/设定信息）
+- 多AI任务分配服务（按任务类型分配不同AI）
+- 数据库迁移脚本（chat_sessions、chat_messages、ai_task_assignments表）
+
+**后端架构（Java）：**
+```
+java-backend/src/main/java/com/novelai/studio/
+├── entity/
+│   ├── ChatSession.java                    # 对话会话实体
+│   ├── ChatMessage.java                    # 对话消息实体
+│   └── AiTaskAssignment.java               # AI任务分配实体
+├── mapper/
+│   ├── ChatSessionMapper.java              # 会话Mapper
+│   ├── ChatMessageMapper.java              # 消息Mapper
+│   └── AiTaskAssignmentMapper.java         # 任务分配Mapper
+├── controller/
+│   └── AiChatController.java               # 对话API控制器
+├── service/
+│   ├── ChatHistoryService.java             # 对话历史服务
+│   └── AiTaskDispatchService.java          # 任务分配服务
+└── service/ai/adapter/
+    ├── ClaudeAdapter.java                  # Claude适配器
+    └── OllamaAdapter.java                  # Ollama适配器
+```
+
+**前端架构（Vue）：**
+```
+src/
+├── types/chat.ts                           # 对话类型定义
+├── services/api/chatApi.ts                 # 对话API服务
+├── stores/chatStore.ts                     # 对话状态管理
+└── components/ai/
+    └── AiChat.vue                          # AI对话组件
+```
+
+**数据库：**
+- `database/migrations/006_chat_system.sql` - 对话系统表结构
+- 表：`chat_sessions`（对话会话）、`chat_messages`（对话消息）、`ai_task_assignments`（任务分配）
+
+**API端点：**
+- `POST /api/chat/sessions` - 创建会话
+- `GET /api/chat/sessions` - 获取会话列表
+- `GET /api/chat/sessions/{id}` - 获取会话详情
+- `PUT /api/chat/sessions/{id}/title` - 更新会话标题
+- `POST /api/chat/sessions/{id}/toggle-pin` - 切换置顶
+- `DELETE /api/chat/sessions/{id}` - 删除会话
+- `GET /api/chat/sessions/{id}/messages` - 获取消息
+- `DELETE /api/chat/sessions/{id}/messages` - 清空消息
+- `POST /api/chat/sessions/{id}/send` - 发送消息（非流式）
+- `POST /api/chat/sessions/{id}/stream` - 发送消息（流式SSE）
 
 ### 阶段七：导出与发布（P3）
 
@@ -1916,6 +2055,13 @@ git commit -m "[1.2] 字数统计工具
 | 1.1 | 2026-01-14 | 添加编辑器UI重构相关组件文档 |
 | 1.2 | 2026-01-15 | AI辅助创建书籍向导、封面上传功能 |
 | 1.3 | 2026-01-15 | 细纲系统实现（五步生成法） |
+| 1.4 | 2026-01-15 | AI生成进度UI优化（步骤列表显示） |
+| 1.5 | 2026-01-16 | 阶段三完成：角色管理、设定百科、知识库、AI上下文增强 |
+| 1.6 | 2026-01-16 | 性能优化：AI上下文缓存机制、知识库检索相关度阈值过滤 |
+| 1.7 | 2026-01-16 | 阶段四完成：记忆系统（L1-L3记忆层级、伏笔系统、AI上下文整合） |
+| 1.8 | 2026-01-16 | 阶段五完成：逻辑审查系统（规则引擎、Level A-D审查、实时审查） |
+| 1.9 | 2026-01-17 | 阶段六完成：AI对话系统、Claude/Ollama适配器、多AI任务分配 |
+| 2.0 | 2026-01-18 | 大纲系统重构：三层大纲架构、分卷plotLine、记忆提取系统 |
 
 ---
 
@@ -2077,3 +2223,705 @@ volumes?: VolumeOutline[]
 6. 满意后点击"确认细纲"
 7. 点击"根据细纲生成章节"生成完整章节内容
 8. 章节生成后自动保存并切换到编辑器
+
+#### 4. 章节生成字数控制优化
+
+**问题背景**：AI生成章节时经常忽略字数限制，导致生成内容远超目标字数（如目标2000-4000字，实际生成7000+字）。
+
+**解决方案**：采用分段生成策略，将章节拆分为4个部分分别生成，每部分严格控制token数量。
+
+**实现细节**：
+
+`src/components/editor/EditorSidebar.vue` 重构 `generateChapterContent` 函数：
+
+```typescript
+// 分段生成章节内容：每个部分单独生成，严格控制字数
+async function generateChapterContent() {
+  // 分配每个部分的字数（4个部分）
+  const partDistribution = [
+    { part: '开篇', ratio: 0.2 },   // 20% - 场景铺设
+    { part: '发展', ratio: 0.3 },   // 30% - 情节推进
+    { part: '高潮', ratio: 0.3 },   // 30% - 冲突高潮
+    { part: '收尾', ratio: 0.2 }    // 20% - 自然结束
+  ]
+
+  // 逐段生成，每段严格限制token
+  for (const section of sections) {
+    const maxTokens = Math.ceil(section.targetWords * 0.75)
+    // 生成当前段落...
+  }
+
+  // 合并所有部分
+  const finalContent = generatedParts.join('\n\n')
+}
+```
+
+**核心改进**：
+1. **分段生成**：将章节拆分为开篇(20%)、发展(30%)、高潮(30%)、收尾(20%)四个部分
+2. **严格token限制**：每段使用 `targetWords * 0.75` 作为maxTokens上限
+3. **上下文传递**：后续段落接收前面已生成内容，保证连贯性
+4. **章节完整性**：最后一段明确要求自然收尾，不会戛然而止
+
+**默认字数配置**：
+
+`src/views/EditorView.vue` 修改默认值：
+```typescript
+const generateConfig = reactive({
+  chapterWordMin: 2000,
+  chapterWordMax: 3000,  // 从4000改为3000
+  continueWordMin: 300,
+  continueWordMax: 800,
+  temperature: 0.7
+})
+```
+
+#### 5. 右侧生成面板修复
+
+**问题**：右侧"生成"标签页点击无反应，配置无法修改。
+
+**原因**：模板中使用了未定义的 `generateConfig` 对象，应该使用计算属性。
+
+**修复**：
+
+`src/components/editor/EditorRightPanel.vue` 修改模板绑定：
+```vue
+<!-- 修复前 -->
+<el-input-number v-model="generateConfig.chapterWordMin" ... />
+
+<!-- 修复后 -->
+<el-input-number v-model="chapterWordMinValue" ... />
+```
+
+涉及字段：
+- `generateConfig.chapterWordMin` → `chapterWordMinValue`
+- `generateConfig.chapterWordMax` → `chapterWordMaxValue`
+- `generateConfig.continueWordMin` → `continueWordMinValue`
+- `generateConfig.continueWordMax` → `continueWordMaxValue`
+- `generateConfig.temperature` → `temperatureValue`
+
+#### 6. 后端章节字数自动计算
+
+**问题**：创建章节时字数显示为0，未根据内容自动计算。
+
+**修复位置**：`java-backend/src/main/java/com/novelai/studio/service/ChapterService.java`
+
+**createChapter 方法修改**：
+```java
+// 自动计算字数（如果有内容）
+if (chapter.getContent() != null && !chapter.getContent().isEmpty()) {
+    // 去除空白字符后计算中文字数
+    String contentWithoutSpaces = chapter.getContent().replaceAll("\\s+", "");
+    chapter.setWordCount(contentWithoutSpaces.length());
+} else if (chapter.getWordCount() == null) {
+    chapter.setWordCount(0);
+}
+```
+
+**updateChapter 方法修改**：
+```java
+// 如果内容有变化，自动重新计算字数
+if (chapter.getContent() != null && !chapter.getContent().isEmpty()) {
+    String contentWithoutSpaces = chapter.getContent().replaceAll("\\s+", "");
+    chapter.setWordCount(contentWithoutSpaces.length());
+}
+```
+
+**注意**：修改后端代码后需要重启Java服务才能生效。
+
+---
+
+### 2026-01-16 阶段三完成
+
+#### 7. 角色管理系统
+
+**功能概述**：完整的角色CRUD管理，支持角色档案、状态追踪、关系图谱
+
+**后端实现**：
+- 实体类：`Character.java`
+- Mapper：`CharacterMapper.java`
+- 服务层：`CharacterService.java`
+- 控制器：`CharacterController.java`
+- API接口：
+  - `GET /api/characters/book/{bookId}` - 获取书籍角色列表
+  - `GET /api/characters/{id}` - 获取角色详情
+  - `POST /api/characters` - 创建角色
+  - `PUT /api/characters/{id}` - 更新角色
+  - `DELETE /api/characters/{id}` - 删除角色
+
+**前端实现**：
+- API服务：`src/services/api/characterApi.ts`
+- 类型定义：`src/types/character.ts`
+- 角色管理组件集成到编辑器右侧面板
+
+#### 8. 角色关系图谱
+
+**功能概述**：可视化角色之间的关系网络
+
+**实现方式**：使用 ECharts 图形库实现力导向图
+- 节点：角色（不同类型不同颜色）
+- 边：角色关系（带标签）
+- 支持拖拽、缩放、高亮
+
+#### 9. 设定百科系统
+
+**功能概述**：世界观设定管理，支持分类（力量体系、物品、地点、组织等）
+
+**后端实现**：
+- 实体类：`WorldSetting.java`
+- Mapper：`WorldSettingMapper.java`
+- 服务层：`WorldSettingService.java`
+- 控制器：`WorldSettingController.java`
+- API接口：
+  - `GET /api/world-settings/book/{bookId}` - 获取书籍设定列表
+  - `GET /api/world-settings/book/{bookId}/category/{category}` - 按分类获取
+  - `POST /api/world-settings` - 创建设定
+  - `PUT /api/world-settings/{id}` - 更新设定
+  - `DELETE /api/world-settings/{id}` - 删除设定
+
+**前端实现**：
+- API服务：`src/services/api/worldSettingApi.ts`
+- 类型定义：`src/types/worldSetting.ts`
+- 设定百科页面：`src/views/SettingsView.vue`
+
+#### 10. 知识库系统
+
+**功能概述**：文件上传、向量化存储、语义检索
+
+**后端实现**：
+
+知识库文件管理：
+- 实体类：`KnowledgeFile.java`
+- 控制器：`KnowledgeController.java`
+- 服务层：`KnowledgeFileService.java`
+- 支持文件类型：txt、pdf、docx、epub、md
+
+向量数据库集成：
+- 配置类：`VectorDBConfig.java`
+- 服务层：`VectorStoreService.java`
+- 使用内存向量存储（可扩展为Milvus/Qdrant）
+
+文件向量化：
+- 服务层：`DocumentVectorService.java`
+- 文档分块、向量化、存储
+
+知识检索：
+- 服务层：`KnowledgeSearchService.java`
+- 语义检索、相关度排序、结果格式化
+
+**前端实现**：
+- API服务：`src/services/api/knowledgeApi.ts`
+- 类型定义：`src/types/knowledge.ts`
+- 知识库页面：`src/views/KnowledgeView.vue`
+- 文件上传组件：`src/components/knowledge/FileUpload.vue`
+
+#### 11. AI上下文增强
+
+**功能概述**：AI生成时自动注入角色、设定和知识库信息
+
+**后端实现**：
+- 服务层：`AIContextEnhancer.java`
+- 控制器：`AIContextController.java`
+- API接口：
+  - `GET /api/ai/context/enhanced/{bookId}` - 获取增强上下文
+  - `GET /api/ai/context/characters/{bookId}` - 获取角色上下文
+  - `GET /api/ai/context/settings/{bookId}` - 获取设定上下文
+  - `POST /api/ai/context/chapter/{bookId}` - 获取章节生成上下文
+
+**上下文构建逻辑**：
+1. 角色上下文：按类型分组（主角、配角、反派），包含档案和状态信息
+2. 设定上下文：按分类分组（力量体系、物品、地点等）
+3. 知识库上下文：基于查询的语义检索结果
+4. 章节上下文：综合以上 + 前文内容摘要
+
+**前端实现**：
+- API方法：`src/services/api/aiApi.ts` 新增：
+  - `getEnhancedContext()` - 获取增强上下文
+  - `getCharacterContext()` - 获取角色上下文
+  - `getSettingContext()` - 获取设定上下文
+  - `getChapterContext()` - 获取章节生成上下文
+
+---
+
+### 2026-01-16 性能优化
+
+#### 12. AI上下文缓存机制
+
+**功能概述**：为AI上下文增强服务添加缓存机制，避免重复构建相同的上下文
+
+**实现位置**：`java-backend/src/main/java/com/novelai/studio/service/ai/AIContextEnhancer.java`
+
+**核心实现**：
+```java
+// 缓存结构
+private final Map<String, CacheEntry> contextCache = new ConcurrentHashMap<>();
+
+// 缓存条目（包含内容和创建时间）
+private static class CacheEntry {
+    final String content;
+    final Instant createdAt;
+    boolean isExpired(int ttlSeconds) {...}
+}
+
+// 带缓存的上下文构建
+public String buildCharacterContextCached(String bookId) {...}
+public String buildSettingContextCached(String bookId) {...}
+
+// 缓存管理
+public void invalidateCache(String bookId) {...}
+public void clearAllCache() {...}
+```
+
+**配置项**（application.yml）：
+```yaml
+ai:
+  context:
+    cache:
+      ttl: 300  # 缓存过期时间（秒），默认5分钟
+```
+
+**特性**：
+- 线程安全：使用 `ConcurrentHashMap`
+- 自动过期：TTL机制，默认5分钟
+- 容量限制：最大100条缓存
+- 手动失效：支持按书籍ID失效缓存
+
+**使用场景**：
+- 角色和设定上下文会被缓存（数据变化频率低）
+- 知识库检索结果不缓存（每次查询不同）
+
+#### 13. 知识库检索相关度阈值过滤
+
+**功能概述**：为知识库检索添加相关度阈值过滤，过滤掉低相关度的结果
+
+**实现位置**：
+- `java-backend/src/main/java/com/novelai/studio/service/knowledge/KnowledgeSearchService.java`
+- `java-backend/src/main/java/com/novelai/studio/controller/KnowledgeSearchController.java`
+
+**核心实现**：
+```java
+// 可配置的相关度阈值
+@Value("${knowledge.search.relevance-threshold:0.1}")
+private float relevanceThreshold;
+
+// 支持自定义阈值的搜索
+public List<SearchResult> search(String bookId, String query, int topK, float minRelevance) {
+    // ...
+    if (score >= minRelevance) {
+        results.add(...);
+    }
+}
+
+// 阈值管理
+public void setRelevanceThreshold(float threshold) {...}
+public float getRelevanceThreshold() {...}
+```
+
+**配置项**（application.yml）：
+```yaml
+knowledge:
+  search:
+    relevance-threshold: 0.1  # 相关度阈值，0-1之间
+```
+
+**新增API**：
+- `GET /api/knowledge/search/threshold` - 获取当前阈值
+- `PUT /api/knowledge/search/threshold` - 设置阈值（body: `{"threshold": 0.15}`）
+- 搜索API新增可选参数：`minRelevance`
+
+**使用示例**：
+```
+# 使用默认阈值搜索
+GET /api/knowledge/search/book/{bookId}?query=关键词&topK=5
+
+# 指定自定义阈值
+GET /api/knowledge/search/book/{bookId}?query=关键词&topK=5&minRelevance=0.2
+
+# 动态调整全局阈值
+PUT /api/knowledge/search/threshold
+{"threshold": 0.15}
+```
+
+---
+
+**文档维护**：每完成一个阶段后更新任务状态
+
+### 2026-01-16 阶段四完成：记忆系统
+
+#### 14. 四层记忆架构
+
+**功能概述**：实现完整的记忆系统，支持从即时记忆到长期记忆的多层级信息管理
+
+**记忆层级设计**：
+- **L0 永久记忆**：角色档案、世界观设定（带缓存，TTL 5分钟）
+- **L1 即时记忆**：当前章节内容（最近3000字）
+- **L2 短期记忆**：章节摘要（最近10章的AI生成摘要）
+- **L3 长期记忆**：事件时间线 + 角色状态追踪
+
+**数据库迁移**：`database/migrations/004_memory_system.sql`
+- `chapter_summaries` - 章节摘要表
+- `story_events` - 故事事件表
+- `character_state_changes` - 角色状态变更表
+- `foreshadows` - 伏笔表
+
+#### 15. 章节摘要系统（L2）
+
+**后端实现**：
+- 实体类：`ChapterSummary.java`
+- Mapper：`ChapterSummaryMapper.java`
+- 服务层：`ChapterSummaryService.java`
+  - `generateSummary(chapterId)` - AI生成章节摘要
+  - `buildPreviousContext(bookId, chapterOrder, maxChapters)` - 构建前文摘要上下文
+- 控制器：`ChapterSummaryController.java`
+- API接口：
+  - `GET /api/summaries/chapter/{chapterId}` - 获取章节摘要
+  - `GET /api/summaries/book/{bookId}` - 获取书籍所有摘要
+  - `POST /api/summaries/generate/{chapterId}` - AI生成摘要
+  - `GET /api/summaries/context/{bookId}/{chapterOrder}` - 构建上下文
+
+**前端实现**：
+- API服务：`src/services/api/memoryApi.ts`
+- UI组件：`src/components/editor/panels/SummaryPanel.vue`
+- 功能：查看摘要、AI生成、手动编辑
+
+#### 16. 事件时间线系统（L3）
+
+**后端实现**：
+- 实体类：`StoryEvent.java`
+- Mapper：`StoryEventMapper.java`
+- 服务层：`StoryEventService.java`
+  - `extractEventsFromChapter(chapterId)` - AI从章节提取事件
+  - `buildTimelineContext(bookId, chapterOrder)` - 构建时间线上下文
+- 控制器：`StoryEventController.java`
+- API接口：
+  - `GET /api/events/book/{bookId}` - 获取书籍事件
+  - `POST /api/events/extract/{chapterId}` - AI提取章节事件
+  - `GET /api/events/context/{bookId}/{chapterOrder}` - 构建上下文
+
+**前端实现**：
+- UI组件：`src/components/editor/panels/TimelinePanel.vue`
+- 功能：事件时间线显示、AI提取、手动添加、筛选（重大/次要/背景）
+
+#### 17. 角色状态追踪（L3）
+
+**后端实现**：
+- 实体类：`CharacterStateChange.java`
+- Mapper：`CharacterStateChangeMapper.java`
+- 服务层：`CharacterStateChangeService.java`
+  - `recordStateChange()` - 记录状态变更
+  - `buildCharacterStateContext(bookId, chapterOrder)` - 构建角色状态上下文
+  - `getCharacterStateAtChapter(characterId, chapterOrder)` - 获取角色在指定章节的状态
+- 控制器：`CharacterStateController.java`
+- API接口：
+  - `GET /api/character-states/character/{characterId}` - 获取角色状态变更历史
+  - `POST /api/character-states` - 记录状态变更
+  - `GET /api/character-states/character/{characterId}/at-chapter/{chapterOrder}` - 获取指定章节状态
+
+#### 18. 伏笔管理系统
+
+**后端实现**：
+- 实体类：`Foreshadow.java`
+- Mapper：`ForeshadowMapper.java`
+- 服务层：`ForeshadowService.java`
+  - `buildForeshadowReminder(bookId, chapterOrder)` - 构建伏笔提醒上下文
+  - `getForeshadowReminders(bookId, currentChapter, minChaptersAgo)` - 获取需要提醒的伏笔
+- 控制器：`ForeshadowController.java`
+- API接口：
+  - `GET /api/foreshadows/book/{bookId}` - 获取书籍伏笔
+  - `GET /api/foreshadows/book/{bookId}/unresolved` - 获取未回收伏笔
+  - `POST /api/foreshadows` - 创建伏笔
+  - `PUT /api/foreshadows/{id}/status` - 更新伏笔状态
+  - `POST /api/foreshadows/{id}/resolve` - 标记为已回收
+  - `GET /api/foreshadows/context/{bookId}/{chapterOrder}` - 构建伏笔上下文
+
+**前端实现**：
+- 类型定义：`src/types/memory.ts`
+  - `ForeshadowType`: prophecy | item | character | event | hint
+  - `ForeshadowImportance`: major | minor | subtle
+  - `ForeshadowStatus`: planted | partial | resolved | abandoned
+- UI组件：`src/components/editor/panels/ForeshadowPanel.vue`
+- 功能：伏笔列表、统计、筛选、创建、状态管理、详情查看
+
+#### 19. 记忆系统整合
+
+**AI上下文增强服务**：`AIContextEnhancer.java`
+
+核心方法：
+```java
+// 构建完整记忆上下文（包含所有层级）
+public String buildFullMemoryContext(String bookId, int currentChapterOrder, String query) {
+    // L0: 角色和设定信息（带缓存）
+    // L2: 前文章节摘要
+    // L3: 重要事件时间线
+    // L3: 角色当前状态
+    // 伏笔提醒
+    // 知识库检索
+}
+
+// 构建章节生成上下文
+public String buildChapterGenerationContext(String bookId, int currentChapterOrder,
+                                             String chapterTitle, String previousContent) {
+    // 记忆系统上下文 + L1即时记忆
+}
+
+// 构建续写上下文
+public String buildContinueContext(String bookId, int chapterOrder, String currentContent) {
+    // 精简角色上下文 + 伏笔提醒 + 当前内容
+}
+```
+
+**前端Store**：`src/stores/memoryStore.ts`
+- 统一管理摘要、事件、伏笔、状态变更数据
+- 提供计算属性：`unresolvedForeshadows`, `majorEvents`, `foreshadowStats`
+- 支持一键加载书籍全部记忆数据
+
+#### 20. 编辑器右侧面板集成
+
+**新增"记忆"标签页**，包含三个子面板：
+- 伏笔面板：伏笔统计、列表、创建、状态管理
+- 事件面板：时间线展示、AI提取、筛选
+- 摘要面板：章节摘要查看、AI生成
+
+**使用流程**：
+1. 打开书籍后自动加载记忆数据
+2. AI生成时自动注入相关记忆上下文
+3. 伏笔系统会在写作时提醒未回收的重要伏笔
+4. 事件和摘要支持AI自动提取，减少手动维护工作
+
+---
+
+### 2026-01-16 阶段五完成：逻辑审查系统
+
+#### 21. 规则引擎框架
+
+**功能概述**：可扩展的审查规则引擎，支持多级别审查规则
+
+**后端架构**：
+```
+java-backend/src/main/java/com/novelai/studio/service/review/
+├── ReviewRule.java                     # 规则接口
+├── ReviewContext.java                  # 规则上下文
+├── ReviewLevel.java                    # 级别常量(error/warning/suggestion/info)
+├── ReviewType.java                     # 类型常量(15种问题类型)
+├── ReviewReport.java                   # 审查报告
+├── RuleEngineService.java              # 规则引擎服务
+├── RealtimeReviewService.java          # 实时审查服务
+└── rules/
+    ├── AbstractReviewRule.java         # 规则基类
+    ├── CharacterDeathConflictRule.java # Level A: 角色生死冲突
+    ├── NameInconsistencyRule.java      # Level A: 称呼不一致
+    ├── TimelineConflictRule.java       # Level A: 时间线冲突
+    ├── LocationConflictRule.java       # Level A: 地理位置冲突
+    ├── SettingConflictRule.java        # Level B: 设定冲突(AI辅助)
+    ├── PersonalityDeviationRule.java   # Level B: 性格偏离(AI辅助)
+    └── ForeshadowForgottenRule.java    # Level C: 伏笔遗忘检测
+```
+
+**审查级别**：
+- **Level A (error)**: 确定性错误 - 角色生死冲突、称呼不一致、时间线冲突、实力等级冲突、地理位置冲突
+- **Level B (warning)**: AI高可信警告 - 性格偏离、能力超限、设定冲突、物品异常
+- **Level C (suggestion)**: 建议 - 因果关系存疑、节奏问题、情感突兀、伏笔遗忘
+- **Level D (info)**: 提示 - 视角漂移、文风不一致
+
+**API端点**：
+- `GET /api/review/rules` - 获取所有规则
+- `POST /api/review/chapter/{bookId}/{chapterId}` - 审查单章
+- `POST /api/review/book/{bookId}` - 审查全书
+- `POST /api/review/quick/{bookId}/{chapterId}` - 快速审查(仅错误)
+- `GET /api/review/issues/book/{bookId}` - 获取书籍问题
+- `GET /api/review/stats/{bookId}` - 获取统计信息
+- `PUT /api/review/issues/{issueId}/status` - 更新问题状态
+
+**前端架构**：
+```
+src/
+├── types/review.ts                     # 审查类型定义
+├── services/api/reviewApi.ts           # 审查API服务
+├── stores/reviewStore.ts               # 审查状态管理
+├── composables/useRealtimeReview.ts    # 实时审查Hook
+├── views/ReviewView.vue                # 审查报告页面
+└── components/review/
+    ├── ReviewPanel.vue                 # 审查面板组件
+    ├── ReviewIssueItem.vue             # 问题项组件
+    └── ReviewNotification.vue          # 审查通知组件
+```
+
+---
+
+### 2026-01-17 阶段六完成：AI对话与多模型
+
+#### 22. AI对话系统
+
+**功能概述**：完整的AI对话功能，支持会话管理、消息历史、流式响应
+
+**数据库**：`database/migrations/006_chat_system.sql`
+- `chat_sessions` - 对话会话表
+- `chat_messages` - 对话消息表
+- `ai_task_assignments` - AI任务分配配置表
+
+**后端架构**：
+```
+java-backend/src/main/java/com/novelai/studio/
+├── entity/
+│   ├── ChatSession.java                # 对话会话实体
+│   ├── ChatMessageEntity.java          # 对话消息实体
+│   └── AiTaskAssignment.java           # AI任务分配实体
+├── mapper/
+│   ├── ChatSessionMapper.java          # 会话Mapper
+│   ├── ChatMessageMapper.java          # 消息Mapper
+│   └── AiTaskAssignmentMapper.java     # 任务分配Mapper
+├── controller/
+│   └── AiChatController.java           # 对话API控制器
+└── service/
+    ├── ChatHistoryService.java         # 对话历史服务
+    └── AiTaskDispatchService.java      # 任务分配服务
+```
+
+**API端点**：
+- `POST /api/chat/sessions` - 创建会话
+- `GET /api/chat/sessions` - 获取会话列表
+- `GET /api/chat/sessions/{id}` - 获取会话详情
+- `PUT /api/chat/sessions/{id}/title` - 更新会话标题
+- `POST /api/chat/sessions/{id}/toggle-pin` - 切换置顶
+- `DELETE /api/chat/sessions/{id}` - 删除会话
+- `GET /api/chat/sessions/{id}/messages` - 获取消息
+- `POST /api/chat/sessions/{id}/send` - 发送消息（非流式）
+- `POST /api/chat/sessions/{id}/stream` - 发送消息（流式SSE）
+
+#### 23. 多AI适配器
+
+**Claude适配器**：`ClaudeAdapter.java`
+- 支持 Claude 3.5 Sonnet、Claude 3 Opus 等模型
+- 流式响应支持
+
+**Ollama适配器**：`OllamaAdapter.java`
+- 支持本地模型：Llama、Mistral、Qwen 等
+- 自动模型发现
+
+**Gemini适配器**：通过 custom 提供商和 OpenAI 兼容 API 接入
+- 推荐使用 gemini-2.0-flash 模型
+- 支持 Gemini 3 Pro 等推理模型
+
+#### 24. 多AI任务分配
+
+**功能概述**：根据任务类型自动分配最合适的AI模型
+
+**任务类型**：
+- `generate` - 内容生成
+- `review` - 逻辑审查
+- `summary` - 摘要生成
+- `chat` - 对话
+- `outline` - 大纲生成
+
+**配置表**：`ai_task_assignments`
+- 支持按任务类型配置不同AI
+- 支持优先级排序
+- 支持启用/禁用
+
+---
+
+### 2026-01-17~18 大纲系统重构
+
+#### 25. 三层大纲架构
+
+**功能概述**：重新设计大纲系统，支持总大纲、分卷大纲、章节细纲三层结构
+
+**总大纲**（Book.outline）：
+- 全书整体规划
+- 核心主题和走向
+- 主要矛盾和解决路径
+
+**分卷大纲**（Book.volumes）：
+```typescript
+interface VolumeOutline {
+  id: string
+  title: string           // 卷名，如"第一卷 起源"
+  summary: string         // 本卷概要
+  plotLine: string        // 核心剧情线（详细版）
+  chapterCount: number    // 预计章节数
+  startChapter: number    // 起始章节号
+  endChapter: number      // 结束章节号
+  wordCountTarget: number // 目标字数
+  chapters: {             // 章节列表
+    title: string
+    brief: string         // 章节简介
+  }[]
+}
+```
+
+**章节细纲**（Chapter.detailOutline）：
+```typescript
+interface ChapterDetailOutline {
+  chapterId: string
+  steps: DetailOutlineStep[]  // 五步细纲
+  status: 'draft' | 'confirmed' | 'generated'
+  generatedAt?: string
+  confirmedAt?: string
+}
+
+// 五步细纲结构
+type DetailOutlineStepType = 'scene' | 'characters' | 'plot' | 'climax' | 'ending'
+
+const DETAIL_OUTLINE_STEPS = [
+  { type: 'scene', label: '场景铺设', description: '设定本章的场景环境、时间地点' },
+  { type: 'characters', label: '角色出场', description: '本章出场的角色及其状态' },
+  { type: 'plot', label: '剧情展开', description: '本章的核心剧情发展' },
+  { type: 'climax', label: '高潮推进', description: '情节的高潮部分' },
+  { type: 'ending', label: '本章收尾', description: '本章的结尾和留白' },
+]
+```
+
+#### 26. AI辅助创建书籍向导升级
+
+**字数规划**：
+- 支持选择目标字数区间（30-36万到300万+）
+- 自动计算分卷数量和章节数
+- 每卷约100-120章，每章约3000字
+
+**生成流程**：
+1. 步骤1：输入书名、类型、风格、主角、世界观、核心冲突
+2. 步骤2：AI生成总大纲 + 分卷大纲（含 plotLine 剧情线）+ 角色设定
+3. 步骤3：预览确认后创建书籍
+
+**分卷大纲显示优化**：
+- 默认只显示剧情线（plotLine）
+- 支持展开/折叠查看详细章节列表
+
+#### 27. 细纲生成与章节生成
+
+**细纲生成**：
+- 基于总大纲 + 分卷大纲（优先使用 plotLine）+ 前文内容
+- AI自动生成五步细纲
+- 支持手动修改和确认
+
+**章节生成**（四段式）：
+```typescript
+const partDistribution = [
+  { part: '开篇', ratio: 0.2 },   // 20% - 场景铺设
+  { part: '发展', ratio: 0.3 },   // 30% - 情节推进
+  { part: '高潮', ratio: 0.3 },   // 30% - 冲突高潮
+  { part: '收尾', ratio: 0.2 }    // 20% - 自然结束
+]
+```
+
+**推理模型适配**：
+- 针对 Gemini 3 Pro 等推理模型设置 32000 maxTokens 上限
+- 采用 1.5 倍膨胀系数动态调整字数控制
+- 对目标字数打折以控制实际输出长度
+
+#### 28. 记忆提取系统
+
+**功能概述**：AI自动从章节内容提取记忆信息
+
+**提取内容**：
+- L2 摘要：章节概要、关键事件、情感基调
+- L3 事件：故事时间线上的重要事件
+- 角色状态变化：位置、状态、情感、关系变化
+
+**API端点**：
+- `POST /api/memory/extract/{chapterId}` - 提取单章记忆
+- `POST /api/memory/extract/book/{bookId}` - 批量提取整书
+- `POST /api/memory/extract/{chapterId}/async` - 异步提取
+
+---
+
+**文档维护**：每完成一个阶段后更新任务状态

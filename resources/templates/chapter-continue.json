@@ -1,0 +1,60 @@
+{
+  "id": "chapter-continue",
+  "name": "章节续写",
+  "version": "1.0",
+  "description": "根据前文内容续写章节",
+  "variables": [
+    {
+      "name": "bookTitle",
+      "description": "书名",
+      "required": true
+    },
+    {
+      "name": "genre",
+      "description": "小说类型",
+      "required": true
+    },
+    {
+      "name": "style",
+      "description": "写作风格",
+      "required": true
+    },
+    {
+      "name": "chapterTitle",
+      "description": "章节标题",
+      "required": false
+    },
+    {
+      "name": "previousContent",
+      "description": "前文内容",
+      "required": true
+    },
+    {
+      "name": "characterContext",
+      "description": "角色上下文",
+      "required": false
+    },
+    {
+      "name": "settingContext",
+      "description": "设定上下文",
+      "required": false
+    },
+    {
+      "name": "foreshadowReminder",
+      "description": "伏笔提醒",
+      "required": false
+    },
+    {
+      "name": "targetWordCount",
+      "description": "目标字数",
+      "required": true,
+      "default": "500"
+    }
+  ],
+  "systemPrompt": "你是一位专业的小说创作助手，擅长续写{{genre}}类型的小说。你需要根据用户提供的前文内容，以{{style}}的风格继续创作。\n\n写作要求：\n1. 保持与前文一致的叙事风格和人称视角\n2. 情节发展要自然流畅，符合逻辑\n3. 人物言行要符合其性格设定\n4. 适当加入环境描写和心理描写\n5. 控制在{{targetWordCount}}字左右",
+  "userPromptTemplate": "## 小说信息\n- 书名：{{bookTitle}}\n- 类型：{{genre}}\n- 风格：{{style}}\n{{#if chapterTitle}}\n- 当前章节：{{chapterTitle}}\n{{/if}}\n\n{{#if characterContext}}\n## 角色信息\n{{characterContext}}\n{{/if}}\n\n{{#if settingContext}}\n## 世界观设定\n{{settingContext}}\n{{/if}}\n\n{{#if foreshadowReminder}}\n## 伏笔提醒\n{{foreshadowReminder}}\n{{/if}}\n\n## 前文内容\n{{previousContent}}\n\n---\n请续写约{{targetWordCount}}字的内容。",
+  "options": {
+    "temperature": 0.7,
+    "maxTokens": 2000
+  }
+}

@@ -4,6 +4,7 @@ import { useAiStore, useBookStore } from '@/stores'
 import { ElMessage } from 'element-plus'
 import type { BookGenre, BookStyle, NovelInitResult, GeneratedCharacter } from '@/types'
 import { BOOK_GENRE_MAP, BOOK_STYLE_MAP } from '@/types'
+import { generateVolumeOutline, type VolumeOutlineResult } from '@/services/api/aiApi'
 
 const emit = defineEmits<{
   close: []
@@ -17,14 +18,17 @@ const bookStore = useBookStore()
 const currentStep = ref(0)
 const steps = ['基本信息', 'AI 生成', '预览确认']
 
-// 字数区间选项
+// 字数区间选项（每卷100-120章，每章约3000字，即每卷30-36万字）
 const wordCountRanges = [
-  { value: '30-50', label: '30-50万字', min: 300000, max: 500000, volumes: 2 },
-  { value: '50-80', label: '50-80万字', min: 500000, max: 800000, volumes: 3 },
-  { value: '80-120', label: '80-120万字', min: 800000, max: 1200000, volumes: 4 },
-  { value: '120-200', label: '120-200万字', min: 1200000, max: 2000000, volumes: 5 },
-  { value: '200-300', label: '200-300万字', min: 2000000, max: 3000000, volumes: 7 },
-  { value: '300+', label: '300万字以上', min: 3000000, max: 5000000, volumes: 10 },
+  { value: '30-36', label: '30-36万字（1卷）', min: 300000, max: 360000, chapters: 110 },
+  { value: '60-72', label: '60-72万字（2卷）', min: 600000, max: 720000, chapters: 220 },
+  { value: '90-108', label: '90-108万字（3卷）', min: 900000, max: 1080000, chapters: 330 },
+  { value: '120-144', label: '120-144万字（4卷）', min: 1200000, max: 1440000, chapters: 440 },
+  { value: '150-180', label: '150-180万字（5卷）', min: 1500000, max: 1800000, chapters: 550 },
+  { value: '180-216', label: '180-216万字（6卷）', min: 1800000, max: 2160000, chapters: 660 },
+  { value: '210-252', label: '210-252万字（7卷）', min: 2100000, max: 2520000, chapters: 770 },
+  { value: '240-288', label: '240-288万字（8卷）', min: 2400000, max: 2880000, chapters: 880 },
+  { value: '300+', label: '300万字以上（10卷）', min: 3000000, max: 3600000, chapters: 1100 },
 ]
 
 // 表单数据
@@ -33,7 +37,7 @@ const formData = ref({
   author: '',
   genre: 'xuanhuan' as BookGenre,
   style: 'qingsong' as BookStyle,
-  wordCountRange: '50-80', // 默认50-80万字
+  wordCountRange: '90-108', // 默认90-108万字（3卷）
   protagonist: '',
   worldKeywords: '',
   coreConflict: ''
@@ -44,8 +48,12 @@ interface VolumeOutline {
   id: string
   title: string
   summary: string
+  plotLine: string         // 核心剧情线
   chapterCount: number
+  startChapter: number
+  endChapter: number
   wordCountTarget: number
+  chapters: { title: string; brief: string }[]
 }
 
 interface ExtendedNovelResult extends NovelInitResult {
@@ -150,14 +158,44 @@ async function generateNovelContent(): Promise<void> {
 
     const data = await result.json()
     if (data.success && data.data) {
-      // 生成模拟的分卷大纲（实际应该由 AI 返回）
-      const volumes = generateMockVolumes(wordRange.volumes, wordRange.min, wordRange.max)
+      const totalOutline = data.data.totalOutline || data.data.outline || ''
+
+      // 调用 AI 生成分卷大纲
+      ElMessage.info('正在生成分卷大纲...')
+      let volumes: VolumeOutline[] = []
+
+      try {
+        const volumeResults = await generateVolumeOutline({
+          bookTitle: formData.value.title,
+          totalOutline: totalOutline,
+          targetTotalWords: wordRange.max,
+          genre: BOOK_GENRE_MAP[formData.value.genre] || formData.value.genre,
+          style: BOOK_STYLE_MAP[formData.value.style] || formData.value.style
+        })
+
+        // 转换为内部格式
+        volumes = volumeResults.map(v => ({
+          id: v.id,
+          title: v.title,
+          summary: v.summary,
+          plotLine: v.plotLine || '',
+          chapterCount: v.chapterCount || v.chapters.length || Math.floor(v.wordTarget / 3000),
+          startChapter: v.startChapter,
+          endChapter: v.endChapter,
+          wordCountTarget: v.wordTarget,
+          chapters: v.chapters || []
+        }))
+      } catch (volumeError) {
+        console.error('生成分卷大纲失败，使用模拟数据:', volumeError)
+        // 生成分卷失败时使用模拟数据
+        volumes = generateMockVolumes(wordRange.chapters, wordRange.min, wordRange.max)
+      }
 
       generatedContent.value = {
         description: data.data.description || '',
         outline: data.data.outline || '',
-        totalOutline: data.data.totalOutline || data.data.outline || '',
-        volumes: data.data.volumes || volumes,
+        totalOutline: totalOutline,
+        volumes: volumes,
         characters: data.data.characters || []
       }
       ElMessage.success('AI 生成完成')
@@ -171,21 +209,63 @@ async function generateNovelContent(): Promise<void> {
   }
 }
 
-// 生成模拟分卷数据（实际应由 AI 生成）
-function generateMockVolumes(volumeCount: number, minWords: number, maxWords: number): VolumeOutline[] {
-  const avgWords = Math.floor((minWords + maxWords) / 2 / volumeCount)
+// 生成模拟分卷数据（章节数有差异化）
+function generateMockVolumes(totalChapters: number, minWords: number, maxWords: number): VolumeOutline[] {
+  const avgChaptersPerVolume = 100
+  const volumeCount = Math.max(1, Math.ceil(totalChapters / avgChaptersPerVolume))
+
   const volumeNames = [
     '起源', '觉醒', '试炼', '崛起', '风云',
     '争霸', '巅峰', '沉浮', '归来', '永恒'
   ]
 
-  return Array.from({ length: volumeCount }, (_, i) => ({
-    id: `vol_${i + 1}`,
-    title: `第${i + 1}卷 ${volumeNames[i] || '未命名'}`,
-    summary: `第${i + 1}卷的主要剧情概要...`,
-    chapterCount: Math.floor(avgWords / 3000), // 假设每章3000字
-    wordCountTarget: avgWords
-  }))
+  // 生成差异化的章节分配
+  const distribution = generateVariedChapterDistribution(totalChapters, volumeCount)
+
+  let currentChapter = 1
+  return distribution.map((chapterCount, i) => {
+    const startChapter = currentChapter
+    const endChapter = currentChapter + chapterCount - 1
+    currentChapter = endChapter + 1
+
+    return {
+      id: `vol_${i + 1}`,
+      title: `第${i + 1}卷 ${volumeNames[i] || '未命名'}`,
+      summary: `第${i + 1}卷的主要剧情概要，讲述主角在该阶段的成长和挑战...`,
+      plotLine: `该卷核心：${volumeNames[i] || '发展'}阶段的关键冲突`,
+      chapterCount,
+      startChapter,
+      endChapter,
+      wordCountTarget: chapterCount * 3000,
+      chapters: []
+    }
+  })
+}
+
+// 生成差异化的章节分布
+function generateVariedChapterDistribution(totalChapters: number, volumeCount: number): number[] {
+  const min = 60
+  const max = 150
+  const result: number[] = []
+  let remaining = totalChapters
+
+  for (let i = 0; i < volumeCount; i++) {
+    const isLast = i === volumeCount - 1
+    if (isLast) {
+      result.push(Math.min(Math.max(remaining, min), max))
+    } else {
+      // 使用正弦波创造中间高、两头低的分布
+      const position = volumeCount > 1 ? i / (volumeCount - 1) : 0.5
+      const variance = Math.sin(position * Math.PI) * 0.3
+      const base = totalChapters / volumeCount
+      const chapters = Math.round(base * (0.85 + variance))
+      const clamped = Math.min(Math.max(chapters, min), max)
+      result.push(clamped)
+      remaining -= clamped
+    }
+  }
+
+  return result
 }
 
 async function refineContent(): Promise<void> {
@@ -249,9 +329,21 @@ async function createBook(): Promise<void> {
     })
 
     if (book) {
-      // 保存大纲到书籍
+      // 保存大纲和分卷大纲到书籍
+      const volumeOutlines = generatedContent.value.volumes?.map(v => ({
+        id: v.id,
+        title: v.title,
+        summary: v.summary,
+        chapters: v.chapters.map((ch, i) => ({
+          id: `${v.id}_ch_${i}`,
+          title: ch.title,
+          chapterId: undefined  // 还没有实际章节
+        }))
+      }))
+
       await bookStore.updateBook(book.id, {
-        outline: generatedContent.value.outline
+        outline: generatedContent.value.totalOutline || generatedContent.value.outline,
+        volumes: volumeOutlines
       })
 
       ElMessage.success('书籍创建成功')
@@ -339,7 +431,7 @@ function handleClose(): void {
             </el-select>
             <div class="word-count-hint">
               <el-icon><InfoFilled /></el-icon>
-              <span>AI 将根据字数目标生成 {{ selectedWordRange.volumes }} 卷大纲，每卷约 {{ Math.floor(selectedWordRange.max / selectedWordRange.volumes / 10000) }} 万字</span>
+              <span>每卷约100-120章，每章约3000字，AI 将按剧情发展自动划分卷次</span>
             </div>
           </el-form-item>
 
@@ -405,7 +497,7 @@ function handleClose(): void {
           <div class="content-section" v-if="generatedContent.volumes && generatedContent.volumes.length > 0">
             <h4>
               <el-icon><FolderOpened /></el-icon>
-              分卷大纲 ({{ generatedContent.volumes.length }} 卷)
+              分卷大纲 ({{ generatedContent.volumes.length }} 卷，共 {{ generatedContent.volumes.reduce((sum, v) => sum + v.chapterCount, 0) }} 章)
             </h4>
             <div class="volumes-list">
               <el-collapse>
@@ -418,11 +510,23 @@ function handleClose(): void {
                     <div class="volume-title">
                       <span class="volume-name">{{ volume.title }}</span>
                       <el-tag size="small" type="info">
-                        约 {{ Math.floor(volume.wordCountTarget / 10000) }} 万字 / {{ volume.chapterCount }} 章
+                        第{{ volume.startChapter }}-{{ volume.endChapter }}章 · {{ volume.chapterCount }}章 · {{ Math.floor(volume.wordCountTarget / 10000) }}万字
                       </el-tag>
                     </div>
                   </template>
-                  <div class="volume-summary">{{ volume.summary }}</div>
+                  <div class="volume-detail">
+                    <div class="volume-plot-line" v-if="volume.plotLine">
+                      <strong>核心剧情：</strong>{{ volume.plotLine }}
+                    </div>
+                    <div class="volume-summary">{{ volume.summary }}</div>
+                    <div class="volume-chapters" v-if="volume.chapters && volume.chapters.length > 0">
+                      <div class="chapters-title">关键章节：</div>
+                      <div class="chapter-item" v-for="(chapter, ci) in volume.chapters" :key="ci">
+                        <span class="chapter-title">{{ chapter.title }}</span>
+                        <span class="chapter-brief">{{ chapter.brief }}</span>
+                      </div>
+                    </div>
+                  </div>
                 </el-collapse-item>
               </el-collapse>
             </div>
@@ -668,7 +772,7 @@ function handleClose(): void {
 
     .content-text {
       padding: 16px;
-      background-color: var(--bg-light, $light-bg-panel);
+      background-color: var(--bg-light, $bg-page);
       border-radius: $border-radius-base;
       line-height: 1.8;
       white-space: pre-wrap;
@@ -687,7 +791,7 @@ function handleClose(): void {
       }
 
       :deep(.el-collapse-item__header) {
-        background-color: var(--bg-light, $light-bg-panel);
+        background-color: var(--bg-light, $bg-page);
         border-radius: $border-radius-base;
         padding: 0 16px;
         margin-bottom: 8px;
@@ -721,8 +825,61 @@ function handleClose(): void {
         color: var(--text-secondary, $text-secondary);
         line-height: 1.8;
         padding: 12px 16px;
-        background-color: var(--bg-light, $light-bg-panel);
+        background-color: var(--bg-light, $bg-page);
         border-radius: $border-radius-base;
+      }
+
+      .volume-detail {
+        padding: 0;
+
+        .volume-plot-line {
+          font-size: 14px;
+          color: var(--text-primary, $text-primary);
+          padding: 12px 16px;
+          background-color: rgba($primary-color, 0.08);
+          border-radius: $border-radius-base;
+          margin-bottom: 12px;
+
+          strong {
+            color: $primary-color;
+          }
+        }
+
+        .volume-chapters {
+          margin-top: 12px;
+          padding: 12px 16px;
+          background-color: var(--bg-light, $bg-page);
+          border-radius: $border-radius-base;
+
+          .chapters-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary, $text-secondary);
+            margin-bottom: 8px;
+          }
+
+          .chapter-item {
+            display: flex;
+            gap: 8px;
+            padding: 6px 0;
+            border-bottom: 1px dashed var(--border-color, $border-light);
+
+            &:last-child {
+              border-bottom: none;
+            }
+
+            .chapter-title {
+              font-weight: 500;
+              color: var(--text-primary, $text-primary);
+              flex-shrink: 0;
+            }
+
+            .chapter-brief {
+              font-size: 12px;
+              color: var(--text-secondary, $text-secondary);
+            }
+          }
+        }
       }
     }
   }
@@ -735,7 +892,7 @@ function handleClose(): void {
 
   .character-card {
     padding: 16px;
-    background-color: var(--bg-light, $light-bg-panel);
+    background-color: var(--bg-light, $bg-page);
     border-radius: $border-radius-base;
 
     .char-header {
@@ -802,7 +959,7 @@ function handleClose(): void {
 
 // 步骤3样式
 .preview-card {
-  background-color: var(--bg-light, $light-bg-panel);
+  background-color: var(--bg-light, $bg-page);
   border-radius: $border-radius-card;
   padding: 24px;
 

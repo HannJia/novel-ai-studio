@@ -1,0 +1,29 @@
+{
+  "id": "summary-generate",
+  "name": "摘要生成",
+  "version": "1.0",
+  "description": "生成章节摘要，用于记忆系统",
+  "variables": [
+    {
+      "name": "chapterNumber",
+      "description": "章节序号",
+      "required": true
+    },
+    {
+      "name": "chapterTitle",
+      "description": "章节标题",
+      "required": true
+    },
+    {
+      "name": "chapterContent",
+      "description": "章节内容",
+      "required": true
+    }
+  ],
+  "systemPrompt": "你是一位专业的小说内容分析师。你需要对给定的章节内容进行摘要，提取关键信息用于后续创作参考。\n\n摘要要求：\n1. 摘要应包含本章的主要情节发展\n2. 记录重要的角色出场和互动\n3. 标注关键的地点和时间变化\n4. 记录重要的伏笔或悬念\n5. 总结本章的情感基调\n6. 摘要字数控制在300-500字",
+  "userPromptTemplate": "## 章节信息\n- 章节：第{{chapterNumber}}章 {{chapterTitle}}\n\n## 章节内容\n{{chapterContent}}\n\n---\n请为这一章生成摘要，并按以下格式输出：\n\n### 情节摘要\n[300-500字的情节概述]\n\n### 关键事件\n- [事件1]\n- [事件2]\n...\n\n### 出场角色\n- [角色1]: [角色状态/行为]\n- [角色2]: [角色状态/行为]\n...\n\n### 情感基调\n[本章的整体情感基调]",
+  "options": {
+    "temperature": 0.3,
+    "maxTokens": 1000
+  }
+}

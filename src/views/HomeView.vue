@@ -7,6 +7,7 @@ import type { Book, BookGenre, BookStyle } from '@/types'
 import { BOOK_GENRE_MAP, BOOK_STYLE_MAP, BOOK_STATUS_MAP } from '@/types'
 import CreateBookWizard from '@/components/book/CreateBookWizard.vue'
 import CoverUploader from '@/components/book/CoverUploader.vue'
+import { uploadCover } from '@/services/api/fileApi'
 
 const router = useRouter()
 const bookStore = useBookStore()
@@ -119,6 +120,47 @@ function handleCreateCommand(command: string): void {
     showCreateDialog.value = true
   }
 }
+
+// 书籍卡片封面上传状态
+const uploadingCoverBookId = ref<string | null>(null)
+
+// 处理封面文件选择
+async function handleCoverFileSelect(event: Event, book: Book): Promise<void> {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (file) {
+    await uploadBookCover(file, book)
+  }
+  // 清空input，允许重复选择同一文件
+  target.value = ''
+}
+
+// 上传封面
+async function uploadBookCover(file: File, book: Book): Promise<void> {
+  // 验证文件类型
+  if (!file.type.startsWith('image/')) {
+    ElMessage.error('请选择图片文件')
+    return
+  }
+
+  // 验证文件大小（最大5MB）
+  if (file.size > 5 * 1024 * 1024) {
+    ElMessage.error('图片大小不能超过5MB')
+    return
+  }
+
+  uploadingCoverBookId.value = book.id
+  try {
+    const result = await uploadCover(file)
+    // 更新书籍封面
+    await bookStore.updateBook(book.id, { coverImage: result.url })
+    ElMessage.success('封面上传成功')
+  } catch (e) {
+    ElMessage.error('上传失败: ' + (e instanceof Error ? e.message : '未知错误'))
+  } finally {
+    uploadingCoverBookId.value = null
+  }
+}
 </script>
 
 <template>
@@ -190,9 +232,22 @@ function handleCreateCommand(command: string): void {
               :src="book.coverImage"
               :alt="book.title"
             />
-            <div v-else class="cover-placeholder">
-              <el-icon><Document /></el-icon>
-            </div>
+            <label v-else class="cover-placeholder cover-upload-area">
+              <div v-if="uploadingCoverBookId === book.id" class="uploading-state">
+                <el-icon class="is-loading"><Loading /></el-icon>
+              </div>
+              <template v-else>
+                <el-icon><Plus /></el-icon>
+                <span class="upload-hint">上传封面</span>
+              </template>
+              <input
+                type="file"
+                accept="image/*"
+                @click.stop
+                @change="handleCoverFileSelect($event, book)"
+                style="display: none"
+              />
+            </label>
             <el-button
               class="delete-btn"
               type="danger"
@@ -394,6 +449,50 @@ function handleCreateCommand(command: string): void {
   .cover-placeholder {
     font-size: 48px;
     color: $text-placeholder;
+  }
+
+  .cover-upload-area {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+    transition: all $transition-duration $transition-ease;
+    background-color: $bg-page;
+
+    .el-icon {
+      font-size: 32px;
+      color: $text-placeholder;
+      transition: color $transition-duration-fast;
+    }
+
+    .upload-hint {
+      font-size: 12px;
+      color: $text-placeholder;
+      transition: color $transition-duration-fast;
+    }
+
+    .uploading-state {
+      .el-icon {
+        font-size: 32px;
+        color: $primary-color;
+      }
+    }
+
+    &:hover {
+      background-color: rgba($primary-color, 0.05);
+
+      .el-icon {
+        color: $primary-color;
+      }
+
+      .upload-hint {
+        color: $primary-color;
+      }
+    }
   }
 
   .delete-btn {

@@ -1,0 +1,39 @@
+{
+  "id": "review-logic",
+  "name": "逻辑审查",
+  "version": "1.0",
+  "description": "审查章节的逻辑一致性",
+  "variables": [
+    {
+      "name": "chapterContent",
+      "description": "待审查的章节内容",
+      "required": true
+    },
+    {
+      "name": "characterInfo",
+      "description": "角色信息（包含当前状态）",
+      "required": false
+    },
+    {
+      "name": "worldSettings",
+      "description": "世界观设定",
+      "required": false
+    },
+    {
+      "name": "previousEvents",
+      "description": "前文重要事件",
+      "required": false
+    },
+    {
+      "name": "foreshadows",
+      "description": "已埋设的伏笔",
+      "required": false
+    }
+  ],
+  "systemPrompt": "你是一位专业的小说逻辑审查员。你需要仔细审查给定的章节内容，找出可能存在的逻辑问题。\n\n审查维度：\n1. 角色一致性：角色的言行是否符合其性格设定？是否有角色生死冲突？\n2. 时间线一致性：时间描述是否有前后矛盾？\n3. 设定一致性：是否违反已建立的世界观设定？\n4. 因果关系：情节发展是否符合逻辑？\n5. 伏笔追踪：是否有遗忘的伏笔需要回收？\n\n审查结果分级：\n- error: 确定性错误，必须修改\n- warning: 高可信警告，建议修改\n- suggestion: 建议，可以考虑修改\n- info: 提示信息",
+  "userPromptTemplate": "## 待审查章节\n{{chapterContent}}\n\n{{#if characterInfo}}\n## 角色信息\n{{characterInfo}}\n{{/if}}\n\n{{#if worldSettings}}\n## 世界观设定\n{{worldSettings}}\n{{/if}}\n\n{{#if previousEvents}}\n## 前文重要事件\n{{previousEvents}}\n{{/if}}\n\n{{#if foreshadows}}\n## 已埋设的伏笔\n{{foreshadows}}\n{{/if}}\n\n---\n请审查以上章节内容，按以下JSON格式输出发现的问题：\n\n```json\n{\n  \"issues\": [\n    {\n      \"level\": \"error|warning|suggestion|info\",\n      \"type\": \"问题类型\",\n      \"title\": \"问题标题\",\n      \"description\": \"问题描述\",\n      \"location\": \"问题位置描述\",\n      \"suggestion\": \"修改建议\"\n    }\n  ],\n  \"summary\": \"审查总结\"\n}\n```",
+  "options": {
+    "temperature": 0.2,
+    "maxTokens": 2000
+  }
+}

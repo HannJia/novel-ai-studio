@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useBookStore, useChapterStore, useEditorStore, useUiStore, useAiStore } from '@/stores'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Loading, WarningFilled, CircleCheckFilled } from '@element-plus/icons-vue'
 
 // 导入新组件
 import EditorHeader from '@/components/editor/EditorHeader.vue'
@@ -23,8 +24,16 @@ const showCreateChapterDialog = ref(false)
 const newChapterTitle = ref('')
 const autoSaveTimer = ref<number | null>(null)
 
+// 生成配置 - 字数区间（共享给 EditorSidebar 和 EditorRightPanel）
+const generateConfig = reactive({
+  chapterWordMin: 2000,
+  chapterWordMax: 3000,
+  continueWordMin: 300,
+  continueWordMax: 800,
+  temperature: 0.7
+})
+
 // AI 相关状态
-const continueWordCount = ref(500)
 const chapterOutline = ref('')
 const bookOutline = ref('')
 const outlineTab = ref<'book' | 'chapter'>('chapter')
@@ -233,7 +242,7 @@ function toggleFullscreen(): void {
   }
 }
 
-async function handleContinueWriting(): Promise<void> {
+async function handleContinueWriting(wordRange?: [number, number]): Promise<void> {
   if (!editorStore.content.trim()) {
     ElMessage.warning('请先输入一些内容再进行续写')
     return
@@ -245,15 +254,44 @@ async function handleContinueWriting(): Promise<void> {
     return
   }
 
+  // 使用传入的区间范围
+  const [minWords, maxWords] = wordRange || [300, 800]
+  const targetWordCount = Math.floor(Math.random() * (maxWords - minWords + 1)) + minWords
+
   const result = await aiStore.continueWriting({
     content: editorStore.content,
     outline: chapterOutline.value,
-    wordCount: continueWordCount.value
+    wordCount: targetWordCount,
+    minWordCount: minWords,
+    maxWordCount: maxWords
   })
 
   if (result && result.content) {
     editorStore.content = editorStore.content + '\n\n' + result.content
-    ElMessage.success(`续写完成，生成约${result.tokenUsage?.completionTokens || 0}个token`)
+
+    // 自动保存（直接调用 saveContent，不检查 hasUnsavedChanges）
+    if (editorStore.currentChapterId) {
+      editorStore.isSaving = true
+      try {
+        const saveResult = await chapterStore.updateChapter(editorStore.currentChapterId, {
+          content: editorStore.content,
+          wordCount: editorStore.wordCount
+        })
+        if (saveResult) {
+          editorStore.markAsSaved()
+          // 刷新章节列表以更新字数显示
+          await chapterStore.fetchChapters(bookId.value!)
+          ElMessage.success(`续写完成并已保存，当前共 ${editorStore.wordCount} 字`)
+        }
+      } catch (e) {
+        console.error('保存失败:', e)
+        ElMessage.warning('续写完成，但保存失败')
+      } finally {
+        editorStore.isSaving = false
+      }
+    } else {
+      ElMessage.success(`续写完成，生成约${result.tokenUsage?.completionTokens || 0}个token`)
+    }
   } else {
     ElMessage.error(aiStore.error || '续写失败')
   }
@@ -332,6 +370,8 @@ async function generateOutline(): Promise<void> {
     <div class="editor-body">
       <!-- 左侧边栏 -->
       <EditorSidebar
+        :chapter-word-min="generateConfig.chapterWordMin"
+        :chapter-word-max="generateConfig.chapterWordMax"
         @select-chapter="handleChapterSelect"
         @create-chapter="handleCreateChapter"
         @delete-chapter="handleDeleteChapter"
@@ -342,7 +382,11 @@ async function generateOutline(): Promise<void> {
 
       <!-- 右侧面板 -->
       <EditorRightPanel
-        v-model:continue-word-count="continueWordCount"
+        v-model:chapter-word-min="generateConfig.chapterWordMin"
+        v-model:chapter-word-max="generateConfig.chapterWordMax"
+        v-model:continue-word-min="generateConfig.continueWordMin"
+        v-model:continue-word-max="generateConfig.continueWordMax"
+        v-model:temperature="generateConfig.temperature"
         :chapter-outline="chapterOutline"
         :book-outline="bookOutline"
         :outline-tab="outlineTab"

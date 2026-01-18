@@ -7,6 +7,7 @@ export type AIProvider =
   | 'qianwen'      // 通义千问
   | 'wenxin'       // 文心一言
   | 'zhipu'        // 智谱
+  | 'gemini'       // Google Gemini
   | 'ollama'       // 本地Ollama
   | 'custom'       // 自定义API
 
@@ -55,6 +56,7 @@ export interface GenerateOptions {
  */
 export interface GenerateResult {
   content: string
+  reasoning?: string            // 推理/思考过程（GLM-4.7等推理模型返回）
   tokenUsage: {
     promptTokens: number
     completionTokens: number
@@ -122,6 +124,7 @@ export const AI_PROVIDER_MAP: Record<AIProvider, string> = {
   qianwen: '通义千问',
   wenxin: '文心一言',
   zhipu: '智谱AI',
+  gemini: 'Google Gemini',
   ollama: 'Ollama本地',
   custom: '自定义API'
 }

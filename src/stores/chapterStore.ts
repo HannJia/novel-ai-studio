@@ -150,16 +150,13 @@ export const useChapterStore = defineStore('chapter', () => {
     return chapter?.detailOutline || null
   }
 
-  // 获取章节摘要（用于细纲展示）
+  // 获取章节总结（用于细纲展示，完整显示）
   function getChapterSummary(chapterId: string): string {
     const chapter = chapters.value.find(ch => ch.id === chapterId)
     if (!chapter) return ''
-    // 优先使用 summary，否则截取内容前100字
+    // 优先使用 summary（完整显示），否则提示暂无总结
     if (chapter.summary) return chapter.summary
-    if (chapter.content) {
-      return chapter.content.slice(0, 100) + (chapter.content.length > 100 ? '...' : '')
-    }
-    return '暂无内容'
+    return ''
   }
 
   // ========== 细纲相关方法 ==========

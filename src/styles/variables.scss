@@ -1,13 +1,24 @@
+/**
+ * NovelAI Studio 样式变量
+ * 定义全局颜色、尺寸、字体等变量
+ */
+
+// ==========================================
 // 颜色变量
+// ==========================================
+
+// 主色调
 $primary-color: #409eff;
+$primary-light: #66b1ff;
+$primary-dark: #3a8ee6;
+
+// 成功/警告/危险/信息色
 $success-color: #67c23a;
 $warning-color: #e6a23c;
 $danger-color: #f56c6c;
 $info-color: #909399;
 
-// 强调色 - 方案B清爽蓝
-$accent-blue: #2eaadc;
-$accent-green: #0f7b6c;
+// 强调色
 $accent-purple: #7c3aed;
 
 // 文字颜色
@@ -20,78 +31,148 @@ $text-placeholder: #c0c4cc;
 $border-base: #dcdfe6;
 $border-light: #e4e7ed;
 $border-lighter: #ebeef5;
+$border-extra-light: #f2f6fc;
 
 // 背景颜色
-$bg-base: #ffffff;
+$bg-white: #ffffff;
 $bg-page: #f5f7fa;
-$bg-sidebar: #304156;
-$bg-sidebar-light: #3a4a61;
+$bg-base: #f5f7fa;
+$bg-hover: #f5f7fa;
 
-// ========== 方案B - 浅色清爽风格 (Notion风格) ==========
-$light-bg-panel: #f7f7f7;
-$light-bg-card: #ffffff;
-$light-bg-hover: #f0f0f0;
-$light-bg-active: #e8f4fc;
-$light-border-card: #e8e8e8;
-$light-text-title: #37352f;
-$light-card-radius: 12px;
-$light-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-$light-card-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.12);
+// ==========================================
+// 亮色主题变量
+// ==========================================
 
-// ========== 方案A - 暗色主题变量 (VS Code风格) ==========
-$dark-text-primary: #e5eaf3;
-$dark-text-regular: #cfd3dc;
-$dark-text-secondary: #a3a6ad;
-$dark-text-placeholder: #8d9095;
+$light-bg-panel: #ffffff;
+$light-bg-hover: #f5f7fa;
+$light-bg-active: #ecf5ff;
+$light-text-title: #303133;
+$light-card-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+$light-card-shadow-hover: 0 4px 16px 0 rgba(0, 0, 0, 0.15);
 
-$dark-border-base: #4c4d4f;
-$dark-border-light: #414243;
-$dark-border-lighter: #363637;
+// ==========================================
+// 暗色主题变量
+// ==========================================
 
-$dark-bg-base: #1d1e1f;
-$dark-bg-page: #141414;
-$dark-bg-overlay: #262727;
-$dark-bg-panel: #252526;
-$dark-bg-card: #2d2d2d;
+$dark-bg-primary: #1e1e1e;
+$dark-bg-secondary: #252526;
+$dark-bg-tertiary: #2d2d30;
 $dark-bg-hover: #3c3c3c;
+$dark-bg-panel: #2d2d30;
+$dark-bg-base: #1e1e1e;
+$dark-bg-page: #1a1a1a;
+$dark-bg-card: #252526;
 $dark-bg-active: #094771;
-$dark-card-radius: 4px;
-$dark-card-shadow: none;
 
-// 布局尺寸
-$header-height: 50px;
-$sidebar-width: 260px;
-$sidebar-collapsed-width: 48px;
-$right-panel-width: 340px;
-$status-bar-height: 28px;
+$dark-text-primary: #cccccc;
+$dark-text-secondary: #969696;
+$dark-text-muted: #6e6e6e;
+$dark-text-regular: #b0b0b0;
+$dark-text-placeholder: #5a5a5a;
 
-// 字体
-$font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
-  'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+$dark-border-base: #3c3c3c;
+$dark-border-light: #4c4c4c;
+$dark-border-lighter: #5c5c5c;
+
+$dark-card-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+
+// ==========================================
+// 尺寸变量
+// ==========================================
+
+// 字体大小
+$font-size-extra-large: 20px;
+$font-size-large: 18px;
+$font-size-medium: 16px;
 $font-size-base: 14px;
-$font-size-small: 12px;
-$font-size-large: 16px;
+$font-size-small: 13px;
+$font-size-extra-small: 12px;
 
-// 阴影
-$shadow-base: 0 2px 4px rgba(0, 0, 0, 0.12), 0 0 6px rgba(0, 0, 0, 0.04);
-$shadow-light: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
-$shadow-dark: 0 2px 4px rgba(0, 0, 0, 0.12), 0 0 6px rgba(0, 0, 0, 0.12);
+// 行高
+$line-height-base: 1.5;
+$line-height-tight: 1.3;
+$line-height-loose: 1.8;
+
+// 间距
+$spacing-xs: 4px;
+$spacing-sm: 8px;
+$spacing-md: 12px;
+$spacing-base: 16px;
+$spacing-lg: 20px;
+$spacing-xl: 24px;
+$spacing-xxl: 32px;
 
 // 圆角
-$border-radius-base: 4px;
+$border-radius-sm: 2px;
 $border-radius-small: 2px;
-$border-radius-large: 8px;
-$border-radius-card: 12px;
+$border-radius-base: 4px;
+$border-radius-md: 6px;
+$border-radius-lg: 8px;
+$border-radius-large: 12px;
+$border-radius-card: 8px;
+$border-radius-round: 20px;
+$border-radius-circle: 100%;
 
-// 过渡动画
+// 阴影
+$box-shadow-base: 0 2px 4px rgba(0, 0, 0, 0.12), 0 0 6px rgba(0, 0, 0, 0.04);
+$box-shadow-light: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+$box-shadow-dark: 0 2px 4px rgba(0, 0, 0, 0.12), 0 0 6px rgba(0, 0, 0, 0.12);
+
+// 阴影别名（兼容）
+$shadow-base: $box-shadow-base;
+$shadow-light: $box-shadow-light;
+$shadow-dark: $box-shadow-dark;
+
+// ==========================================
+// 布局变量
+// ==========================================
+
+// 侧边栏
+$sidebar-width: 240px;
+$sidebar-collapsed-width: 64px;
+
+// 头部
+$header-height: 50px;
+
+// 右侧面板
+$right-panel-width: 320px;
+
+// 状态栏
+$statusbar-height: 24px;
+$status-bar-height: 24px;
+
+// ==========================================
+// 动画变量
+// ==========================================
+
 $transition-duration: 0.3s;
 $transition-duration-fast: 0.15s;
-$transition-ease: cubic-bezier(0.4, 0, 0.2, 1);
+$transition-timing: ease-in-out;
+$transition-ease: ease-in-out;
 
-// z-index层级
-$z-header: 100;
+// ==========================================
+// 编辑器变量
+// ==========================================
+
+$font-family: 'PingFang SC', 'Microsoft YaHei', 'Hiragino Sans GB', 'Source Han Sans CN', sans-serif;
+$editor-font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'source-code-pro', monospace;
+$editor-content-font-family: 'PingFang SC', 'Microsoft YaHei', 'Hiragino Sans GB', 'Source Han Sans CN', sans-serif;
+$editor-line-height: 1.8;
+$editor-font-size: 16px;
+
+// ==========================================
+// Z-Index 层级
+// ==========================================
+
+$z-index-dropdown: 1000;
+$z-index-sticky: 1020;
+$z-index-fixed: 1030;
+$z-index-modal-backdrop: 1040;
+$z-index-modal: 1050;
+$z-index-popover: 1060;
+$z-index-tooltip: 1070;
+
+// 布局 z-index
 $z-sidebar: 100;
-$z-right-panel: 90;
-$z-modal: 1000;
-$z-tooltip: 2000;
-$z-thinking-panel: 80;
+$z-header: 100;
+$z-right-panel: 100;

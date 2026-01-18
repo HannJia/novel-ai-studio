@@ -2,14 +2,16 @@
  * 章节摘要（L2短期记忆）
  */
 export interface ChapterSummary {
+  id?: string
   chapterId: string
+  bookId?: string
   chapterOrder: number
   summary: string             // 摘要正文（500-1000字）
   keyEvents: string[]         // 关键事件列表
   charactersAppeared: string[]// 出场角色ID列表
   emotionalTone: string       // 情感基调
-  createdAt: string
-  updatedAt: string
+  createdAt?: string
+  updatedAt?: string
 }
 
 /**
@@ -105,4 +107,29 @@ export const FORESHADOW_STATUS_MAP: Record<ForeshadowStatus, string> = {
   partial: '部分回收',
   resolved: '已回收',
   abandoned: '已废弃'
+}
+
+/**
+ * 角色状态变更记录
+ */
+export interface CharacterStateChange {
+  id?: string
+  characterId: string
+  bookId: string
+  chapterId: string
+  chapterOrder: number
+  field: string               // 变更的字段
+  oldValue: string
+  newValue: string
+  reason: string              // 变更原因
+  createdAt?: string
+}
+
+/**
+ * 事件类型映射
+ */
+export const EVENT_TYPE_MAP: Record<string, string> = {
+  major: '重大事件',
+  minor: '次要事件',
+  background: '背景事件'
 }
