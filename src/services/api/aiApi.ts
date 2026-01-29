@@ -363,17 +363,26 @@ export interface VolumeOutlineResult {
  * 按剧情划分，章节数根据剧情复杂度动态分配
  */
 export async function generateVolumeOutline(request: GenerateVolumeOutlineRequest): Promise<VolumeOutlineResult[]> {
-  // 计算总章节数（假设每章3000字）
-  const chapterWordCount = 3000
+  // 计算总章节数（假设每章2500字，2000-3000的中间值）
+  const chapterWordCount = 2500
   const totalChapters = Math.ceil(request.targetTotalWords / chapterWordCount)
 
-  // 分卷章节范围：60-150章，允许更大的弹性
-  const minChaptersPerVolume = 60
+  // 分卷章节范围：40-150章，允许更大的弹性
+  const minChaptersPerVolume = 40
   const maxChaptersPerVolume = 150
-  const avgChaptersPerVolume = 100
 
-  // 计算推荐分卷数
-  const volumeCount = Math.max(1, Math.ceil(totalChapters / avgChaptersPerVolume))
+  // 根据总章节数动态计算推荐分卷数（不固定每卷100章）
+  let volumeCount: number
+  if (totalChapters <= 60) {
+    volumeCount = 1
+  } else if (totalChapters <= 150) {
+    volumeCount = 2
+  } else if (totalChapters <= 300) {
+    volumeCount = 3
+  } else {
+    // 更大的书籍，根据剧情阶段分卷，大约每80-120章一卷
+    volumeCount = Math.max(3, Math.ceil(totalChapters / 100))
+  }
 
   const result = await aiPost<GenerateResult>(`${AI_BASE_URL}/generate`, {
     prompt: `请根据以下小说信息，按剧情发展阶段划分生成分卷大纲。
@@ -382,77 +391,86 @@ export async function generateVolumeOutline(request: GenerateVolumeOutlineReques
 书名：${request.bookTitle}
 类型：${request.genre}
 风格：${request.style}
-目标总字数：${request.targetTotalWords}字
-总章节数：约${totalChapters}章
-推荐分卷数：${volumeCount}卷
+目标总字数：${request.targetTotalWords}字（约${Math.round(request.targetTotalWords / 10000)}万字）
+预计总章节数：约${totalChapters}章（每章约2500字）
+建议分卷数：${volumeCount}卷（可根据剧情调整为${Math.max(1, volumeCount - 1)}-${volumeCount + 1}卷）
 
 【总大纲】
 ${request.totalOutline}
 
-【重要：智能分卷规则】
-1. 章节数量必须根据剧情复杂度动态分配，不要机械平均分配！
-   - 铺垫期、过渡卷可以较短（${minChaptersPerVolume}-80章）
-   - 高潮卷、转折卷可以较长（100-${maxChaptersPerVolume}章）
-   - 根据剧情内容决定每卷长度
+【核心要求：基于剧情自然分卷】
+⚠️ 不要机械平均分配章节！必须根据剧情阶段来划分：
 
-2. 分卷依据（必须遵循）：
-   - 按故事的"起承转合"自然划分
-   - 每卷应有独立的小目标和冲突
-   - 分卷点选在：重大转折、阶段胜利、环境变化、势力更迭等节点
-   - 避免在剧情紧张处断卷
+1. 分析故事结构：
+   - 识别故事的起承转合阶段
+   - 找出重大转折点和高潮点
+   - 确定每个阶段的剧情容量
 
-3. 每卷字数计算：章节数 × 3000字
+2. 分卷原则：
+   - 起步/铺垫卷：通常较短（${minChaptersPerVolume}-70章），建立背景和人物
+   - 发展卷：中等长度（60-100章），推进主线剧情
+   - 高潮/转折卷：可以较长（80-${maxChaptersPerVolume}章），包含重要事件
+   - 收尾卷：根据收尾需要（50-100章）
 
-【分析大纲后的分卷思路】
-请先分析总大纲，识别出：
-- 故事的几个主要阶段
-- 关键转折点在哪里
-- 每个阶段的剧情密度如何
-然后基于分析结果进行分卷。
+3. 分卷点选择：
+   - 在阶段性胜利后断卷（如：晋升、击败对手）
+   - 在环境变化时断卷（如：离开家乡、进入新地图）
+   - 在身份转变时断卷（如：从弱者变强者、势力更迭）
+   - 绝不在悬念最紧张处断卷
 
-【输出格式】
-为每卷生成：
-1. 分卷标题：「第X卷 卷名」，卷名2-4字概括该卷主题
-2. 分卷简介：200-300字，详细概括该卷主要剧情、角色发展、核心冲突
-3. 核心剧情线：一句话描述该卷的核心目标或冲突
-4. 章节范围：startChapter 和 endChapter（注意：每卷章节数可以不同！）
-5. 关键章节：该卷内6-10个关键节点的章节号、标题和概要
+【输出要求】
+请先简要分析总大纲的故事阶段，然后生成分卷大纲。
 
-请以JSON格式返回：
+每卷需要：
+1. 标题：「第X卷 卷名」（卷名2-4字，体现该卷主题）
+2. 简介：200-300字，包含主要剧情、核心冲突、角色发展
+3. 核心剧情线：一句话概括该卷主线
+4. 章节范围和数量（章节数应有差异！）
+5. 6-10个关键章节节点
+
+【JSON格式】
 [
   {
     "title": "第一卷 卷名",
-    "summary": "详细的分卷简介，包含主要剧情线、角色发展...",
+    "summary": "详细的分卷简介...",
     "plotLine": "核心剧情线...",
     "startChapter": 1,
-    "endChapter": 85,
-    "chapterCount": 85,
+    "endChapter": 72,
+    "chapterCount": 72,
     "keyChapters": [
-      {"chapterNum": 1, "title": "章节标题", "brief": "章节概要..."},
-      {"chapterNum": 20, "title": "转折点", "brief": "重要转折..."},
-      ...
+      {"chapterNum": 1, "title": "开篇标题", "brief": "故事开端..."},
+      {"chapterNum": 18, "title": "首次冲突", "brief": "主角遇到..."},
+      {"chapterNum": 53, "title": "阶段高潮", "brief": "决战..."},
+      {"chapterNum": 72, "title": "卷末收尾", "brief": "暂告段落..."}
     ]
   },
   {
     "title": "第二卷 卷名",
     "summary": "...",
     "plotLine": "...",
-    "startChapter": 86,
-    "endChapter": 200,
-    "chapterCount": 115,
+    "startChapter": 73,
+    "endChapter": 165,
+    "chapterCount": 93,
     "keyChapters": [...]
-  },
-  ...
+  }
 ]
 
-注意：每卷的 chapterCount 必须等于 endChapter - startChapter + 1，且各卷章节数应该有差异！`,
-    systemPrompt: `你是一位资深的网络小说策划编辑，有丰富的长篇连载小说结构设计经验。
-请务必做到：
-1. 先仔细阅读和分析总大纲，理解故事的完整脉络
-2. 识别故事中的关键转折点和阶段划分
-3. 根据每个阶段的剧情密度和重要性分配章节数量
-4. 每卷章节数应该有明显差异，体现剧情轻重缓急
-5. 确保JSON格式正确，可以被解析`,
+⚠️ 极其重要：
+1. 各卷的 chapterCount 必须有明显差异（至少10-20章差距），体现剧情的轻重缓急
+2. 章节数绝对不能是整十或整百数（如50、60、70、80、90、100）！必须是自然的数字（如47、63、78、91、107等）
+3. 分卷应基于剧情需要，而非凑整数`,
+    systemPrompt: `你是一位资深的网络小说策划编辑，擅长长篇连载小说的结构设计。
+
+你的任务是根据总大纲，将小说科学地划分为若干卷，每卷有独立的剧情弧线。
+
+关键原则：
+1. 先分析总大纲，理解故事的整体脉络和转折点
+2. 根据剧情阶段自然划分，不要机械平均分配
+3. 每卷章节数应该有明显差异，反映剧情密度
+4. 分卷点要选在剧情的自然间歇处
+5. 确保返回的JSON格式正确可解析
+
+请务必输出有效的JSON数组。`,
     maxTokens: 8000,
     temperature: 0.7,
     configId: request.configId
@@ -464,22 +482,23 @@ ${request.totalOutline}
     if (jsonMatch) {
       const volumes = JSON.parse(jsonMatch[0]) as any[]
 
-      // 验证和处理分卷数据
+      // 验证和处理分卷数据，保留AI的差异化分配
       let lastEndChapter = 0
       return volumes.map((v, index) => {
         // 获取AI分配的章节范围
         const startChapter = v.startChapter || (lastEndChapter + 1)
-        let endChapter = v.endChapter || (startChapter + avgChaptersPerVolume - 1)
+        let endChapter = v.endChapter || (startChapter + 80 - 1)
 
         // 计算章节数
         let chapterCount = v.chapterCount || (endChapter - startChapter + 1)
 
-        // 验证章节数在合理范围内，但保留AI的差异化分配
-        if (chapterCount < minChaptersPerVolume * 0.8) { // 允许一定弹性
-          chapterCount = minChaptersPerVolume
+        // 放宽验证范围，尽量保留AI的分配
+        // 只在极端情况下调整
+        if (chapterCount < 20) {
+          chapterCount = 40
           endChapter = startChapter + chapterCount - 1
-        } else if (chapterCount > maxChaptersPerVolume * 1.1) {
-          chapterCount = maxChaptersPerVolume
+        } else if (chapterCount > 200) {
+          chapterCount = 150
           endChapter = startChapter + chapterCount - 1
         }
 
@@ -505,12 +524,18 @@ ${request.totalOutline}
     console.error('解析分卷大纲JSON失败:', e)
   }
 
-  // 解析失败时返回默认结构（但仍然尝试有差异化）
+  // 解析失败时返回默认结构（使用差异化分配）
   const defaultVolumes: VolumeOutlineResult[] = []
   let currentChapter = 1
 
   // 为默认分卷创建差异化的章节分配
   const volumeDistribution = generateVariedDistribution(totalChapters, volumeCount, minChaptersPerVolume, maxChaptersPerVolume)
+
+  // 卷名模板，根据小说类型选择
+  const volumeNames = [
+    '初入江湖', '崭露头角', '风云变幻', '步步为营', '力挽狂澜',
+    '登峰造极', '天下争雄', '尘埃落定', '新的征程', '终章'
+  ]
 
   for (let i = 0; i < volumeCount; i++) {
     const chapterCount = volumeDistribution[i]
@@ -518,8 +543,8 @@ ${request.totalOutline}
 
     defaultVolumes.push({
       id: `vol_${i + 1}`,
-      title: `第${i + 1}卷`,
-      summary: '待生成',
+      title: `第${i + 1}卷 ${volumeNames[i] || '未命名'}`,
+      summary: '基于剧情发展自动划分的分卷',
       plotLine: '',
       wordTarget: chapterCount * chapterWordCount,
       startChapter: currentChapter,

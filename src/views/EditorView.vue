@@ -3,13 +3,14 @@ import { ref, reactive, onMounted, onUnmounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useBookStore, useChapterStore, useEditorStore, useUiStore, useAiStore } from '@/stores'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Loading, WarningFilled, CircleCheckFilled } from '@element-plus/icons-vue'
 
 // 导入新组件
 import EditorHeader from '@/components/editor/EditorHeader.vue'
 import EditorSidebar from '@/components/editor/EditorSidebar.vue'
 import EditorMain from '@/components/editor/EditorMain.vue'
 import EditorRightPanel from '@/components/editor/EditorRightPanel.vue'
+import EditorToolbar from '@/components/editor/EditorToolbar.vue'
+import GenerateSettings from '@/components/editor/GenerateSettings.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -41,6 +42,7 @@ const outlineTab = ref<'book' | 'chapter'>('chapter')
 // 编辑器状态
 const focusMode = ref(false)
 const isFullscreen = ref(false)
+const showGenerateSettings = ref(false)
 
 const chineseNumbers = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十',
   '十一', '十二', '十三', '十四', '十五', '十六', '十七', '十八', '十九', '二十',
@@ -161,8 +163,7 @@ async function saveContent(): Promise<void> {
   try {
     // 计算字数并一起保存
     const result = await chapterStore.updateChapter(editorStore.currentChapterId, {
-      content: editorStore.content,
-      wordCount: editorStore.wordCount  // 保存时同步更新字数
+      content: editorStore.content
     })
     if (result) {
       editorStore.markAsSaved()
@@ -274,13 +275,12 @@ async function handleContinueWriting(wordRange?: [number, number]): Promise<void
       editorStore.isSaving = true
       try {
         const saveResult = await chapterStore.updateChapter(editorStore.currentChapterId, {
-          content: editorStore.content,
-          wordCount: editorStore.wordCount
+          content: editorStore.content
         })
         if (saveResult) {
           editorStore.markAsSaved()
           // 刷新章节列表以更新字数显示
-          await chapterStore.fetchChapters(bookId.value!)
+          await chapterStore.fetchChaptersByBook(bookId.value!)
           ElMessage.success(`续写完成并已保存，当前共 ${editorStore.wordCount} 字`)
         }
       } catch (e) {
@@ -396,37 +396,17 @@ async function generateOutline(): Promise<void> {
       />
     </div>
 
-    <!-- 状态栏 -->
-    <footer class="editor-status-bar">
-      <div class="status-left">
-        <span v-if="editorStore.isSaving" class="status-item saving">
-          <el-icon class="is-loading"><Loading /></el-icon>
-          保存中...
-        </span>
-        <span v-else-if="editorStore.hasUnsavedChanges" class="status-item unsaved">
-          <el-icon><WarningFilled /></el-icon>
-          未保存
-        </span>
-        <span v-else-if="editorStore.lastSavedAt" class="status-item saved">
-          <el-icon><CircleCheckFilled /></el-icon>
-          已保存
-        </span>
-        <span v-if="aiStore.generating" class="status-item ai">
-          <el-icon class="is-loading"><Loading /></el-icon>
-          AI生成中
-        </span>
-      </div>
-      <div class="status-center">
-        <span class="status-item">
-          今日: {{ bookStore.currentBook?.wordCount || 0 }} 字
-        </span>
-      </div>
-      <div class="status-right">
-        <span class="status-item">字数: {{ editorStore.wordCount }}</span>
-        <span class="status-item shortcut">Ctrl+S 保存</span>
-        <span class="status-item shortcut">Ctrl+G 生成</span>
-      </div>
-    </footer>
+    <!-- 底部工具栏 -->
+    <EditorToolbar
+      @undo="editorStore.undo"
+      @regenerate="handleContinueWriting"
+      @open-font-settings="uiStore.toggleRightPanel"
+      @open-generate-settings="showGenerateSettings = true"
+      @generate-next-chapter="handleCreateChapter"
+      @generate-outline="generateOutline"
+      @generate-from-outline="handleContinueWriting"
+      @free-write="handleContinueWriting"
+    />
 
     <!-- 新建章节对话框 -->
     <el-dialog
@@ -451,60 +431,99 @@ async function generateOutline(): Promise<void> {
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 生成设置弹窗 -->
+    <GenerateSettings v-model:visible="showGenerateSettings" />
   </div>
 </template>
 
 <style scoped lang="scss">
+// ==========================================
+// 编辑器视图样式 - Gemini 3 Pro 设计方案
+// ==========================================
+
 .editor-view {
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
-  background-color: var(--page-bg, $bg-page);
-  transition: all $transition-duration $transition-ease;
+  background-color: var(--bg-base, $dark-bg-base);
+  transition: all $transition-duration $transition-timing;
 
+  // ==========================================
   // 专注模式
+  // ==========================================
   &.focus-mode {
     :deep(.editor-header) {
-      opacity: 0.3;
-      &:hover { opacity: 1; }
+      opacity: 0;
+      transform: translateY(-100%);
+      pointer-events: none;
+
+      &:hover {
+        opacity: 1;
+        transform: translateY(0);
+        pointer-events: auto;
+      }
     }
 
     :deep(.editor-sidebar) {
       width: 0;
+      min-width: 0;
       opacity: 0;
       overflow: hidden;
+      border: none;
     }
 
     :deep(.editor-right-panel) {
       width: 0;
+      min-width: 0;
       opacity: 0;
       overflow: hidden;
+      border: none;
     }
 
     .editor-status-bar {
-      opacity: 0.3;
-      &:hover { opacity: 1; }
+      opacity: 0;
+      transform: translateY(100%);
+
+      &:hover {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    // 编辑器全屏居中
+    :deep(.editor-main) {
+      max-width: 900px;
+      margin: 0 auto;
     }
   }
 }
 
+// ==========================================
+// 主体区域 - 三栏布局
+// ==========================================
 .editor-body {
   flex: 1;
   display: flex;
   overflow: hidden;
+  background-color: var(--bg-base, $dark-bg-base);
 }
 
+// ==========================================
+// 状态栏
+// ==========================================
 .editor-status-bar {
   height: $status-bar-height;
-  padding: 0 16px;
+  padding: 0 $spacing-base;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background-color: var(--status-bg, $bg-base);
-  border-top: 1px solid var(--border-color, $border-light);
-  font-size: 12px;
-  transition: all $transition-duration $transition-ease;
+  background-color: var(--bg-surface, $dark-bg-surface);
+  border-top: 1px solid var(--border-base, $dark-border-base);
+  font-size: $font-size-extra-small;
+  transition: all $transition-duration $transition-timing;
+  flex-shrink: 0;
 }
 
 .status-left,
@@ -512,17 +531,26 @@ async function generateOutline(): Promise<void> {
 .status-right {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: $spacing-base;
 }
 
 .status-item {
   display: flex;
   align-items: center;
-  gap: 4px;
-  color: var(--text-secondary, $text-secondary);
+  gap: $spacing-xs;
+  color: var(--text-secondary, $dark-text-secondary);
+  transition: color $transition-duration-fast $transition-timing;
+
+  .el-icon {
+    font-size: 14px;
+  }
 
   &.saving {
     color: $primary-color;
+
+    .el-icon {
+      animation: pulse 1s infinite;
+    }
   }
 
   &.unsaved {
@@ -535,29 +563,146 @@ async function generateOutline(): Promise<void> {
 
   &.ai {
     color: $primary-color;
+
+    &::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background-color: $primary-color;
+      animation: pulse 1.5s infinite;
+    }
   }
 
   &.shortcut {
-    padding: 2px 8px;
-    background-color: var(--shortcut-bg, $light-bg-panel);
-    border-radius: $border-radius-small;
+    padding: 2px $spacing-sm;
+    background-color: var(--bg-elevated, $dark-bg-elevated);
+    border: 1px solid var(--border-base, $dark-border-base);
+    border-radius: $border-radius-sm;
     font-size: 11px;
+    font-family: $font-family-mono;
+    color: var(--text-muted, $dark-text-muted);
+
+    &:hover {
+      background-color: var(--bg-hover, $dark-bg-hover);
+      color: var(--text-secondary, $dark-text-secondary);
+    }
   }
 }
 
-// 深色主题适配
-:global(html.dark) .editor-view {
-  --page-bg: #{$dark-bg-page};
-  --status-bg: #{$dark-bg-base};
-  --border-color: #{$dark-border-light};
-  --text-secondary: #{$dark-text-secondary};
-  --shortcut-bg: #{$dark-bg-panel};
+// ==========================================
+// 动画
+// ==========================================
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
+// ==========================================
 // 对话框样式
+// ==========================================
 .create-chapter-dialog {
   :deep(.el-dialog) {
-    border-radius: $border-radius-card;
+    border-radius: $border-radius-lg;
+    background-color: var(--dialog-bg, $dark-bg-surface);
+    border: 1px solid var(--border-base, $dark-border-base);
+    box-shadow: var(--dialog-shadow, $dark-shadow-xl);
+  }
+
+  :deep(.el-dialog__header) {
+    padding: $spacing-base $spacing-lg;
+    border-bottom: 1px solid var(--border-base, $dark-border-base);
+  }
+
+  :deep(.el-dialog__body) {
+    padding: $spacing-lg;
+  }
+
+  :deep(.el-dialog__footer) {
+    padding: $spacing-base $spacing-lg;
+    border-top: 1px solid var(--border-base, $dark-border-base);
+  }
+}
+
+// ==========================================
+// 响应式适配
+// ==========================================
+@media (max-width: 1200px) {
+  .editor-view:not(.focus-mode) {
+    :deep(.editor-right-panel) {
+      width: 300px;
+      min-width: 300px;
+    }
+  }
+}
+
+@media (max-width: 992px) {
+  .editor-view:not(.focus-mode) {
+    :deep(.editor-sidebar) {
+      width: $sidebar-collapsed-width;
+      min-width: $sidebar-collapsed-width;
+    }
+
+    :deep(.editor-right-panel) {
+      position: absolute;
+      right: 0;
+      top: $header-height;
+      bottom: $status-bar-height;
+      z-index: $z-right-panel;
+      box-shadow: var(--shadow-lg, $dark-shadow-lg);
+    }
+  }
+}
+
+// ==========================================
+// 浅色主题
+// ==========================================
+:global(.theme-light) {
+  .editor-view {
+    background-color: #f8fafc;
+  }
+
+  .editor-body {
+    background-color: #f8fafc;
+  }
+
+  .editor-status-bar {
+    background-color: #ffffff;
+    border-top-color: #e2e8f0;
+  }
+
+  .status-item {
+    color: #64748b;
+
+    &.shortcut {
+      background-color: #f1f5f9;
+      border-color: #e2e8f0;
+      color: #94a3b8;
+
+      &:hover {
+        background-color: #e2e8f0;
+        color: #64748b;
+      }
+    }
+  }
+
+  .create-chapter-dialog {
+    :deep(.el-dialog) {
+      background-color: #ffffff;
+      border-color: #e2e8f0;
+    }
+
+    :deep(.el-dialog__header) {
+      border-bottom-color: #e2e8f0;
+    }
+
+    :deep(.el-dialog__footer) {
+      border-top-color: #e2e8f0;
+    }
   }
 }
 </style>

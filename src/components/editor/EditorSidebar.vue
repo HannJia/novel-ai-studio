@@ -2,10 +2,10 @@
 import { ref, computed, watch } from 'vue'
 import { useChapterStore, useUiStore, useBookStore, useAiStore, useEditorStore } from '@/stores'
 import type { VolumeOutlineChapter, DetailOutlineStep } from '@/types'
-import { DETAIL_OUTLINE_STEPS } from '@/types'
+import { DETAIL_OUTLINE_STEPS, BOOK_GENRE_MAP, BOOK_STYLE_MAP } from '@/types'
 import { Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { generateChapterTitleAndSummary } from '@/services/api/aiApi'
+import { generateChapterTitleAndSummary, generateVolumeOutline } from '@/services/api/aiApi'
 
 const chapterStore = useChapterStore()
 const editorStore = useEditorStore()
@@ -44,6 +44,14 @@ const maxWords = computed(() => props.chapterWordMax || 4000)
 // 本地状态
 const searchQuery = ref('')
 const activeTab = ref<'chapters' | 'outline' | 'detail'>('chapters')
+
+// 点击导航项：如果已收缩则展开，如果已展开则切换标签
+function handleNavClick(tab: 'chapters' | 'outline' | 'detail') {
+  if (uiStore.sidebarCollapsed) {
+    uiStore.sidebarCollapsed = false
+  }
+  activeTab.value = tab
+}
 
 // 当前选中的大纲项索引
 const selectedOutlineIndex = ref<number | null>(null)
@@ -146,6 +154,87 @@ const totalOutline = computed(() => {
   return bookStore.currentBook?.outline || '暂无总大纲'
 })
 
+// 分卷大纲的总章节数
+const totalChapterCount = computed(() => {
+  const volumes = bookStore.currentBook?.volumes
+  if (!volumes || volumes.length === 0) return 0
+  return volumes.reduce((sum, v) => sum + (v.chapterCount || v.chapters?.length || 0), 0)
+})
+
+// 生成分卷大纲状态
+const generatingVolumes = ref(false)
+
+// 生成分卷大纲
+async function handleGenerateVolumeOutline() {
+  console.log('handleGenerateVolumeOutline called')
+  const book = bookStore.currentBook
+  console.log('currentBook:', book)
+  console.log('book.outline:', book?.outline)
+  console.log('aiStore.hasConfig:', aiStore.hasConfig)
+
+  if (!book) {
+    ElMessage.warning('请先选择书籍')
+    return
+  }
+  if (!book.outline) {
+    ElMessage.warning('请先设置总大纲')
+    return
+  }
+  if (!aiStore.hasConfig) {
+    ElMessage.warning('请先在设置中配置 AI')
+    return
+  }
+
+  generatingVolumes.value = true
+  ElMessage.info('正在生成分卷大纲，请稍候...')
+  try {
+    // 估算总字数（假设每章2500字，预计100章）
+    const estimatedChapters = 100
+    const targetTotalWords = estimatedChapters * 2500
+
+    console.log('开始调用 generateVolumeOutline API...')
+    const volumeResults = await generateVolumeOutline({
+      bookTitle: book.title,
+      totalOutline: book.outline,
+      targetTotalWords: targetTotalWords,
+      genre: BOOK_GENRE_MAP[book.genre] || book.genre,
+      style: BOOK_STYLE_MAP[book.style] || book.style,
+      configId: aiStore.defaultConfig?.id
+    })
+    console.log('generateVolumeOutline 返回结果:', volumeResults)
+
+    // 转换为内部格式并保存
+    const volumes = volumeResults.map(v => ({
+      id: v.id,
+      title: v.title,
+      summary: v.summary,
+      plotLine: v.plotLine || '',
+      chapterCount: v.chapterCount || v.chapters.length || Math.floor(v.wordTarget / 2500),
+      startChapter: v.startChapter,
+      endChapter: v.endChapter,
+      wordCountTarget: v.wordTarget,
+      chapters: (v.chapters || []).map((ch, i) => ({
+        id: `${v.id}_ch_${i}`,
+        title: ch.title,
+        brief: ch.brief
+      }))
+    }))
+
+    console.log('转换后的 volumes:', volumes)
+
+    // 保存到书籍
+    console.log('开始保存到书籍...')
+    await bookStore.updateBook(book.id, { volumes })
+    console.log('保存成功')
+    ElMessage.success('分卷大纲生成成功')
+  } catch (e) {
+    console.error('生成分卷大纲失败:', e)
+    ElMessage.error('生成分卷大纲失败: ' + (e instanceof Error ? e.message : '未知错误'))
+  } finally {
+    generatingVolumes.value = false
+  }
+}
+
 // 当前分卷大纲（根据下一章序号计算所属分卷）
 const currentVolumeOutline = computed(() => {
   const book = bookStore.currentBook
@@ -199,15 +288,6 @@ watch(() => chapterStore.currentChapter, (chapter) => {
     }
   }
 })
-
-// 联动：点击大纲项时，跳转到对应章节
-function selectOutlineChapter(chapterId: string | undefined) {
-  if (chapterId) {
-    emit('selectChapter', chapterId)
-    // 自动切换到细纲标签
-    activeTab.value = 'detail'
-  }
-}
 
 // 选择已完成章节查看
 function selectCompletedChapter(chapterId: string) {
@@ -722,24 +802,43 @@ function getStepContent(stepType: string): string {
 
 <template>
   <aside class="editor-sidebar" :class="{ collapsed: uiStore.sidebarCollapsed }">
-    <!-- 侧边栏头部 -->
-    <div class="sidebar-header">
-      <div class="header-content" v-show="!uiStore.sidebarCollapsed">
-        <el-icon class="header-icon"><Folder /></el-icon>
-        <span class="header-title">目录</span>
+    <!-- 左侧图标导航栏 - 始终显示 -->
+    <div class="icon-nav-rail">
+      <div
+        class="nav-item"
+        :class="{ active: activeTab === 'chapters' && !uiStore.sidebarCollapsed }"
+        @click="handleNavClick('chapters')"
+      >
+        <el-icon :size="28"><Document /></el-icon>
+        <span class="nav-label">章节</span>
       </div>
-      <el-button class="collapse-btn" text @click="uiStore.toggleSidebar">
-        <el-icon>
-          <Expand v-if="uiStore.sidebarCollapsed" />
-          <Fold v-else />
-        </el-icon>
-      </el-button>
+      <div
+        class="nav-item"
+        :class="{ active: activeTab === 'outline' && !uiStore.sidebarCollapsed }"
+        @click="handleNavClick('outline')"
+      >
+        <el-icon :size="28"><Notebook /></el-icon>
+        <span class="nav-label">大纲</span>
+      </div>
+      <div
+        class="nav-item"
+        :class="{ active: activeTab === 'detail' && !uiStore.sidebarCollapsed }"
+        @click="handleNavClick('detail')"
+      >
+        <el-icon :size="28"><List /></el-icon>
+        <span class="nav-label">细纲</span>
+      </div>
     </div>
 
     <!-- 主内容区 -->
     <div class="sidebar-content" v-show="!uiStore.sidebarCollapsed">
+      <!-- 面板标题 -->
+      <div class="panel-header">
+        <span class="panel-title">{{ activeTab === 'chapters' ? '章节' : activeTab === 'outline' ? '大纲' : '细纲' }}</span>
+      </div>
+
       <!-- 搜索框 -->
-      <div class="search-box">
+      <div class="search-box" v-if="activeTab === 'chapters'">
         <el-input
           v-model="searchQuery"
           placeholder="搜索章节..."
@@ -747,34 +846,6 @@ function getStepContent(stepType: string): string {
           clearable
           size="small"
         />
-      </div>
-
-      <!-- 标签切换 -->
-      <div class="tab-switch">
-        <button
-          class="tab-btn"
-          :class="{ active: activeTab === 'chapters' }"
-          @click="activeTab = 'chapters'"
-        >
-          <el-icon><Document /></el-icon>
-          章节
-        </button>
-        <button
-          class="tab-btn"
-          :class="{ active: activeTab === 'outline' }"
-          @click="activeTab = 'outline'"
-        >
-          <el-icon><Notebook /></el-icon>
-          大纲
-        </button>
-        <button
-          class="tab-btn"
-          :class="{ active: activeTab === 'detail' }"
-          @click="activeTab = 'detail'"
-        >
-          <el-icon><List /></el-icon>
-          细纲
-        </button>
       </div>
 
       <!-- 章节列表 -->
@@ -850,25 +921,49 @@ function getStepContent(stepType: string): string {
         <!-- 分卷大纲 -->
         <div class="volumes-section-header">
           <el-icon><FolderOpened /></el-icon>
-          <span>分卷大纲</span>
+          <span>分卷大纲 ({{ bookStore.currentBook?.volumes?.length ?? 0 }} 卷，共 {{ totalChapterCount }} 章)</span>
         </div>
 
-        <div class="volumes-list" v-if="bookStore.currentBook?.volumes?.length > 0">
+        <div class="volumes-list" v-if="bookStore.currentBook?.volumes && bookStore.currentBook.volumes.length > 0">
           <div
-            v-for="volume in bookStore.currentBook.volumes"
+            v-for="volume in bookStore.currentBook?.volumes"
             :key="volume.id"
             class="volume-section"
           >
             <div class="volume-header" @click="toggleVolume(volume.id)">
               <el-icon><FolderOpened /></el-icon>
-              <span>{{ volume.title }}</span>
+              <div class="volume-title-wrapper">
+                <span class="volume-name">{{ volume.title }}</span>
+                <el-tag size="small" type="info" class="volume-info-tag">
+                  第{{ volume.startChapter || '?' }}-{{ volume.endChapter || '?' }}章 · {{ volume.chapterCount || volume.chapters?.length || '?' }}章 · {{ Math.floor((volume.wordCountTarget || 0) / 10000) }}万字
+                </el-tag>
+              </div>
               <el-icon class="expand-icon">
                 <ArrowDown v-if="expandedVolumes.includes(volume.id)" />
                 <ArrowRight v-else />
               </el-icon>
             </div>
-            <div v-if="expandedVolumes.includes(volume.id)" class="volume-outline-content">
-              {{ volume.plotLine || volume.summary || '暂无分卷大纲' }}
+            <div v-if="expandedVolumes.includes(volume.id)" class="volume-detail-content">
+              <!-- 核心剧情 -->
+              <div class="volume-plot-line" v-if="volume.plotLine">
+                <strong>核心剧情：</strong>{{ volume.plotLine }}
+              </div>
+              <!-- 卷概要 -->
+              <div class="volume-summary" v-if="volume.summary">
+                {{ volume.summary }}
+              </div>
+              <!-- 关键章节 -->
+              <div class="volume-chapters" v-if="volume.chapters && volume.chapters.length > 0">
+                <div class="chapters-title">关键章节：</div>
+                <div class="chapter-item" v-for="(chapter, ci) in volume.chapters" :key="ci">
+                  <span class="chapter-title">{{ chapter.title }}</span>
+                  <span class="chapter-brief" v-if="chapter.brief">{{ chapter.brief }}</span>
+                </div>
+              </div>
+              <!-- 无内容提示 -->
+              <div v-if="!volume.plotLine && !volume.summary && (!volume.chapters || volume.chapters.length === 0)" class="no-content-tip">
+                暂无分卷详情
+              </div>
             </div>
           </div>
         </div>
@@ -876,6 +971,16 @@ function getStepContent(stepType: string): string {
         <div v-else class="empty-outline">
           <el-icon><InfoFilled /></el-icon>
           <span>暂无分卷大纲</span>
+          <el-button
+            type="primary"
+            size="small"
+            :loading="generatingVolumes"
+            @click="handleGenerateVolumeOutline"
+            style="margin-top: 12px;"
+          >
+            <el-icon><MagicStick /></el-icon>
+            AI 生成分卷大纲
+          </el-button>
         </div>
       </div>
 
@@ -1100,13 +1205,7 @@ function getStepContent(stepType: string): string {
       </div>
     </div>
 
-    <!-- 底部统计 -->
-    <div class="sidebar-footer" v-show="!uiStore.sidebarCollapsed">
-      <div class="stats-item">
-        <el-icon><Warning /></el-icon>
-        <span>逻辑告警: 0</span>
-      </div>
-    </div>
+    <!-- 底部统计已移到底部工具栏 -->
   </aside>
 </template>
 
@@ -1116,48 +1215,70 @@ function getStepContent(stepType: string): string {
   background-color: var(--sidebar-bg, $bg-base);
   border-right: 1px solid var(--border-color, $border-light);
   display: flex;
-  flex-direction: column;
+  flex-direction: row; // 改为横向布局：图标栏 + 内容区
   transition: width $transition-duration $transition-ease;
   overflow: hidden;
 
   &.collapsed {
-    width: $sidebar-collapsed-width;
+    width: 64px; // 折叠时只显示图标栏宽度
   }
 }
 
-.sidebar-header {
-  height: 48px;
-  padding: 0 12px;
+// 左侧图标导航栏 - 始终显示
+.icon-nav-rail {
+  width: 64px;
+  min-width: 64px;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--border-color, $border-lighter);
+  padding: 12px 0;
+  background-color: var(--rail-bg, rgba(0, 0, 0, 0.02));
+  border-right: 1px solid var(--border-color, $border-lighter);
 
-  .header-content {
+  .nav-item {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 8px;
-
-    .header-icon {
-      font-size: 16px;
-      color: var(--text-secondary, $text-secondary);
-    }
-
-    .header-title {
-      font-weight: 600;
-      font-size: 14px;
-      color: var(--text-primary, $text-primary);
-    }
-  }
-
-  .collapse-btn {
-    padding: 6px;
-    border-radius: $border-radius-base;
+    justify-content: center;
+    gap: 4px;
+    width: 56px;
+    padding: 10px 0;
+    border-radius: $border-radius-large;
+    cursor: pointer;
+    transition: all $transition-duration-fast $transition-ease;
     color: var(--text-secondary, $text-secondary);
 
     &:hover {
       background-color: var(--hover-bg, $light-bg-hover);
+      color: var(--text-primary, $text-primary);
     }
+
+    &.active {
+      background-color: var(--active-bg, rgba($primary-color, 0.1));
+      color: $primary-color;
+
+      .nav-label {
+        color: $primary-color;
+        font-weight: 500;
+      }
+    }
+
+    .nav-label {
+      font-size: 11px;
+      color: var(--text-secondary, $text-secondary);
+      transition: color $transition-duration-fast;
+    }
+  }
+}
+
+// 面板标题
+.panel-header {
+  padding: 16px 16px 12px;
+
+  .panel-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary, $text-primary);
   }
 }
 
@@ -1464,9 +1585,9 @@ function getStepContent(stepType: string): string {
   .volume-section {
     .volume-header {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 8px;
-      padding: 8px 12px;
+      padding: 10px 12px;
       font-size: 13px;
       font-weight: 500;
       color: var(--text-primary, $text-primary);
@@ -1479,15 +1600,113 @@ function getStepContent(stepType: string): string {
         background-color: var(--hover-bg, $light-bg-hover);
       }
 
-      .expand-icon {
-        margin-left: auto;
-        font-size: 12px;
-        color: var(--text-secondary, $text-secondary);
-      }
-
-      .el-icon {
+      > .el-icon:first-child {
         font-size: 14px;
         color: var(--text-secondary, $text-secondary);
+        flex-shrink: 0;
+        margin-top: 2px;
+      }
+
+      .volume-title-wrapper {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+
+        .volume-name {
+          font-weight: 500;
+          color: var(--text-primary, $text-primary);
+        }
+
+        .volume-info-tag {
+          align-self: flex-start;
+          font-size: 11px;
+        }
+      }
+
+      .expand-icon {
+        flex-shrink: 0;
+        font-size: 12px;
+        color: var(--text-secondary, $text-secondary);
+        margin-top: 2px;
+      }
+    }
+
+    .volume-detail-content {
+      margin-top: 4px;
+      padding: 0;
+
+      .volume-plot-line {
+        font-size: 12px;
+        color: var(--text-primary, $text-primary);
+        padding: 10px 12px;
+        background-color: rgba($primary-color, 0.08);
+        border-radius: $border-radius-base;
+        margin-bottom: 8px;
+        line-height: 1.6;
+
+        strong {
+          color: $primary-color;
+        }
+      }
+
+      .volume-summary {
+        font-size: 12px;
+        line-height: 1.8;
+        color: var(--text-secondary, $text-secondary);
+        padding: 10px 12px;
+        background-color: var(--panel-bg, $light-bg-panel);
+        border-radius: $border-radius-base;
+        margin-bottom: 8px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .volume-chapters {
+        padding: 10px 12px;
+        background-color: var(--panel-bg, $light-bg-panel);
+        border-radius: $border-radius-base;
+
+        .chapters-title {
+          font-size: 12px;
+          font-weight: 500;
+          color: var(--text-secondary, $text-secondary);
+          margin-bottom: 8px;
+        }
+
+        .chapter-item {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          padding: 6px 0;
+          border-bottom: 1px dashed var(--border-color, $border-lighter);
+
+          &:last-child {
+            border-bottom: none;
+          }
+
+          .chapter-title {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-primary, $text-primary);
+          }
+
+          .chapter-brief {
+            font-size: 11px;
+            color: var(--text-secondary, $text-secondary);
+            line-height: 1.5;
+          }
+        }
+      }
+
+      .no-content-tip {
+        font-size: 12px;
+        color: var(--text-placeholder, $text-placeholder);
+        padding: 10px 12px;
+        background-color: var(--panel-bg, $light-bg-panel);
+        border-radius: $border-radius-base;
+        text-align: center;
       }
     }
 
@@ -2090,5 +2309,19 @@ function getStepContent(stepType: string): string {
   --tab-bg: #{$dark-bg-panel};
   --active-tab-bg: #{$dark-bg-card};
   --input-bg: #{$dark-bg-panel};
+}
+
+// 浅色主题适配
+:global(.theme-light) .editor-sidebar {
+  --sidebar-bg: #ffffff;
+  --border-color: #e2e8f0;
+  --text-primary: #1e293b;
+  --text-secondary: #64748b;
+  --hover-bg: #f1f5f9;
+  --active-bg: #e2e8f0;
+  --panel-bg: #ffffff;
+  --tab-bg: #f8fafc;
+  --active-tab-bg: #ffffff;
+  --input-bg: #ffffff;
 }
 </style>

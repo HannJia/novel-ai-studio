@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAiStore, useUiStore } from '@/stores'
-import { AI_PROVIDER_MAP } from '@/types'
-import type { AIProvider, AIConfig } from '@/types'
+import { AI_PROVIDER_MAP, AI_SCENE_TYPE_MAP } from '@/types'
+import type { AIProvider, AIConfig, AISceneType } from '@/types'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const router = useRouter()
@@ -16,6 +16,38 @@ const isEditing = ref(false)
 const editingConfigId = ref<string | null>(null)
 const testing = ref(false)
 const testingConfigId = ref<string | null>(null)
+
+// AI场景配置
+const useUnified = ref(true)
+const unifiedConfigId = ref<string | undefined>(undefined)
+const sceneConfigs = ref<Record<AISceneType, string | undefined>>({
+  creative: undefined,
+  review: undefined,
+  vision: undefined,
+  analysis: undefined
+})
+const sceneTypes: AISceneType[] = ['creative', 'review', 'vision', 'analysis']
+
+// 所有可用的AI配置
+const availableConfigs = computed(() => aiStore.configs)
+
+// 加载场景配置
+function loadSceneConfig() {
+  const config = aiStore.sceneConfig
+  useUnified.value = config.useUnified
+  unifiedConfigId.value = config.unifiedConfigId
+  sceneConfigs.value = { ...config.sceneConfigs } as Record<AISceneType, string | undefined>
+}
+
+// 保存场景配置
+function saveSceneConfig() {
+  aiStore.updateSceneConfig({
+    useUnified: useUnified.value,
+    unifiedConfigId: unifiedConfigId.value,
+    sceneConfigs: { ...sceneConfigs.value }
+  })
+  ElMessage.success('场景配置已保存')
+}
 
 const providerOptions = Object.entries(AI_PROVIDER_MAP).map(([value, label]) => ({
   value: value as AIProvider,
@@ -60,6 +92,7 @@ const configForm = ref({
 
 onMounted(async () => {
   await aiStore.fetchConfigs()
+  loadSceneConfig()
 })
 
 function goHome(): void {
@@ -300,6 +333,83 @@ function getCurrentModelOptions(): string[] {
                 </div>
               </div>
             </div>
+
+            <!-- AI场景配置 -->
+            <div class="section-header" style="margin-top: 32px;">
+              <h2>AI场景配置</h2>
+              <el-button type="primary" @click="saveSceneConfig">
+                <el-icon><Check /></el-icon>
+                保存配置
+              </el-button>
+            </div>
+
+            <div class="scene-config-section">
+              <!-- 统一模式 -->
+              <div class="config-mode">
+                <el-radio-group v-model="useUnified">
+                  <el-radio :value="true">
+                    <span class="radio-label">统一使用默认模型</span>
+                  </el-radio>
+                </el-radio-group>
+
+                <div v-if="useUnified" class="unified-hint">
+                  <el-tag v-if="aiStore.defaultConfig" type="success">
+                    当前默认模型：{{ aiStore.defaultConfig.name }}
+                  </el-tag>
+                  <span v-else class="no-default-hint">请先在上方设置一个默认模型</span>
+                </div>
+              </div>
+
+              <el-divider>
+                <span class="divider-text">或分别配置</span>
+              </el-divider>
+
+              <!-- 分场景模式 -->
+              <div class="config-mode">
+                <el-radio-group v-model="useUnified">
+                  <el-radio :value="false">
+                    <span class="radio-label">分别配置不同场景</span>
+                  </el-radio>
+                </el-radio-group>
+
+                <div v-if="!useUnified" class="scene-configs">
+                  <div class="scene-hint">
+                    <el-icon><InfoFilled /></el-icon>
+                    <span>未配置的场景及全局场景将使用"创作"模型</span>
+                  </div>
+                  <div
+                    v-for="sceneType in sceneTypes"
+                    :key="sceneType"
+                    class="scene-config-item"
+                  >
+                    <div class="scene-info">
+                      <span class="scene-icon">{{ AI_SCENE_TYPE_MAP[sceneType].icon }}</span>
+                      <div class="scene-text">
+                        <span class="scene-label">
+                          {{ AI_SCENE_TYPE_MAP[sceneType].label }}
+                          <el-tag v-if="sceneType === 'creative'" size="small" type="warning">默认/全局</el-tag>
+                        </span>
+                        <span class="scene-desc">{{ AI_SCENE_TYPE_MAP[sceneType].description }}</span>
+                      </div>
+                    </div>
+                    <el-select
+                      v-model="sceneConfigs[sceneType]"
+                      placeholder="选择配置"
+                      size="small"
+                      style="width: 200px"
+                      clearable
+                    >
+                      <el-option
+                        v-for="config in availableConfigs"
+                        :key="config.id"
+                        :label="config.name"
+                        :value="config.id"
+                      />
+                    </el-select>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </el-tab-pane>
 
@@ -485,34 +595,46 @@ function getCurrentModelOptions(): string[] {
 </template>
 
 <style scoped lang="scss">
+// ==========================================
+// AI 配置页面样式 - Gemini 3 Pro 设计方案
+// ==========================================
+
 .config-view {
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
-  background-color: $bg-page;
+  background-color: var(--bg-base, $dark-bg-base);
 }
 
+// ==========================================
+// 页面头部
+// ==========================================
 .config-header {
   height: $header-height;
-  padding: 0 24px;
+  padding: 0 $spacing-xl;
   display: flex;
   align-items: center;
-  background-color: $bg-base;
-  border-bottom: 1px solid $border-light;
+  background-color: var(--bg-surface, $dark-bg-surface);
+  border-bottom: 1px solid var(--border-base, $dark-border-base);
+  flex-shrink: 0;
 
   .header-left {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: $spacing-base;
 
     h1 {
-      font-size: 18px;
+      font-size: $font-size-large;
       font-weight: 600;
+      color: var(--text-primary, $dark-text-primary);
     }
   }
 }
 
+// ==========================================
+// 配置内容
+// ==========================================
 .config-content {
   flex: 1;
   overflow: hidden;
@@ -522,24 +644,47 @@ function getCurrentModelOptions(): string[] {
   height: 100%;
 
   :deep(.el-tabs__header) {
-    width: 160px;
-    background-color: $bg-base;
+    width: 180px;
+    background-color: var(--bg-surface, $dark-bg-surface);
+    border-right: 1px solid var(--border-base, $dark-border-base);
+    margin-right: 0;
+
+    .el-tabs__item {
+      height: 48px;
+      line-height: 48px;
+      color: var(--text-secondary, $dark-text-secondary);
+      transition: all $transition-duration-fast $transition-timing;
+
+      &:hover {
+        color: var(--text-primary, $dark-text-primary);
+      }
+
+      &.is-active {
+        color: $primary-color;
+        background-color: rgba($primary-color, 0.1);
+      }
+    }
   }
 
   :deep(.el-tabs__content) {
-    padding: 24px;
+    padding: $spacing-xl $spacing-xxl;
     height: 100%;
     overflow-y: auto;
+    background-color: var(--bg-base, $dark-bg-base);
   }
 }
 
+// ==========================================
+// Tab 内容区
+// ==========================================
 .tab-content {
-  max-width: 800px;
+  max-width: 900px;
 
   h2 {
-    font-size: 18px;
+    font-size: $font-size-large;
     font-weight: 600;
-    margin-bottom: 24px;
+    margin-bottom: $spacing-xl;
+    color: var(--text-primary, $dark-text-primary);
   }
 }
 
@@ -547,49 +692,65 @@ function getCurrentModelOptions(): string[] {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 24px;
+  margin-bottom: $spacing-xl;
 
   h2 {
     margin-bottom: 0;
   }
 }
 
+// ==========================================
+// 加载和空状态
+// ==========================================
 .loading-state {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 48px;
-  color: $text-secondary;
+  gap: $spacing-sm;
+  padding: $spacing-xxxl;
+  color: var(--text-secondary, $dark-text-secondary);
+
+  .el-icon {
+    font-size: 24px;
+    color: $primary-color;
+  }
 }
 
 .empty-state {
-  padding: 48px;
+  padding: $spacing-xxxl;
 }
 
+// ==========================================
+// 配置卡片列表
+// ==========================================
 .config-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: $spacing-md;
 }
 
 .config-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
-  background-color: $bg-base;
-  border: 1px solid $border-light;
-  border-radius: $border-radius-base;
-  transition: all 0.2s ease;
+  padding: $spacing-base $spacing-lg;
+  background-color: var(--card-bg, $dark-bg-surface);
+  border: 1px solid var(--border-base, $dark-border-base);
+  border-radius: $border-radius-lg;
+  transition: all $transition-duration $transition-timing;
 
   &:hover {
-    border-color: $primary-color;
+    border-color: rgba($primary-color, 0.5);
+    box-shadow: var(--card-shadow, $dark-card-shadow);
   }
 
   &.is-default {
-    border-color: $success-color;
-    background-color: rgba($success-color, 0.02);
+    border-color: rgba($success-color, 0.5);
+    background-color: rgba($success-color, 0.05);
+
+    &:hover {
+      border-color: $success-color;
+    }
   }
 }
 
@@ -599,52 +760,227 @@ function getCurrentModelOptions(): string[] {
   .config-title {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-bottom: 6px;
+    gap: $spacing-sm;
+    margin-bottom: $spacing-xs;
 
     h3 {
-      font-size: 15px;
+      font-size: $font-size-base;
       font-weight: 600;
+      color: var(--text-primary, $dark-text-primary);
     }
   }
 
   .config-detail {
-    font-size: 13px;
-    color: $text-regular;
-    margin-bottom: 4px;
+    font-size: $font-size-small;
+    color: var(--text-secondary, $dark-text-secondary);
+    margin-bottom: $spacing-xs;
+
+    .provider {
+      color: $primary-color;
+    }
 
     .divider {
-      margin: 0 8px;
-      color: $border-light;
+      margin: 0 $spacing-sm;
+      color: var(--border-base, $dark-border-base);
+    }
+
+    .model {
+      font-family: $font-family-mono;
+      font-size: $font-size-extra-small;
     }
   }
 
   .config-params {
-    font-size: 12px;
-    color: $text-secondary;
+    font-size: $font-size-extra-small;
+    color: var(--text-muted, $dark-text-muted);
+    font-family: $font-family-mono;
   }
 }
 
 .config-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: $spacing-sm;
+  flex-shrink: 0;
 }
 
+// ==========================================
+// 设置表单
+// ==========================================
 .settings-form {
-  max-width: 500px;
-}
+  max-width: 600px;
 
-.about-info {
-  p {
-    margin-bottom: 8px;
-    color: $text-regular;
+  :deep(.el-form-item__label) {
+    color: var(--text-secondary, $dark-text-secondary);
+  }
+
+  :deep(.el-slider) {
+    padding-right: 60px;
   }
 }
 
-.form-tip {
+// ==========================================
+// 关于页面
+// ==========================================
+.about-info {
+  p {
+    margin-bottom: $spacing-sm;
+    color: var(--text-secondary, $dark-text-secondary);
+    line-height: 1.6;
+
+    strong {
+      color: var(--text-primary, $dark-text-primary);
+    }
+  }
+
+  .mt-16 {
+    margin-top: $spacing-base;
+  }
+}
+
+// ==========================================
+// AI场景配置样式
+// ==========================================
+.scene-config-section {
+  background-color: var(--card-bg, $dark-bg-surface);
+  border: 1px solid var(--border-base, $dark-border-base);
+  border-radius: $border-radius-lg;
+  padding: $spacing-lg;
+}
+
+.config-mode {
+  .radio-label {
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .unified-select {
+    margin-top: 12px;
+    margin-left: 24px;
+  }
+
+  .unified-hint {
+    margin-top: 12px;
+    margin-left: 24px;
+
+    .no-default-hint {
+      color: var(--el-color-warning);
+      font-size: 13px;
+    }
+  }
+}
+
+.scene-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  background-color: rgba(var(--el-color-primary-rgb, 249, 115, 22), 0.1);
+  border-radius: 6px;
   font-size: 12px;
-  color: $text-secondary;
-  margin-top: 4px;
+  color: var(--text-secondary, $dark-text-secondary);
+  margin-bottom: 12px;
+
+  .el-icon {
+    color: var(--el-color-primary);
+  }
+}
+
+.config-option {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+
+  .model-name {
+    font-size: 12px;
+    color: var(--text-secondary, $dark-text-secondary);
+  }
+}
+
+.divider-text {
+  font-size: 12px;
+  color: var(--text-muted, $dark-text-muted);
+}
+
+.scene-configs {
+  margin-top: 12px;
+  margin-left: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.scene-config-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background-color: var(--bg-surface, $dark-bg-base);
+  border-radius: 8px;
+  border: 1px solid var(--border-base, $dark-border-base);
+}
+
+.scene-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  .scene-icon {
+    font-size: 20px;
+  }
+
+  .scene-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+
+    .scene-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-primary, $dark-text-primary);
+    }
+
+    .scene-desc {
+      font-size: 11px;
+      color: var(--text-secondary, $dark-text-secondary);
+    }
+  }
+}
+
+// ==========================================
+// 表单提示
+// ==========================================
+.form-tip {
+  font-size: $font-size-extra-small;
+  color: var(--text-muted, $dark-text-muted);
+  margin-top: $spacing-xs;
+}
+
+// ==========================================
+// 对话框样式覆盖
+// ==========================================
+:deep(.el-dialog) {
+  border-radius: $border-radius-lg;
+  background-color: var(--dialog-bg, $dark-bg-surface);
+  border: 1px solid var(--border-base, $dark-border-base);
+
+  .el-dialog__header {
+    padding: $spacing-base $spacing-lg;
+    border-bottom: 1px solid var(--border-base, $dark-border-base);
+
+    .el-dialog__title {
+      color: var(--text-primary, $dark-text-primary);
+    }
+  }
+
+  .el-dialog__body {
+    padding: $spacing-lg;
+  }
+
+  .el-dialog__footer {
+    padding: $spacing-base $spacing-lg;
+    border-top: 1px solid var(--border-base, $dark-border-base);
+  }
 }
 </style>

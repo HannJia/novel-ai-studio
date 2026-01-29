@@ -41,6 +41,38 @@ export type AIUsageTask =
   | 'all'           // 全部
 
 /**
+ * AI场景类型（用于场景化模型配置）
+ */
+export type AISceneType =
+  | 'creative'      // 创作：续写、扩写、生成章节、生成细纲
+  | 'review'        // 审查：润色、改写、逻辑检查、连贯性审查
+  | 'vision'        // 识图：知识库图片识别、封面分析
+  | 'analysis'      // 分析：大纲分析、角色分析、情节梳理
+
+/**
+ * AI场景配置接口
+ */
+export interface AISceneConfig {
+  useUnified: boolean           // 是否统一使用同一模型
+  unifiedConfigId?: string      // 统一配置ID
+  sceneConfigs: {
+    creative?: string           // 创作场景配置ID
+    review?: string             // 审查场景配置ID
+    vision?: string             // 识图场景配置ID
+    analysis?: string           // 分析场景配置ID
+  }
+}
+
+/**
+ * 生成参数配置
+ */
+export interface GenerateParamsConfig {
+  chapterWordRange: [number, number]  // 章节字数范围 [min, max]
+  continueWordRange: [number, number] // 续写字数范围 [min, max]
+  temperature: number                  // 创意温度 0-1
+}
+
+/**
  * AI生成选项
  */
 export interface GenerateOptions {
@@ -138,4 +170,30 @@ export const AI_USAGE_TASK_MAP: Record<AIUsageTask, string> = {
   summary: '摘要生成',
   chat: '对话',
   all: '全部任务'
+}
+
+/**
+ * AI场景类型映射
+ */
+export const AI_SCENE_TYPE_MAP: Record<AISceneType, { label: string; icon: string; description: string }> = {
+  creative: {
+    label: '创作模型',
+    icon: '✍️',
+    description: '用于：续写、扩写、生成章节、生成细纲'
+  },
+  review: {
+    label: '审查模型',
+    icon: '🔍',
+    description: '用于：润色、改写、逻辑检查、连贯性审查'
+  },
+  vision: {
+    label: '识图模型',
+    icon: '🖼️',
+    description: '用于：知识库图片识别、封面分析'
+  },
+  analysis: {
+    label: '分析模型',
+    icon: '📋',
+    description: '用于：大纲分析、角色分析、情节梳理'
+  }
 }

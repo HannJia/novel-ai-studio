@@ -8,6 +8,33 @@ export type CharacterType =
   | 'other'         // 其他
 
 /**
+ * 角色标签
+ */
+export type CharacterTag =
+  | 'heroine'       // 女主
+  | 'hero'          // 男主
+  | 'important'     // 重要配角
+  | 'love_interest' // 感情对象
+  | 'mentor'        // 导师/师父
+  | 'rival'         // 对手
+  | 'comic_relief'  // 搞笑担当
+  | 'mysterious'    // 神秘人物
+
+/**
+ * 角色标签映射
+ */
+export const CHARACTER_TAG_MAP: Record<CharacterTag, string> = {
+  heroine: '女主',
+  hero: '男主',
+  important: '重要配角',
+  love_interest: '感情对象',
+  mentor: '导师/师父',
+  rival: '对手',
+  comic_relief: '搞笑担当',
+  mysterious: '神秘人物'
+}
+
+/**
  * 角色档案
  */
 export interface CharacterProfile {
@@ -66,6 +93,7 @@ export interface Character {
   name: string
   aliases: string[]           // 别名/称呼列表
   type: CharacterType
+  tags?: CharacterTag[]       // 角色标签
   profile: CharacterProfile
   state: CharacterState
   createdAt: string

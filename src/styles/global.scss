@@ -195,3 +195,93 @@ img {
   height: 100vh;
   overflow: hidden;
 }
+
+// ==========================================
+// 浅色主题全局样式
+// ==========================================
+.theme-light {
+  // 页面背景
+  background-color: #f8fafc !important;
+
+  // 全局 CSS 变量覆盖
+  --bg-base: #f8fafc;
+  --bg-surface: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-hover: #f1f5f9;
+  --bg-active: #e2e8f0;
+  --bg-page: #f8fafc;
+
+  --text-primary: #1e293b;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+  --text-placeholder: #94a3b8;
+
+  --border-base: #e2e8f0;
+  --border-light: #f1f5f9;
+
+  --card-bg: #ffffff;
+  --card-border: #e2e8f0;
+  --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --card-hover-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  --card-hover-border: #cbd5e1;
+
+  --dialog-bg: #ffffff;
+  --dialog-shadow: 0 20px 25px rgba(0, 0, 0, 0.15);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-base: 0 4px 6px rgba(0, 0, 0, 0.07);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+
+  body {
+    background-color: #f8fafc;
+    color: #1e293b;
+  }
+
+  #app {
+    background-color: #f8fafc;
+  }
+}
+
+// ==========================================
+// 暗色主题全局样式
+// ==========================================
+.theme-dark {
+  background-color: #0f0f0f;
+
+  --bg-base: #0f0f0f;
+  --bg-surface: #1a1a1a;
+  --bg-elevated: #262626;
+  --bg-hover: #333333;
+  --bg-active: #404040;
+  --bg-page: #0f0f0f;
+
+  --text-primary: #f5f5f5;
+  --text-secondary: #a3a3a3;
+  --text-muted: #737373;
+  --text-placeholder: #737373;
+
+  --border-base: #333333;
+  --border-light: #404040;
+
+  --card-bg: #1a1a1a;
+  --card-border: #333333;
+  --card-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --card-hover-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --card-hover-border: #404040;
+
+  --dialog-bg: #1a1a1a;
+  --dialog-shadow: 0 20px 25px rgba(0, 0, 0, 0.6);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-base: 0 4px 6px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
+
+  body {
+    background-color: #0f0f0f;
+    color: #f5f5f5;
+  }
+
+  #app {
+    background-color: #0f0f0f;
+  }
+}

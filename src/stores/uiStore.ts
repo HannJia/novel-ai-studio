@@ -42,14 +42,20 @@ export const useUiStore = defineStore('ui', () => {
   function setThemeMode(mode: ThemeMode): void {
     themeMode.value = mode
     applyTheme()
+    // 立即保存到 localStorage
+    localStorage.setItem('themeMode', mode)
   }
 
   function applyTheme(): void {
     const html = document.documentElement
     if (isDarkMode.value) {
+      html.classList.remove('theme-light')
+      html.classList.add('theme-dark')
       html.classList.add('dark')
     } else {
+      html.classList.remove('theme-dark')
       html.classList.remove('dark')
+      html.classList.add('theme-light')
     }
   }
 

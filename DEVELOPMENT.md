@@ -56,6 +56,8 @@
 | Element Plus | ^2.5.0 | UI组件库 |
 | Vue Router | ^4.2.0 | 路由管理 |
 | Monaco Editor | ^0.45.0 | 代码/文本编辑器 |
+| Axios | ^1.6.0 | HTTP客户端 |
+| ECharts | ^5.4.0 | 图表库（角色关系图） |
 
 ### 2.2 后端服务（Java）
 
@@ -2062,6 +2064,9 @@ git commit -m "[1.2] 字数统计工具
 | 1.8 | 2026-01-16 | 阶段五完成：逻辑审查系统（规则引擎、Level A-D审查、实时审查） |
 | 1.9 | 2026-01-17 | 阶段六完成：AI对话系统、Claude/Ollama适配器、多AI任务分配 |
 | 2.0 | 2026-01-18 | 大纲系统重构：三层大纲架构、分卷plotLine、记忆提取系统 |
+| 2.1 | 2026-01-19 | 应用启动优化：自动加载AI配置，解决首次使用需进入设置的问题 |
+| 2.2 | 2026-01-24 | 技术栈更新：添加Axios、ECharts依赖；文档完善：补充开发进度总结 |
+| 2.3 | 2026-01-29 | UI重构：主题系统优化、AI对话窗口统一、编辑器布局调整 |
 
 ---
 
@@ -2921,6 +2926,46 @@ const partDistribution = [
 - `POST /api/memory/extract/{chapterId}` - 提取单章记忆
 - `POST /api/memory/extract/book/{bookId}` - 批量提取整书
 - `POST /api/memory/extract/{chapterId}/async` - 异步提取
+
+#### 29. 应用启动时自动加载AI配置（2026-01-19）
+
+**问题描述**：
+每次重新启动软件后，必须先点击书架的设置页面才能使用 AI 功能（如创建书籍），否则会提示"请先在设置中配置 AI"。
+
+**问题原因**：
+- `CreateBookWizard.vue` 检查 `aiStore.hasConfig` 来判断是否可以使用 AI 功能
+- 但 `aiStore.configs` 数组只有在调用 `fetchConfigs()` 后才会被填充
+- 原来只有设置页面 (`ConfigView.vue`) 会调用 `fetchConfigs()`
+- 导致应用启动时 AI 配置未加载，`hasConfig` 为 false
+
+**解决方案**：
+在 `App.vue` 的 `onMounted` 中添加 `aiStore.fetchConfigs()` 调用：
+
+```vue
+// src/App.vue
+<script setup lang="ts">
+import { onMounted } from 'vue'
+import { RouterView } from 'vue-router'
+import { useUiStore, useAiStore } from '@/stores'
+
+const uiStore = useUiStore()
+const aiStore = useAiStore()
+
+onMounted(() => {
+  uiStore.loadSettings()
+  // 应用启动时自动加载 AI 配置，确保创建书籍等功能可用
+  aiStore.fetchConfigs()
+})
+</script>
+```
+
+**修改文件**：
+- `src/App.vue` - 添加 AI 配置初始化
+
+**效果**：
+1. 应用启动时自动加载 AI 配置列表
+2. 如果没有配置，会自动创建默认的 Gemini 3 Pro 配置
+3. 创建书籍时 `aiStore.hasConfig` 为 true，可以直接使用 AI 功能
 
 ---
 

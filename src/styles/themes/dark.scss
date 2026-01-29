@@ -1,82 +1,230 @@
 /**
- * NovelAI Studio 深色主题（方案A - VS Code风格）
- * 适合夜间使用，护眼舒适
+ * NovelAI Studio 深色主题
+ * 橙色纸张质感风格 - 适合夜间使用
  */
 
 @import '../variables.scss';
 
 .theme-dark {
-  // 背景色
-  --bg-primary: #{$dark-bg-primary};
-  --bg-secondary: #{$dark-bg-secondary};
-  --bg-tertiary: #{$dark-bg-tertiary};
+  // ==========================================
+  // 背景色层级
+  // ==========================================
+  --bg-base: #{$dark-bg-base};
+  --bg-surface: #{$dark-bg-surface};
+  --bg-elevated: #{$dark-bg-elevated};
   --bg-hover: #{$dark-bg-hover};
+  --bg-active: #{$dark-bg-active};
 
+  // 兼容旧变量名
+  --bg-primary: #{$dark-bg-base};
+  --bg-secondary: #{$dark-bg-surface};
+  --bg-tertiary: #{$dark-bg-elevated};
+
+  // ==========================================
   // 文字颜色
+  // ==========================================
   --text-primary: #{$dark-text-primary};
   --text-secondary: #{$dark-text-secondary};
   --text-muted: #{$dark-text-muted};
+  --text-disabled: #{$dark-text-disabled};
   --text-placeholder: #{$dark-text-muted};
 
+  // ==========================================
   // 边框颜色
+  // ==========================================
   --border-base: #{$dark-border-base};
   --border-light: #{$dark-border-light};
-  --border-lighter: #5c5c5c;
+  --border-lighter: #{$dark-border-lighter};
+  --border-focus: #{$primary-color};
 
+  // ==========================================
   // 主色调
+  // ==========================================
   --color-primary: #{$primary-color};
   --color-primary-light: #{$primary-light};
   --color-primary-dark: #{$primary-dark};
+  --color-primary-rgb: 249, 115, 22;
 
+  // ==========================================
   // 状态颜色
+  // ==========================================
   --color-success: #{$success-color};
   --color-warning: #{$warning-color};
   --color-danger: #{$danger-color};
-  --color-info: #6e6e6e;
+  --color-info: #{$info-color};
 
+  // ==========================================
   // 阴影
-  --shadow-base: 0 2px 8px rgba(0, 0, 0, 0.4);
-  --shadow-light: 0 4px 12px rgba(0, 0, 0, 0.3);
+  // ==========================================
+  --shadow-sm: #{$dark-shadow-sm};
+  --shadow-base: #{$dark-shadow-base};
+  --shadow-lg: #{$dark-shadow-lg};
+  --shadow-xl: #{$dark-shadow-xl};
 
+  // 兼容旧变量名
+  --shadow-light: #{$dark-card-shadow};
+
+  // ==========================================
   // 侧边栏
-  --sidebar-bg: #{$dark-bg-secondary};
+  // ==========================================
+  --sidebar-bg: #{$dark-bg-surface};
   --sidebar-border: #{$dark-border-base};
   --sidebar-item-hover: #{$dark-bg-hover};
-  --sidebar-item-active: rgba(64, 158, 255, 0.15);
+  --sidebar-item-active: rgba(249, 115, 22, 0.2);
+  --sidebar-item-active-border: #{$primary-color};
 
+  // ==========================================
   // 编辑器
-  --editor-bg: #{$dark-bg-primary};
+  // ==========================================
+  --editor-bg: #{$dark-bg-base};
+  --editor-content-bg: #{$dark-bg-surface};
   --editor-line-number: #{$dark-text-muted};
-  --editor-selection: rgba(64, 158, 255, 0.3);
+  --editor-selection: rgba(249, 115, 22, 0.3);
   --editor-cursor: #{$dark-text-primary};
+  --editor-gutter-bg: #{$dark-bg-surface};
 
+  // ==========================================
   // 面板
-  --panel-bg: #{$dark-bg-secondary};
-  --panel-header-bg: #{$dark-bg-tertiary};
+  // ==========================================
+  --panel-bg: #{$dark-bg-surface};
+  --panel-header-bg: #{$dark-bg-elevated};
   --panel-border: #{$dark-border-base};
 
+  // ==========================================
   // 卡片
-  --card-bg: #{$dark-bg-secondary};
-  --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-  --card-hover-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  // ==========================================
+  --card-bg: #{$dark-bg-surface};
+  --card-border: #{$dark-border-base};
+  --card-shadow: #{$dark-card-shadow};
+  --card-hover-shadow: #{$dark-card-shadow-hover};
+  --card-hover-border: #{$dark-border-light};
 
+  // ==========================================
   // 输入框
-  --input-bg: #{$dark-bg-tertiary};
+  // ==========================================
+  --input-bg: #{$dark-bg-elevated};
   --input-border: #{$dark-border-base};
   --input-focus-border: #{$primary-color};
+  --input-focus-shadow: 0 0 0 3px rgba(249, 115, 22, 0.15);
+  --input-placeholder: #{$dark-text-muted};
 
+  // ==========================================
   // 按钮
-  --button-default-bg: #{$dark-bg-tertiary};
+  // ==========================================
+  --button-default-bg: #{$dark-bg-elevated};
   --button-default-border: #{$dark-border-base};
   --button-default-text: #{$dark-text-primary};
+  --button-default-hover-bg: #{$dark-bg-hover};
+
   --button-primary-bg: #{$primary-color};
   --button-primary-text: #ffffff;
+  --button-primary-hover-bg: #{$primary-light};
+  --button-primary-active-bg: #{$primary-dark};
 
-  // Element Plus 暗色覆盖
-  --el-bg-color: #{$dark-bg-primary};
-  --el-bg-color-overlay: #{$dark-bg-secondary};
+  // ==========================================
+  // 标签页 Tabs
+  // ==========================================
+  --tabs-bg: transparent;
+  --tabs-item-hover: #{$dark-bg-hover};
+  --tabs-item-active: #{$primary-color};
+  --tabs-indicator: #{$primary-color};
+
+  // ==========================================
+  // 下拉菜单
+  // ==========================================
+  --dropdown-bg: #{$dark-bg-elevated};
+  --dropdown-border: #{$dark-border-base};
+  --dropdown-shadow: #{$dark-shadow-lg};
+  --dropdown-item-hover: #{$dark-bg-hover};
+
+  // ==========================================
+  // 对话框
+  // ==========================================
+  --dialog-bg: #{$dark-bg-surface};
+  --dialog-header-bg: #{$dark-bg-elevated};
+  --dialog-border: #{$dark-border-base};
+  --dialog-shadow: #{$dark-shadow-xl};
+  --dialog-overlay: rgba(0, 0, 0, 0.7);
+
+  // ==========================================
+  // 滚动条
+  // ==========================================
+  --scrollbar-track: #{$dark-bg-base};
+  --scrollbar-thumb: #{$dark-border-light};
+  --scrollbar-thumb-hover: #{$dark-border-lighter};
+
+  // ==========================================
+  // Element Plus 覆盖
+  // ==========================================
+  --el-bg-color: #{$dark-bg-base};
+  --el-bg-color-page: #{$dark-bg-base};
+  --el-bg-color-overlay: #{$dark-bg-elevated};
+
   --el-text-color-primary: #{$dark-text-primary};
   --el-text-color-regular: #{$dark-text-secondary};
+  --el-text-color-secondary: #{$dark-text-muted};
+  --el-text-color-placeholder: #{$dark-text-muted};
+  --el-text-color-disabled: #{$dark-text-disabled};
+
   --el-border-color: #{$dark-border-base};
-  --el-fill-color-light: #{$dark-bg-tertiary};
+  --el-border-color-light: #{$dark-border-light};
+  --el-border-color-lighter: #{$dark-border-lighter};
+
+  --el-fill-color: #{$dark-bg-elevated};
+  --el-fill-color-light: #{$dark-bg-hover};
+  --el-fill-color-lighter: #{$dark-bg-active};
+  --el-fill-color-blank: #{$dark-bg-surface};
+
+  --el-color-primary: #{$primary-color};
+  --el-color-primary-light-3: #{$primary-light};
+  --el-color-primary-light-5: rgba(249, 115, 22, 0.5);
+  --el-color-primary-light-7: rgba(249, 115, 22, 0.3);
+  --el-color-primary-light-9: rgba(249, 115, 22, 0.1);
+  --el-color-primary-dark-2: #{$primary-dark};
+
+  --el-color-success: #{$success-color};
+  --el-color-warning: #{$warning-color};
+  --el-color-danger: #{$danger-color};
+  --el-color-info: #{$info-color};
+
+  --el-box-shadow: #{$dark-shadow-base};
+  --el-box-shadow-light: #{$dark-card-shadow};
+  --el-box-shadow-lighter: #{$dark-shadow-sm};
+  --el-box-shadow-dark: #{$dark-shadow-lg};
+
+  --el-mask-color: rgba(0, 0, 0, 0.7);
+  --el-mask-color-extra-light: rgba(0, 0, 0, 0.3);
+
+  // 圆角
+  --el-border-radius-base: #{$border-radius-base};
+  --el-border-radius-small: #{$border-radius-sm};
+  --el-border-radius-round: #{$border-radius-round};
+  --el-border-radius-circle: #{$border-radius-circle};
+}
+
+// ==========================================
+// 全局滚动条样式
+// ==========================================
+.theme-dark {
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 4px;
+
+    &:hover {
+      background: var(--scrollbar-thumb-hover);
+    }
+  }
+
+  // Firefox
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }

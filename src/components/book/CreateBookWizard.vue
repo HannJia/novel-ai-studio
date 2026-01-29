@@ -2,9 +2,16 @@
 import { ref, computed, watch } from 'vue'
 import { useAiStore, useBookStore } from '@/stores'
 import { ElMessage } from 'element-plus'
-import type { BookGenre, BookStyle, NovelInitResult, GeneratedCharacter } from '@/types'
-import { BOOK_GENRE_MAP, BOOK_STYLE_MAP } from '@/types'
-import { generateVolumeOutline, type VolumeOutlineResult } from '@/services/api/aiApi'
+import type { BookGenre, BookSubGenre, BookStyle, NovelInitResult, NovelSettings, HaremSize } from '@/types'
+import {
+  BOOK_GENRE_MAP, BOOK_STYLE_MAP, BOOK_SUB_GENRE_MAP, GENRE_SUB_GENRES_MAP,
+  GOLDEN_FINGER_TYPE_MAP, GOLDEN_FINGER_EXAMPLES,
+  NARRATIVE_PERSPECTIVE_MAP, NARRATIVE_TENSE_MAP, ERA_SETTING_MAP, POWER_SYSTEM_MAP,
+  TECH_LEVEL_MAP, PROTAGONIST_PERSONALITY_MAP, ROMANCE_LINE_MAP, HAREM_SIZE_MAP, PACING_PREFERENCE_MAP,
+  CONFLICT_DENSITY_MAP, ANGST_LEVEL_MAP, ENDING_PREFERENCE_MAP, WRITING_STYLE_MAP,
+  DIALOGUE_RATIO_MAP, DESCRIPTION_LEVEL_MAP
+} from '@/types'
+import { generateVolumeOutline } from '@/services/api/aiApi'
 
 const emit = defineEmits<{
   close: []
@@ -18,30 +25,70 @@ const bookStore = useBookStore()
 const currentStep = ref(0)
 const steps = ['基本信息', 'AI 生成', '预览确认']
 
-// 字数区间选项（每卷100-120章，每章约3000字，即每卷30-36万字）
-const wordCountRanges = [
-  { value: '30-36', label: '30-36万字（1卷）', min: 300000, max: 360000, chapters: 110 },
-  { value: '60-72', label: '60-72万字（2卷）', min: 600000, max: 720000, chapters: 220 },
-  { value: '90-108', label: '90-108万字（3卷）', min: 900000, max: 1080000, chapters: 330 },
-  { value: '120-144', label: '120-144万字（4卷）', min: 1200000, max: 1440000, chapters: 440 },
-  { value: '150-180', label: '150-180万字（5卷）', min: 1500000, max: 1800000, chapters: 550 },
-  { value: '180-216', label: '180-216万字（6卷）', min: 1800000, max: 2160000, chapters: 660 },
-  { value: '210-252', label: '210-252万字（7卷）', min: 2100000, max: 2520000, chapters: 770 },
-  { value: '240-288', label: '240-288万字（8卷）', min: 2400000, max: 2880000, chapters: 880 },
-  { value: '300+', label: '300万字以上（10卷）', min: 3000000, max: 3600000, chapters: 1100 },
-]
+// 高级设置展开状态
+const showAdvancedSettings = ref(false)
+const activeSettingPanels = ref<string[]>([])
 
 // 表单数据
 const formData = ref({
   title: '',
   author: '',
   genre: 'xuanhuan' as BookGenre,
+  subGenre: '' as BookSubGenre | '',  // 子分类
   style: 'qingsong' as BookStyle,
-  wordCountRange: '90-108', // 默认90-108万字（3卷）
+  targetWordCountMin: 100, // 目标字数最小值（万字）
+  targetWordCountMax: 200, // 目标字数最大值（万字）
   protagonist: '',
   worldKeywords: '',
   coreConflict: ''
 })
+
+// 高级设置
+const advancedSettings = ref<NovelSettings>({
+  narrative: {
+    perspective: 'third_limited',
+    tense: 'past'
+  },
+  worldBuilding: {
+    era: undefined,
+    powerSystem: undefined,
+    powerSystemCustom: '',
+    techLevel: undefined
+  },
+  protagonist: {
+    personality: undefined,
+    goldenFinger: {
+      type: 'none',
+      name: '',
+      description: '',
+      limitation: '',
+      growthPath: ''
+    },
+    romanceLine: undefined,
+    haremSize: undefined
+  },
+  plot: {
+    pacing: undefined,
+    conflictDensity: undefined,
+    angstLevel: undefined,
+    ending: undefined
+  },
+  writing: {
+    style: undefined,
+    dialogueRatio: undefined,
+    psychologyDescription: undefined,
+    environmentDescription: undefined
+  },
+  preferences: {
+    forbiddenElements: [],
+    requiredElements: [],
+    referenceWorks: ''
+  }
+})
+
+// 禁用/必含元素的输入
+const forbiddenInput = ref('')
+const requiredInput = ref('')
 
 // AI 生成的内容（扩展结构）
 interface VolumeOutline {
@@ -59,6 +106,7 @@ interface VolumeOutline {
 interface ExtendedNovelResult extends NovelInitResult {
   totalOutline: string // 总大纲
   volumes: VolumeOutline[] // 分卷大纲
+  suggestedTitles?: string[] // 推荐书名
 }
 
 const generatedContent = ref<ExtendedNovelResult | null>(null)
@@ -71,20 +119,61 @@ const creating = ref(false)
 const refineRequest = ref('')
 const refining = ref(false)
 
-// 选项映射
-const genreOptions = Object.entries(BOOK_GENRE_MAP).map(([value, label]) => ({
-  value,
-  label
-}))
+// 选项映射转数组
+const genreOptions = Object.entries(BOOK_GENRE_MAP).map(([value, label]) => ({ value, label }))
+const styleOptions = Object.entries(BOOK_STYLE_MAP).map(([value, label]) => ({ value, label }))
+const goldenFingerOptions = Object.entries(GOLDEN_FINGER_TYPE_MAP).map(([value, label]) => ({ value, label }))
+const perspectiveOptions = Object.entries(NARRATIVE_PERSPECTIVE_MAP).map(([value, label]) => ({ value, label }))
+const tenseOptions = Object.entries(NARRATIVE_TENSE_MAP).map(([value, label]) => ({ value, label }))
+const eraOptions = Object.entries(ERA_SETTING_MAP).map(([value, label]) => ({ value, label }))
+const powerSystemOptions = Object.entries(POWER_SYSTEM_MAP).map(([value, label]) => ({ value, label }))
+const techLevelOptions = Object.entries(TECH_LEVEL_MAP).map(([value, label]) => ({ value, label }))
+const personalityOptions = Object.entries(PROTAGONIST_PERSONALITY_MAP).map(([value, label]) => ({ value, label }))
+const romanceOptions = Object.entries(ROMANCE_LINE_MAP).map(([value, label]) => ({ value, label }))
+const haremSizeOptions = Object.entries(HAREM_SIZE_MAP).map(([value, label]) => ({ value, label }))
+const pacingOptions = Object.entries(PACING_PREFERENCE_MAP).map(([value, label]) => ({ value, label }))
+const conflictOptions = Object.entries(CONFLICT_DENSITY_MAP).map(([value, label]) => ({ value, label }))
+const angstOptions = Object.entries(ANGST_LEVEL_MAP).map(([value, label]) => ({ value, label }))
+const endingOptions = Object.entries(ENDING_PREFERENCE_MAP).map(([value, label]) => ({ value, label }))
+const writingStyleOptions = Object.entries(WRITING_STYLE_MAP).map(([value, label]) => ({ value, label }))
+const dialogueOptions = Object.entries(DIALOGUE_RATIO_MAP).map(([value, label]) => ({ value, label }))
+const descriptionOptions = Object.entries(DESCRIPTION_LEVEL_MAP).map(([value, label]) => ({ value, label }))
 
-const styleOptions = Object.entries(BOOK_STYLE_MAP).map(([value, label]) => ({
-  value,
-  label
-}))
+// 子类型选项（根据主类型动态变化）
+const subGenreOptions = computed(() => {
+  const subGenres = GENRE_SUB_GENRES_MAP[formData.value.genre] || []
+  return subGenres.map(value => ({
+    value,
+    label: BOOK_SUB_GENRE_MAP[value]
+  }))
+})
 
-// 计算当前选中的字数区间信息
-const selectedWordRange = computed(() => {
-  return wordCountRanges.find(r => r.value === formData.value.wordCountRange) || wordCountRanges[1]
+// 当主类型改变时，清空子类型
+watch(() => formData.value.genre, () => {
+  formData.value.subGenre = ''
+})
+
+// 计算字数相关信息（使用区间中值）
+const wordCountInfo = computed(() => {
+  const minWords = formData.value.targetWordCountMin * 10000
+  const maxWords = formData.value.targetWordCountMax * 10000
+  const avgWords = (minWords + maxWords) / 2
+  const chaptersEstimate = Math.ceil(avgWords / 2500) // 每章约2500字（2000-3000的中间值）
+  return {
+    totalWords: avgWords,
+    minWords,
+    maxWords,
+    chaptersEstimate
+  }
+})
+
+// 金手指示例
+const currentGoldenFingerExample = computed(() => {
+  const type = advancedSettings.value.protagonist?.goldenFinger?.type
+  if (type && GOLDEN_FINGER_EXAMPLES[type]) {
+    return GOLDEN_FINGER_EXAMPLES[type]
+  }
+  return null
 })
 
 // 计算属性
@@ -107,6 +196,57 @@ const roleTypeMap: Record<string, string> = {
   protagonist: '主角',
   supporting: '配角',
   antagonist: '反派'
+}
+
+// 添加禁用元素
+function addForbiddenElement(): void {
+  const value = forbiddenInput.value.trim()
+  if (value && !advancedSettings.value.preferences?.forbiddenElements?.includes(value)) {
+    if (!advancedSettings.value.preferences) {
+      advancedSettings.value.preferences = { forbiddenElements: [], requiredElements: [], referenceWorks: '' }
+    }
+    advancedSettings.value.preferences.forbiddenElements?.push(value)
+    forbiddenInput.value = ''
+  }
+}
+
+// 移除禁用元素
+function removeForbiddenElement(element: string): void {
+  const list = advancedSettings.value.preferences?.forbiddenElements
+  if (list) {
+    const index = list.indexOf(element)
+    if (index > -1) list.splice(index, 1)
+  }
+}
+
+// 添加必含元素
+function addRequiredElement(): void {
+  const value = requiredInput.value.trim()
+  if (value && !advancedSettings.value.preferences?.requiredElements?.includes(value)) {
+    if (!advancedSettings.value.preferences) {
+      advancedSettings.value.preferences = { forbiddenElements: [], requiredElements: [], referenceWorks: '' }
+    }
+    advancedSettings.value.preferences.requiredElements?.push(value)
+    requiredInput.value = ''
+  }
+}
+
+// 移除必含元素
+function removeRequiredElement(element: string): void {
+  const list = advancedSettings.value.preferences?.requiredElements
+  if (list) {
+    const index = list.indexOf(element)
+    if (index > -1) list.splice(index, 1)
+  }
+}
+
+// 应用金手指示例
+function applyGoldenFingerExample(): void {
+  const example = currentGoldenFingerExample.value
+  if (example && advancedSettings.value.protagonist?.goldenFinger) {
+    advancedSettings.value.protagonist.goldenFinger.name = example.name
+    advancedSettings.value.protagonist.goldenFinger.description = example.desc
+  }
 }
 
 // 方法
@@ -136,7 +276,7 @@ async function generateNovelContent(): Promise<void> {
 
   generating.value = true
   try {
-    const wordRange = selectedWordRange.value
+    const totalWords = wordCountInfo.value.totalWords
     const result = await fetch('/api/ai/initialize-novel', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -149,10 +289,12 @@ async function generateNovelContent(): Promise<void> {
         coreConflict: formData.value.coreConflict,
         // 字数规划参数
         wordCountTarget: {
-          min: wordRange.min,
-          max: wordRange.max,
-          volumes: wordRange.volumes
-        }
+          min: totalWords * 0.9,
+          max: totalWords * 1.1,
+          total: totalWords
+        },
+        // 高级设置
+        advancedSettings: advancedSettings.value
       })
     })
 
@@ -168,9 +310,10 @@ async function generateNovelContent(): Promise<void> {
         const volumeResults = await generateVolumeOutline({
           bookTitle: formData.value.title,
           totalOutline: totalOutline,
-          targetTotalWords: wordRange.max,
+          targetTotalWords: totalWords,
           genre: BOOK_GENRE_MAP[formData.value.genre] || formData.value.genre,
-          style: BOOK_STYLE_MAP[formData.value.style] || formData.value.style
+          style: BOOK_STYLE_MAP[formData.value.style] || formData.value.style,
+          configId: aiStore.defaultConfig?.id
         })
 
         // 转换为内部格式
@@ -179,7 +322,7 @@ async function generateNovelContent(): Promise<void> {
           title: v.title,
           summary: v.summary,
           plotLine: v.plotLine || '',
-          chapterCount: v.chapterCount || v.chapters.length || Math.floor(v.wordTarget / 3000),
+          chapterCount: v.chapterCount || v.chapters.length || Math.floor(v.wordTarget / 2500),
           startChapter: v.startChapter,
           endChapter: v.endChapter,
           wordCountTarget: v.wordTarget,
@@ -188,7 +331,7 @@ async function generateNovelContent(): Promise<void> {
       } catch (volumeError) {
         console.error('生成分卷大纲失败，使用模拟数据:', volumeError)
         // 生成分卷失败时使用模拟数据
-        volumes = generateMockVolumes(wordRange.chapters, wordRange.min, wordRange.max)
+        volumes = generateMockVolumes(wordCountInfo.value.chaptersEstimate, totalWords)
       }
 
       generatedContent.value = {
@@ -210,7 +353,7 @@ async function generateNovelContent(): Promise<void> {
 }
 
 // 生成模拟分卷数据（章节数有差异化）
-function generateMockVolumes(totalChapters: number, minWords: number, maxWords: number): VolumeOutline[] {
+function generateMockVolumes(totalChapters: number, _totalWords: number): VolumeOutline[] {
   const avgChaptersPerVolume = 100
   const volumeCount = Math.max(1, Math.ceil(totalChapters / avgChaptersPerVolume))
 
@@ -236,7 +379,7 @@ function generateMockVolumes(totalChapters: number, minWords: number, maxWords: 
       chapterCount,
       startChapter,
       endChapter,
-      wordCountTarget: chapterCount * 3000,
+      wordCountTarget: chapterCount * 2500,
       chapters: []
     }
   })
@@ -329,22 +472,32 @@ async function createBook(): Promise<void> {
     })
 
     if (book) {
-      // 保存大纲和分卷大纲到书籍
+      // 保存大纲和分卷大纲到书籍（包含完整的分卷信息）
       const volumeOutlines = generatedContent.value.volumes?.map(v => ({
         id: v.id,
         title: v.title,
         summary: v.summary,
+        plotLine: v.plotLine,
+        startChapter: v.startChapter,
+        endChapter: v.endChapter,
+        chapterCount: v.chapterCount,
+        wordCountTarget: v.wordCountTarget,
         chapters: v.chapters.map((ch, i) => ({
           id: `${v.id}_ch_${i}`,
           title: ch.title,
+          brief: ch.brief,
           chapterId: undefined  // 还没有实际章节
         }))
       }))
 
-      await bookStore.updateBook(book.id, {
+      console.log('准备保存分卷大纲, volumeOutlines:', volumeOutlines)
+      console.log('outline:', generatedContent.value.totalOutline || generatedContent.value.outline)
+
+      const updateResult = await bookStore.updateBook(book.id, {
         outline: generatedContent.value.totalOutline || generatedContent.value.outline,
         volumes: volumeOutlines
       })
+      console.log('updateBook 返回:', updateResult)
 
       ElMessage.success('书籍创建成功')
       emit('created', book.id)
@@ -394,7 +547,7 @@ function handleClose(): void {
           </el-form-item>
 
           <el-row :gutter="16">
-            <el-col :span="12">
+            <el-col :span="8">
               <el-form-item label="类型" required>
                 <el-select v-model="formData.genre" placeholder="请选择类型">
                   <el-option
@@ -406,7 +559,24 @@ function handleClose(): void {
                 </el-select>
               </el-form-item>
             </el-col>
-            <el-col :span="12">
+            <el-col :span="8">
+              <el-form-item label="子分类">
+                <el-select
+                  v-model="formData.subGenre"
+                  placeholder="请选择子分类"
+                  clearable
+                  :disabled="subGenreOptions.length === 0"
+                >
+                  <el-option
+                    v-for="opt in subGenreOptions"
+                    :key="opt.value"
+                    :label="opt.label"
+                    :value="opt.value"
+                  />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
               <el-form-item label="风格" required>
                 <el-select v-model="formData.style" placeholder="请选择风格">
                   <el-option
@@ -421,23 +591,72 @@ function handleClose(): void {
           </el-row>
 
           <el-form-item label="目标字数" required>
-            <el-select v-model="formData.wordCountRange" placeholder="请选择目标字数">
-              <el-option
-                v-for="opt in wordCountRanges"
-                :key="opt.value"
-                :label="opt.label"
-                :value="opt.value"
+            <div class="word-count-range-input">
+              <el-input-number
+                v-model="formData.targetWordCountMin"
+                :min="10"
+                :max="formData.targetWordCountMax - 10"
+                :step="10"
+                controls-position="right"
+                placeholder="最小"
               />
-            </el-select>
+              <span class="range-separator">-</span>
+              <el-input-number
+                v-model="formData.targetWordCountMax"
+                :min="formData.targetWordCountMin + 10"
+                :max="1000"
+                :step="10"
+                controls-position="right"
+                placeholder="最大"
+              />
+              <span class="unit">万字</span>
+            </div>
             <div class="word-count-hint">
               <el-icon><InfoFilled /></el-icon>
-              <span>每卷约100-120章，每章约3000字，AI 将按剧情发展自动划分卷次</span>
+              <span>预计{{ wordCountInfo.chaptersEstimate }}章，每章约2000-3000字，AI 将按照剧情发展自动划分卷</span>
             </div>
           </el-form-item>
 
-          <el-divider content-position="left">AI 创作提示（可选）</el-divider>
+          <el-divider content-position="left">主角设定</el-divider>
 
-          <el-form-item label="主角设定">
+          <!-- 主角预设选项（从高级设置移过来） -->
+          <el-row :gutter="16">
+            <el-col :span="6">
+              <el-form-item label="性格">
+                <el-select v-model="advancedSettings.protagonist!.personality" placeholder="选择性格" clearable>
+                  <el-option v-for="opt in personalityOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :span="6">
+              <el-form-item label="感情线">
+                <el-select v-model="advancedSettings.protagonist!.romanceLine" placeholder="选择感情线" clearable>
+                  <el-option v-for="opt in romanceOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :span="6" v-if="advancedSettings.protagonist?.romanceLine === 'harem'">
+              <el-form-item label="女主数量">
+                <el-select v-model="advancedSettings.protagonist!.haremSize" placeholder="选择数量">
+                  <el-option v-for="opt in haremSizeOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :span="advancedSettings.protagonist?.romanceLine === 'harem' ? 6 : 12">
+              <el-form-item label="金手指">
+                <el-select v-model="advancedSettings.protagonist!.goldenFinger!.type" placeholder="选择类型">
+                  <el-option v-for="opt in goldenFingerOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                </el-select>
+                <div class="golden-finger-hint" v-if="advancedSettings.protagonist?.goldenFinger?.type !== 'none'">
+                  <el-icon><InfoFilled /></el-icon>
+                  <span>可在下方高级设置中详细配置金手指能力</span>
+                </div>
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <!-- 主角详细描述（原有的输入框） -->
+          <el-form-item label="主角描述">
             <el-input
               v-model="formData.protagonist"
               type="textarea"
@@ -445,6 +664,8 @@ function handleClose(): void {
               placeholder="简述主角的身份、性格、特点等，如：少年天才，性格沉稳，身负血海深仇"
             />
           </el-form-item>
+
+          <el-divider content-position="left">AI 创作提示（可选）</el-divider>
 
           <el-form-item label="世界观关键词">
             <el-input
@@ -462,6 +683,309 @@ function handleClose(): void {
             />
           </el-form-item>
         </el-form>
+
+        <!-- 高级设置折叠面板 -->
+        <div class="advanced-settings-section">
+          <div class="advanced-toggle" @click="showAdvancedSettings = !showAdvancedSettings">
+            <el-icon><Setting /></el-icon>
+            <span>高级设置（可选）</span>
+            <el-icon class="arrow-icon">
+              <ArrowDown v-if="!showAdvancedSettings" />
+              <ArrowUp v-else />
+            </el-icon>
+          </div>
+
+          <el-collapse-transition>
+            <div v-show="showAdvancedSettings" class="advanced-settings-content">
+              <el-collapse v-model="activeSettingPanels" accordion>
+                <!-- 叙事设定 -->
+                <el-collapse-item title="叙事设定" name="narrative">
+                  <template #title>
+                    <div class="panel-title">
+                      <el-icon><Edit /></el-icon>
+                      <span>叙事设定</span>
+                    </div>
+                  </template>
+                  <el-row :gutter="16">
+                    <el-col :span="12">
+                      <el-form-item label="视角">
+                        <el-select v-model="advancedSettings.narrative!.perspective" placeholder="选择视角" clearable>
+                          <el-option v-for="opt in perspectiveOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                        </el-select>
+                      </el-form-item>
+                    </el-col>
+                    <el-col :span="12">
+                      <el-form-item label="时态">
+                        <el-select v-model="advancedSettings.narrative!.tense" placeholder="选择时态" clearable>
+                          <el-option v-for="opt in tenseOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                        </el-select>
+                      </el-form-item>
+                    </el-col>
+                  </el-row>
+                </el-collapse-item>
+
+                <!-- 世界观设定 -->
+                <el-collapse-item title="世界观设定" name="worldBuilding">
+                  <template #title>
+                    <div class="panel-title">
+                      <el-icon><Compass /></el-icon>
+                      <span>世界观设定</span>
+                    </div>
+                  </template>
+                  <el-row :gutter="16">
+                    <el-col :span="8">
+                      <el-form-item label="时代背景">
+                        <el-select v-model="advancedSettings.worldBuilding!.era" placeholder="选择时代" clearable>
+                          <el-option v-for="opt in eraOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                        </el-select>
+                      </el-form-item>
+                    </el-col>
+                    <el-col :span="8">
+                      <el-form-item label="力量体系">
+                        <el-select v-model="advancedSettings.worldBuilding!.powerSystem" placeholder="选择体系" clearable>
+                          <el-option v-for="opt in powerSystemOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                        </el-select>
+                      </el-form-item>
+                    </el-col>
+                    <el-col :span="8">
+                      <el-form-item label="科技水平">
+                        <el-select v-model="advancedSettings.worldBuilding!.techLevel" placeholder="选择科技" clearable>
+                          <el-option v-for="opt in techLevelOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                        </el-select>
+                      </el-form-item>
+                    </el-col>
+                  </el-row>
+                  <el-form-item v-if="advancedSettings.worldBuilding?.powerSystem === 'custom'" label="自定义体系">
+                    <el-input
+                      v-model="advancedSettings.worldBuilding!.powerSystemCustom"
+                      type="textarea"
+                      :rows="2"
+                      placeholder="描述你的力量体系，如：九品中正制，一品最高..."
+                    />
+                  </el-form-item>
+                </el-collapse-item>
+
+                <!-- 金手指详细设定 -->
+                <el-collapse-item title="金手指详细设定" name="protagonist">
+                  <template #title>
+                    <div class="panel-title">
+                      <el-icon><Star /></el-icon>
+                      <span>金手指详细设定</span>
+                    </div>
+                  </template>
+
+                  <!-- 金手指示例提示 -->
+                  <div v-if="currentGoldenFingerExample && advancedSettings.protagonist?.goldenFinger?.type !== 'none'" class="golden-finger-example">
+                    <div class="example-header">
+                      <span class="example-label">示例参考：</span>
+                      <el-button type="primary" link size="small" @click="applyGoldenFingerExample">
+                        <el-icon><CopyDocument /></el-icon>
+                        应用示例
+                      </el-button>
+                    </div>
+                    <div class="example-content">
+                      <span class="example-name">{{ currentGoldenFingerExample.name }}</span>
+                      <span class="example-desc">{{ currentGoldenFingerExample.desc }}</span>
+                    </div>
+                  </div>
+
+                  <!-- 金手指详细设定 -->
+                  <template v-if="advancedSettings.protagonist?.goldenFinger?.type !== 'none'">
+                    <el-form-item label="名称">
+                      <el-input
+                        v-model="advancedSettings.protagonist!.goldenFinger!.name"
+                        placeholder="如：掌天瓶、鸿蒙系统、上古传承..."
+                      />
+                    </el-form-item>
+                    <el-form-item label="功能描述">
+                      <el-input
+                        v-model="advancedSettings.protagonist!.goldenFinger!.description"
+                        type="textarea"
+                        :rows="3"
+                        placeholder="详细描述金手指的功能，如：缓慢吸收灵气产生灵液，加速灵药生长，间接帮助修炼..."
+                      />
+                    </el-form-item>
+                    <el-row :gutter="16">
+                      <el-col :span="12">
+                        <el-form-item label="限制条件">
+                          <el-input
+                            v-model="advancedSettings.protagonist!.goldenFinger!.limitation"
+                            type="textarea"
+                            :rows="2"
+                            placeholder="如：每日只能使用一次、需要消耗精血..."
+                          />
+                        </el-form-item>
+                      </el-col>
+                      <el-col :span="12">
+                        <el-form-item label="成长路线">
+                          <el-input
+                            v-model="advancedSettings.protagonist!.goldenFinger!.growthPath"
+                            type="textarea"
+                            :rows="2"
+                            placeholder="如：随修为提升解锁新功能..."
+                          />
+                        </el-form-item>
+                      </el-col>
+                    </el-row>
+                  </template>
+
+                  <div v-else class="no-golden-finger-tip">
+                    <el-icon><InfoFilled /></el-icon>
+                    <span>当前选择"无金手指"，如需设定金手指详情，请在上方主角设定中选择金手指类型</span>
+                  </div>
+                </el-collapse-item>
+
+                <!-- 剧情偏好 -->
+                <el-collapse-item title="剧情偏好" name="plot">
+                  <template #title>
+                    <div class="panel-title">
+                      <el-icon><TrendCharts /></el-icon>
+                      <span>剧情偏好</span>
+                    </div>
+                  </template>
+                  <el-row :gutter="16">
+                    <el-col :span="12">
+                      <el-form-item label="节奏">
+                        <el-select v-model="advancedSettings.plot!.pacing" placeholder="选择节奏" clearable>
+                          <el-option v-for="opt in pacingOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                        </el-select>
+                      </el-form-item>
+                    </el-col>
+                    <el-col :span="12">
+                      <el-form-item label="爽点密度">
+                        <el-select v-model="advancedSettings.plot!.conflictDensity" placeholder="选择密度" clearable>
+                          <el-option v-for="opt in conflictOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                        </el-select>
+                      </el-form-item>
+                    </el-col>
+                  </el-row>
+                  <el-row :gutter="16">
+                    <el-col :span="12">
+                      <el-form-item label="虐点程度">
+                        <el-select v-model="advancedSettings.plot!.angstLevel" placeholder="选择虐度" clearable>
+                          <el-option v-for="opt in angstOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                        </el-select>
+                      </el-form-item>
+                    </el-col>
+                    <el-col :span="12">
+                      <el-form-item label="结局倾向">
+                        <el-select v-model="advancedSettings.plot!.ending" placeholder="选择结局" clearable>
+                          <el-option v-for="opt in endingOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                        </el-select>
+                      </el-form-item>
+                    </el-col>
+                  </el-row>
+                </el-collapse-item>
+
+                <!-- 写作风格 -->
+                <el-collapse-item title="写作风格" name="writing">
+                  <template #title>
+                    <div class="panel-title">
+                      <el-icon><EditPen /></el-icon>
+                      <span>写作风格</span>
+                    </div>
+                  </template>
+                  <el-row :gutter="16">
+                    <el-col :span="12">
+                      <el-form-item label="文笔风格">
+                        <el-select v-model="advancedSettings.writing!.style" placeholder="选择风格" clearable>
+                          <el-option v-for="opt in writingStyleOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                        </el-select>
+                      </el-form-item>
+                    </el-col>
+                    <el-col :span="12">
+                      <el-form-item label="对话比例">
+                        <el-select v-model="advancedSettings.writing!.dialogueRatio" placeholder="选择比例" clearable>
+                          <el-option v-for="opt in dialogueOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                        </el-select>
+                      </el-form-item>
+                    </el-col>
+                  </el-row>
+                  <el-row :gutter="16">
+                    <el-col :span="12">
+                      <el-form-item label="心理描写">
+                        <el-select v-model="advancedSettings.writing!.psychologyDescription" placeholder="选择程度" clearable>
+                          <el-option v-for="opt in descriptionOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                        </el-select>
+                      </el-form-item>
+                    </el-col>
+                    <el-col :span="12">
+                      <el-form-item label="环境描写">
+                        <el-select v-model="advancedSettings.writing!.environmentDescription" placeholder="选择程度" clearable>
+                          <el-option v-for="opt in descriptionOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                        </el-select>
+                      </el-form-item>
+                    </el-col>
+                  </el-row>
+                </el-collapse-item>
+
+                <!-- 禁忌/偏好设置 -->
+                <el-collapse-item title="禁忌/偏好" name="preferences">
+                  <template #title>
+                    <div class="panel-title">
+                      <el-icon><Warning /></el-icon>
+                      <span>禁忌/偏好</span>
+                    </div>
+                  </template>
+                  <el-form-item label="禁用元素">
+                    <div class="tag-input-wrapper">
+                      <div class="tags-display">
+                        <el-tag
+                          v-for="element in advancedSettings.preferences?.forbiddenElements"
+                          :key="element"
+                          closable
+                          type="danger"
+                          @close="removeForbiddenElement(element)"
+                        >
+                          {{ element }}
+                        </el-tag>
+                      </div>
+                      <div class="tag-input">
+                        <el-input
+                          v-model="forbiddenInput"
+                          placeholder="输入禁用元素，如：党争、血腥..."
+                          size="small"
+                          @keyup.enter="addForbiddenElement"
+                        />
+                        <el-button size="small" @click="addForbiddenElement">添加</el-button>
+                      </div>
+                    </div>
+                  </el-form-item>
+                  <el-form-item label="必含元素">
+                    <div class="tag-input-wrapper">
+                      <div class="tags-display">
+                        <el-tag
+                          v-for="element in advancedSettings.preferences?.requiredElements"
+                          :key="element"
+                          closable
+                          type="success"
+                          @close="removeRequiredElement(element)"
+                        >
+                          {{ element }}
+                        </el-tag>
+                      </div>
+                      <div class="tag-input">
+                        <el-input
+                          v-model="requiredInput"
+                          placeholder="输入必含元素，如：宠物、师徒..."
+                          size="small"
+                          @keyup.enter="addRequiredElement"
+                        />
+                        <el-button size="small" @click="addRequiredElement">添加</el-button>
+                      </div>
+                    </div>
+                  </el-form-item>
+                  <el-form-item label="参考作品">
+                    <el-input
+                      v-model="advancedSettings.preferences!.referenceWorks"
+                      placeholder="如：凡人修仙传、斗破苍穹..."
+                    />
+                  </el-form-item>
+                </el-collapse-item>
+              </el-collapse>
+            </div>
+          </el-collapse-transition>
+        </div>
       </div>
 
       <!-- 步骤2：AI 生成 -->
@@ -474,6 +998,30 @@ function handleClose(): void {
 
         <div v-else-if="generatedContent" class="generated-content">
           <h3 class="step-title">AI 生成结果</h3>
+
+          <!-- 书名推荐 -->
+          <div class="content-section title-suggestions" v-if="generatedContent.suggestedTitles && generatedContent.suggestedTitles.length > 0">
+            <h4>
+              <el-icon><EditPen /></el-icon>
+              推荐书名
+            </h4>
+            <div class="title-suggestions-list">
+              <el-tag
+                v-for="(title, index) in generatedContent.suggestedTitles"
+                :key="index"
+                :type="formData.title === title ? 'primary' : 'info'"
+                size="large"
+                class="title-suggestion-tag"
+                @click="formData.title = title"
+              >
+                {{ title }}
+              </el-tag>
+            </div>
+            <div class="current-title">
+              <span class="label">当前书名：</span>
+              <el-input v-model="formData.title" placeholder="点击上方推荐或自行修改" style="width: 300px;" />
+            </div>
+          </div>
 
           <!-- 简介 -->
           <div class="content-section">
@@ -502,7 +1050,7 @@ function handleClose(): void {
             <div class="volumes-list">
               <el-collapse>
                 <el-collapse-item
-                  v-for="(volume, index) in generatedContent.volumes"
+                  v-for="volume in generatedContent.volumes"
                   :key="volume.id"
                   :name="volume.id"
                 >
@@ -546,16 +1094,36 @@ function handleClose(): void {
               >
                 <div class="char-header">
                   <span class="char-name">{{ char.name }}</span>
-                  <el-tag
-                    :type="char.role === 'protagonist' ? 'primary' : char.role === 'antagonist' ? 'danger' : 'info'"
-                    size="small"
-                  >
-                    {{ roleTypeMap[char.role] || char.role }}
-                  </el-tag>
+                  <div class="char-tags">
+                    <el-tag
+                      :type="char.role === 'protagonist' ? 'primary' : char.role === 'antagonist' ? 'danger' : 'info'"
+                      size="small"
+                    >
+                      {{ roleTypeMap[char.role] || char.role }}
+                    </el-tag>
+                    <el-tag
+                      v-for="tag in (char.tags || [])"
+                      :key="tag"
+                      size="small"
+                      type="warning"
+                    >
+                      {{ tag }}
+                    </el-tag>
+                  </div>
                 </div>
                 <p class="char-desc">{{ char.description }}</p>
               </div>
             </div>
+          </div>
+
+          <!-- 预设展示 -->
+          <div class="preset-display">
+            <span class="preset-label">预设：</span>
+            <el-tag size="small" type="primary">{{ BOOK_GENRE_MAP[formData.genre] }}</el-tag>
+            <el-tag v-if="formData.subGenre" size="small" type="primary">{{ BOOK_SUB_GENRE_MAP[formData.subGenre as BookSubGenre] }}</el-tag>
+            <el-tag size="small" type="success">{{ BOOK_STYLE_MAP[formData.style] }}</el-tag>
+            <el-tag v-if="advancedSettings.protagonist?.romanceLine" size="small" type="warning">{{ ROMANCE_LINE_MAP[advancedSettings.protagonist.romanceLine] }}</el-tag>
+            <el-tag v-if="advancedSettings.protagonist?.goldenFinger?.type && advancedSettings.protagonist.goldenFinger.type !== 'none'" size="small" type="danger">{{ GOLDEN_FINGER_TYPE_MAP[advancedSettings.protagonist.goldenFinger.type] }}</el-tag>
           </div>
 
           <!-- 修改区域 -->
@@ -716,6 +1284,43 @@ function handleClose(): void {
   }
 }
 
+.word-count-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  .el-input-number {
+    width: 150px;
+  }
+
+  .unit {
+    font-size: 14px;
+    color: var(--text-primary, $text-primary);
+  }
+}
+
+.word-count-range-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  .el-input-number {
+    width: 130px;
+  }
+
+  .range-separator {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text-secondary, $text-secondary);
+  }
+
+  .unit {
+    font-size: 14px;
+    color: var(--text-primary, $text-primary);
+    margin-left: 4px;
+  }
+}
+
 .word-count-hint {
   display: flex;
   align-items: center;
@@ -727,6 +1332,188 @@ function handleClose(): void {
   .el-icon {
     font-size: 14px;
     color: $primary-color;
+  }
+}
+
+.no-golden-finger-tip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background-color: var(--bg-light, $bg-page);
+  border-radius: $border-radius-base;
+  font-size: 13px;
+  color: var(--text-secondary, $text-secondary);
+
+  .el-icon {
+    font-size: 16px;
+    color: var(--text-placeholder, $text-placeholder);
+  }
+}
+
+.golden-finger-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary, $text-secondary);
+
+  .el-icon {
+    font-size: 14px;
+    color: $primary-color;
+  }
+}
+
+// 高级设置样式
+.advanced-settings-section {
+  margin-top: 24px;
+  border: 1px solid var(--border-color, $border-light);
+  border-radius: $border-radius-base;
+  overflow: hidden;
+
+  .advanced-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    background-color: var(--bg-light, $bg-page);
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.2s;
+
+    &:hover {
+      background-color: var(--el-fill-color-light);
+    }
+
+    span {
+      flex: 1;
+      font-weight: 500;
+      color: var(--text-primary, $text-primary);
+    }
+
+    .arrow-icon {
+      transition: transform 0.3s;
+    }
+  }
+
+  .advanced-settings-content {
+    padding: 16px;
+    border-top: 1px solid var(--border-color, $border-light);
+
+    :deep(.el-collapse) {
+      border: none;
+
+      .el-collapse-item__header {
+        padding: 0 12px;
+        height: 44px;
+        background-color: var(--bg-light, $bg-page);
+        border-radius: $border-radius-base;
+        margin-bottom: 8px;
+        border: none;
+      }
+
+      .el-collapse-item__wrap {
+        border: none;
+      }
+
+      .el-collapse-item__content {
+        padding: 12px 0;
+      }
+    }
+
+    .panel-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 500;
+    }
+
+    .el-form-item {
+      margin-bottom: 12px;
+
+      :deep(.el-form-item__label) {
+        font-size: 13px;
+      }
+    }
+
+    .el-select {
+      width: 100%;
+    }
+  }
+}
+
+// 金手指设定样式
+.golden-finger-section {
+  margin-top: 16px;
+  padding: 16px;
+  background-color: var(--bg-light, $bg-page);
+  border-radius: $border-radius-base;
+
+  .section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary, $text-primary);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px dashed var(--border-color, $border-light);
+  }
+
+  .golden-finger-example {
+    margin: 12px 0;
+    padding: 12px;
+    background-color: rgba($primary-color, 0.08);
+    border-radius: $border-radius-base;
+    border-left: 3px solid $primary-color;
+
+    .example-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+
+      .example-label {
+        font-size: 12px;
+        color: var(--text-secondary, $text-secondary);
+      }
+    }
+
+    .example-content {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+
+      .example-name {
+        font-weight: 600;
+        color: $primary-color;
+      }
+
+      .example-desc {
+        font-size: 13px;
+        color: var(--text-secondary, $text-secondary);
+        line-height: 1.6;
+      }
+    }
+  }
+}
+
+// 禁忌/偏好标签输入样式
+.tag-input-wrapper {
+  .tags-display {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 8px;
+    min-height: 24px;
+  }
+
+  .tag-input {
+    display: flex;
+    gap: 8px;
+
+    .el-input {
+      flex: 1;
+    }
   }
 }
 
@@ -759,6 +1546,46 @@ function handleClose(): void {
 .generated-content {
   .content-section {
     margin-bottom: 24px;
+
+    &.title-suggestions {
+      padding: 16px;
+      background-color: rgba($primary-color, 0.05);
+      border-radius: $border-radius-base;
+      border: 1px dashed rgba($primary-color, 0.3);
+
+      .title-suggestions-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-bottom: 16px;
+
+        .title-suggestion-tag {
+          cursor: pointer;
+          transition: all 0.2s;
+          font-size: 14px;
+          padding: 8px 16px;
+
+          &:hover {
+            transform: scale(1.02);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+          }
+        }
+      }
+
+      .current-title {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding-top: 12px;
+        border-top: 1px solid var(--border-color, $border-light);
+
+        .label {
+          font-size: 13px;
+          color: var(--text-secondary, $text-secondary);
+          white-space: nowrap;
+        }
+      }
+    }
 
     h4 {
       display: flex;
@@ -905,12 +1732,39 @@ function handleClose(): void {
         font-weight: 600;
         font-size: 15px;
       }
+
+      .char-tags {
+        display: flex;
+        gap: 4px;
+        flex-wrap: wrap;
+      }
     }
 
     .char-desc {
       font-size: 13px;
       color: var(--text-secondary, $text-secondary);
       line-height: 1.6;
+    }
+  }
+
+  .preset-display {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 24px;
+    padding: 12px 16px;
+    background: var(--el-fill-color-lighter, #f5f7fa);
+    border-radius: 8px;
+
+    .preset-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary, #666);
+    }
+
+    .el-tag {
+      border-radius: 12px;
     }
   }
 

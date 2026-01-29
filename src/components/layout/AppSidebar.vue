@@ -90,14 +90,20 @@ function goToConfig(): void {
 </template>
 
 <style scoped lang="scss">
+// ==========================================
+// 侧边栏样式 - Gemini 3 Pro 设计方案
+// ==========================================
+
 .app-sidebar {
   width: $sidebar-width;
   height: 100%;
-  background-color: $bg-sidebar;
+  background-color: var(--sidebar-bg, $dark-bg-surface);
+  border-right: 1px solid var(--border-base, $dark-border-base);
   display: flex;
   flex-direction: column;
-  transition: width $transition-duration $transition-ease;
+  transition: width $transition-duration $transition-timing;
   z-index: $z-sidebar;
+  flex-shrink: 0;
 
   &.collapsed {
     width: $sidebar-collapsed-width;
@@ -106,69 +112,113 @@ function goToConfig(): void {
     .nav-text {
       display: none;
     }
+
+    .nav-item {
+      justify-content: center;
+      padding: $spacing-md;
+    }
   }
 }
 
+// ==========================================
+// Logo 区域
+// ==========================================
 .sidebar-logo {
   height: $header-height;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid var(--border-base, $dark-border-base);
+  flex-shrink: 0;
 
   .logo-text {
-    font-size: 18px;
+    font-size: $font-size-large;
     font-weight: 700;
-    color: #fff;
+    background: linear-gradient(135deg, $primary-color, $primary-light);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
   }
 
   .logo-icon {
-    font-size: 20px;
+    font-size: $font-size-extra-large;
     font-weight: 700;
-    color: #fff;
+    background: linear-gradient(135deg, $primary-color, $primary-light);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
   }
 }
 
+// ==========================================
+// 导航区域
+// ==========================================
 .sidebar-nav {
   flex: 1;
-  padding: 12px 8px;
+  padding: $spacing-md $spacing-sm;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .sidebar-footer {
-  padding: 12px 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding: $spacing-md $spacing-sm;
+  border-top: 1px solid var(--border-base, $dark-border-base);
+  flex-shrink: 0;
 }
 
+// ==========================================
+// 导航项
+// ==========================================
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px;
-  margin-bottom: 4px;
-  border-radius: $border-radius-base;
-  color: rgba(255, 255, 255, 0.7);
+  gap: $spacing-md;
+  padding: $spacing-md $spacing-base;
+  margin-bottom: $spacing-xs;
+  border-radius: $border-radius-md;
+  color: var(--text-secondary, $dark-text-secondary);
   cursor: pointer;
-  transition: all $transition-duration $transition-ease;
+  transition: all $transition-duration-fast $transition-timing;
+  position: relative;
 
   &:hover {
-    background-color: $bg-sidebar-light;
-    color: #fff;
+    background-color: var(--sidebar-item-hover, $dark-bg-hover);
+    color: var(--text-primary, $dark-text-primary);
   }
 
   &.active {
-    background-color: $primary-color;
-    color: #fff;
+    background-color: var(--sidebar-item-active, rgba($primary-color, 0.15));
+    color: $primary-color;
+
+    // 左侧指示条
+    &::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 3px;
+      height: 60%;
+      background-color: $primary-color;
+      border-radius: 0 2px 2px 0;
+    }
+
+    .nav-icon {
+      color: $primary-color;
+    }
   }
 }
 
 .nav-icon {
-  font-size: 18px;
+  font-size: 20px;
   flex-shrink: 0;
+  transition: color $transition-duration-fast $transition-timing;
 }
 
 .nav-text {
-  font-size: 14px;
+  font-size: $font-size-base;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>

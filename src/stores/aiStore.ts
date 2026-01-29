@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { AIConfig, AIProvider, TokenUsageRecord, GenerateResult } from '@/types'
+import type { AIConfig, AIProvider, TokenUsageRecord, GenerateResult, AISceneType, AISceneConfig, GenerateParamsConfig } from '@/types'
 import * as aiApi from '@/services/api/aiApi'
 
 export const useAiStore = defineStore('ai', () => {
@@ -36,6 +36,20 @@ export const useAiStore = defineStore('ai', () => {
   const currentReasoning = ref<string | null>(null)
   // 嵌入式思考面板是否可见（用于控制浮窗是否显示）
   const embeddedPanelVisible = ref(false)
+
+  // 场景化AI模型配置
+  const sceneConfig = ref<AISceneConfig>({
+    useUnified: true,
+    unifiedConfigId: undefined,
+    sceneConfigs: {}
+  })
+
+  // 生成参数配置
+  const generateParams = ref<GenerateParamsConfig>({
+    chapterWordRange: [2000, 4000],
+    continueWordRange: [300, 800],
+    temperature: 0.7
+  })
 
   // 计算属性
   const defaultConfig = computed(() =>
@@ -329,6 +343,77 @@ export const useAiStore = defineStore('ai', () => {
     currentReasoning.value = null
   }
 
+  // 根据场景获取配置
+  function getConfigForScene(scene: AISceneType): AIConfig | null {
+    if (sceneConfig.value.useUnified) {
+      // 统一模式：优先使用默认配置
+      return defaultConfig.value
+    }
+    // 分场景模式
+    const configId = sceneConfig.value.sceneConfigs[scene]
+    if (configId) {
+      return configs.value.find(c => c.id === configId) || getCreativeConfig()
+    }
+    // 未配置的场景使用创作模型
+    return getCreativeConfig()
+  }
+
+  // 获取创作模型配置（分场景模式下的默认/全局模型）
+  function getCreativeConfig(): AIConfig | null {
+    const creativeId = sceneConfig.value.sceneConfigs['creative']
+    if (creativeId) {
+      return configs.value.find(c => c.id === creativeId) || defaultConfig.value
+    }
+    return defaultConfig.value
+  }
+
+  // 获取全局模型（非创作场景用的通用模型，使用创作模型）
+  function getGlobalConfig(): AIConfig | null {
+    if (sceneConfig.value.useUnified) {
+      return defaultConfig.value
+    }
+    // 分场景模式下，全局模型使用创作模型
+    return getCreativeConfig()
+  }
+
+  // 保存场景配置到本地存储
+  function saveSceneConfig(): void {
+    localStorage.setItem('ai-scene-config', JSON.stringify(sceneConfig.value))
+    localStorage.setItem('ai-generate-params', JSON.stringify(generateParams.value))
+  }
+
+  // 加载场景配置
+  function loadSceneConfig(): void {
+    const savedSceneConfig = localStorage.getItem('ai-scene-config')
+    const savedGenerateParams = localStorage.getItem('ai-generate-params')
+    if (savedSceneConfig) {
+      try {
+        sceneConfig.value = JSON.parse(savedSceneConfig)
+      } catch (e) {
+        console.error('加载场景配置失败:', e)
+      }
+    }
+    if (savedGenerateParams) {
+      try {
+        generateParams.value = JSON.parse(savedGenerateParams)
+      } catch (e) {
+        console.error('加载生成参数失败:', e)
+      }
+    }
+  }
+
+  // 更新场景配置
+  function updateSceneConfig(config: Partial<AISceneConfig>): void {
+    sceneConfig.value = { ...sceneConfig.value, ...config }
+    saveSceneConfig()
+  }
+
+  // 更新生成参数
+  function updateGenerateParams(params: Partial<GenerateParamsConfig>): void {
+    generateParams.value = { ...generateParams.value, ...params }
+    saveSceneConfig()
+  }
+
   // 更新生成步骤状态
   function updateStep(stepId: string, status: 'pending' | 'running' | 'completed', description?: string): void {
     const step = generatingProgress.value.steps.find(s => s.id === stepId)
@@ -374,6 +459,8 @@ export const useAiStore = defineStore('ai', () => {
     generatingProgress,
     currentReasoning,
     embeddedPanelVisible,
+    sceneConfig,
+    generateParams,
     // 计算属性
     defaultConfig,
     configsByProvider,
@@ -400,6 +487,14 @@ export const useAiStore = defineStore('ai', () => {
     clearReasoning,
     updateStep,
     updateProgress,
-    resetProgress
+    resetProgress,
+    // 场景配置方法
+    getConfigForScene,
+    getCreativeConfig,
+    getGlobalConfig,
+    saveSceneConfig,
+    loadSceneConfig,
+    updateSceneConfig,
+    updateGenerateParams
   }
 })

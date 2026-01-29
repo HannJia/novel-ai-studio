@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { useBookStore } from '@/stores'
+import { useBookStore, useUiStore } from '@/stores'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { Book, BookGenre, BookStyle } from '@/types'
 import { BOOK_GENRE_MAP, BOOK_STYLE_MAP, BOOK_STATUS_MAP } from '@/types'
@@ -11,6 +11,7 @@ import { uploadCover } from '@/services/api/fileApi'
 
 const router = useRouter()
 const bookStore = useBookStore()
+const uiStore = useUiStore()
 
 const showCreateDialog = ref(false)
 const showWizardDialog = ref(false)
@@ -34,6 +35,7 @@ const styleOptions = Object.entries(BOOK_STYLE_MAP).map(([value, label]) => ({
 }))
 
 onMounted(() => {
+  uiStore.loadSettings()
   bookStore.fetchBooks()
 })
 
@@ -351,39 +353,52 @@ async function uploadBookCover(file: File, book: Book): Promise<void> {
 </template>
 
 <style scoped lang="scss">
+// ==========================================
+// 书架页面样式 - Gemini 3 Pro 设计方案
+// ==========================================
+
 .home-view {
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
-  background-color: $bg-page;
+  background-color: var(--bg-base, $dark-bg-base);
 }
 
+// ==========================================
+// 顶部工具栏
+// ==========================================
 .home-header {
   height: $header-height;
-  padding: 0 24px;
+  padding: 0 $spacing-xl;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background-color: $bg-base;
-  border-bottom: 1px solid $border-light;
-  box-shadow: $shadow-base;
+  background-color: var(--bg-surface, $dark-bg-surface);
+  border-bottom: 1px solid var(--border-base, $dark-border-base);
+  backdrop-filter: blur(8px);
 }
 
 .app-title {
-  font-size: 20px;
-  font-weight: 600;
-  color: $primary-color;
+  font-size: $font-size-extra-large;
+  font-weight: 700;
+  background: linear-gradient(135deg, $primary-color, $primary-light);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .header-right {
   display: flex;
-  gap: 12px;
+  gap: $spacing-md;
 }
 
+// ==========================================
+// 主内容区
+// ==========================================
 .home-content {
   flex: 1;
-  padding: 24px;
+  padding: $spacing-xxl;
   overflow-y: auto;
 }
 
@@ -394,61 +409,102 @@ async function uploadBookCover(file: File, book: Book): Promise<void> {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: $text-secondary;
+  color: var(--text-secondary, $dark-text-secondary);
 }
 
 .loading-state {
-  gap: 12px;
+  gap: $spacing-md;
 
   .el-icon {
-    font-size: 32px;
+    font-size: 40px;
+    color: $primary-color;
   }
 }
 
 .empty-actions {
   display: flex;
-  gap: 12px;
-  margin-top: 16px;
+  gap: $spacing-md;
+  margin-top: $spacing-lg;
 }
 
+// ==========================================
+// 书籍网格
+// ==========================================
 .book-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 24px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: $spacing-xl;
 }
 
+// ==========================================
+// 书籍卡片
+// ==========================================
 .book-card {
-  background-color: $bg-base;
-  border-radius: $border-radius-large;
+  background-color: var(--card-bg, $dark-bg-surface);
+  border: 1px solid var(--card-border, $dark-border-base);
+  border-radius: $border-radius-lg;
   overflow: hidden;
   cursor: pointer;
-  transition: all $transition-duration $transition-ease;
-  box-shadow: $shadow-light;
+  transition: all $transition-duration $transition-timing;
+  box-shadow: var(--card-shadow, $dark-card-shadow);
 
   &:hover {
-    transform: translateY(-4px);
-    box-shadow: $shadow-dark;
+    transform: translateY(-6px);
+    box-shadow: var(--card-hover-shadow, $dark-card-shadow-hover);
+    border-color: var(--card-hover-border, $dark-border-light);
+
+    .book-cover::after {
+      opacity: 1;
+    }
+
+    .delete-btn {
+      opacity: 1;
+    }
   }
 }
 
+// ==========================================
+// 书籍封面
+// ==========================================
 .book-cover {
   width: 100%;
-  height: 160px;
-  background-color: $bg-page;
+  height: 180px;
+  background-color: var(--bg-elevated, $dark-bg-elevated);
   display: flex;
   align-items: center;
   justify-content: center;
   position: relative;
+  overflow: hidden;
+
+  // 悬浮渐变遮罩
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      to top,
+      rgba(0, 0, 0, 0.6) 0%,
+      transparent 50%
+    );
+    opacity: 0;
+    transition: opacity $transition-duration $transition-timing;
+    pointer-events: none;
+  }
 
   img {
     width: 100%;
     height: 100%;
     object-fit: cover;
+    transition: transform $transition-duration-slow $transition-timing;
+  }
+
+  &:hover img {
+    transform: scale(1.05);
   }
 
   .cover-placeholder {
     font-size: 48px;
-    color: $text-placeholder;
+    color: var(--text-muted, $dark-text-muted);
   }
 
   .cover-upload-area {
@@ -456,39 +512,42 @@ async function uploadBookCover(file: File, book: Book): Promise<void> {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: $spacing-sm;
     width: 100%;
     height: 100%;
     cursor: pointer;
-    transition: all $transition-duration $transition-ease;
-    background-color: $bg-page;
+    transition: all $transition-duration $transition-timing;
+    background-color: var(--bg-elevated, $dark-bg-elevated);
+    border: 2px dashed var(--border-base, $dark-border-base);
+    margin: $spacing-sm;
+    width: calc(100% - #{$spacing-base});
+    height: calc(100% - #{$spacing-base});
+    border-radius: $border-radius-md;
 
     .el-icon {
-      font-size: 32px;
-      color: $text-placeholder;
-      transition: color $transition-duration-fast;
+      font-size: 36px;
+      color: var(--text-muted, $dark-text-muted);
+      transition: all $transition-duration-fast $transition-timing;
     }
 
     .upload-hint {
-      font-size: 12px;
-      color: $text-placeholder;
-      transition: color $transition-duration-fast;
+      font-size: $font-size-small;
+      color: var(--text-muted, $dark-text-muted);
+      transition: all $transition-duration-fast $transition-timing;
     }
 
     .uploading-state {
       .el-icon {
-        font-size: 32px;
+        font-size: 36px;
         color: $primary-color;
       }
     }
 
     &:hover {
-      background-color: rgba($primary-color, 0.05);
+      background-color: rgba($primary-color, 0.08);
+      border-color: $primary-color;
 
-      .el-icon {
-        color: $primary-color;
-      }
-
+      .el-icon,
       .upload-hint {
         color: $primary-color;
       }
@@ -497,76 +556,111 @@ async function uploadBookCover(file: File, book: Book): Promise<void> {
 
   .delete-btn {
     position: absolute;
-    top: 8px;
-    right: 8px;
+    top: $spacing-sm;
+    right: $spacing-sm;
     opacity: 0;
-    transition: opacity $transition-duration $transition-ease;
+    z-index: 10;
+    transition: opacity $transition-duration $transition-timing;
   }
 }
 
-.book-card:hover .delete-btn {
-  opacity: 1;
-}
-
+// ==========================================
+// 书籍信息
+// ==========================================
 .book-info {
-  padding: 16px;
+  padding: $spacing-base;
 }
 
 .book-title {
-  font-size: 16px;
+  font-size: $font-size-medium;
   font-weight: 600;
-  color: $text-primary;
-  margin-bottom: 8px;
+  color: var(--text-primary, $dark-text-primary);
+  margin-bottom: $spacing-sm;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.4;
 }
 
 .book-meta {
   display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
+  flex-wrap: wrap;
+  gap: $spacing-xs;
+  margin-bottom: $spacing-sm;
 
   .genre-tag,
   .style-tag {
-    font-size: 12px;
-    padding: 2px 8px;
-    border-radius: 4px;
-    background-color: $bg-page;
-    color: $text-secondary;
+    font-size: $font-size-extra-small;
+    padding: 2px $spacing-sm;
+    border-radius: $border-radius-sm;
+    background-color: rgba($primary-color, 0.15);
+    color: $primary-light;
+    font-weight: 500;
+  }
+
+  .style-tag {
+    background-color: rgba($accent-cyan, 0.15);
+    color: $accent-cyan;
   }
 }
 
 .book-stats {
-  font-size: 12px;
-  color: $text-secondary;
-  margin-bottom: 8px;
+  font-size: $font-size-extra-small;
+  color: var(--text-secondary, $dark-text-secondary);
+  margin-bottom: $spacing-sm;
+  display: flex;
+  gap: $spacing-md;
 
   span {
-    margin-right: 12px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
   }
 }
 
 .book-status {
-  font-size: 12px;
-  font-weight: 500;
+  font-size: $font-size-extra-small;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+
+  &::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
 
   &.writing {
     color: $primary-color;
+    &::before {
+      background-color: $primary-color;
+      box-shadow: 0 0 8px rgba($primary-color, 0.5);
+    }
   }
 
   &.paused {
     color: $warning-color;
+    &::before {
+      background-color: $warning-color;
+    }
   }
 
   &.completed {
     color: $success-color;
+    &::before {
+      background-color: $success-color;
+    }
   }
 }
 
+// ==========================================
+// 创建书籍表单
+// ==========================================
 .create-book-form {
   display: flex;
-  gap: 24px;
+  gap: $spacing-xl;
 
   .form-left {
     flex-shrink: 0;
@@ -578,6 +672,102 @@ async function uploadBookCover(file: File, book: Book): Promise<void> {
     .el-select {
       width: 100%;
     }
+  }
+}
+
+// ==========================================
+// 响应式适配
+// ==========================================
+@media (max-width: 768px) {
+  .home-header {
+    padding: 0 $spacing-base;
+  }
+
+  .home-content {
+    padding: $spacing-base;
+  }
+
+  .book-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: $spacing-base;
+  }
+
+  .book-cover {
+    height: 140px;
+  }
+}
+
+// ==========================================
+// 浅色主题
+// ==========================================
+:global(.theme-light) {
+  .home-view {
+    background-color: #f8fafc;
+  }
+
+  .home-header {
+    background-color: #ffffff;
+    border-bottom-color: #e2e8f0;
+  }
+
+  .home-content {
+    background-color: #f8fafc;
+  }
+
+  .loading-state,
+  .empty-state {
+    color: #64748b;
+  }
+
+  .book-card {
+    background-color: #ffffff;
+    border-color: #e2e8f0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+
+    &:hover {
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+      border-color: #cbd5e1;
+    }
+  }
+
+  .book-cover {
+    background-color: #f1f5f9;
+
+    .cover-placeholder {
+      color: #94a3b8;
+    }
+
+    .cover-upload-area {
+      background-color: #f8fafc;
+      border-color: #e2e8f0;
+
+      .el-icon,
+      .upload-hint {
+        color: #94a3b8;
+      }
+
+      &:hover {
+        background-color: rgba(249, 115, 22, 0.08);
+        border-color: #f97316;
+
+        .el-icon,
+        .upload-hint {
+          color: #f97316;
+        }
+      }
+    }
+  }
+
+  .book-info {
+    background-color: #ffffff;
+  }
+
+  .book-title {
+    color: #1e293b;
+  }
+
+  .book-stats {
+    color: #64748b;
   }
 }
 </style>

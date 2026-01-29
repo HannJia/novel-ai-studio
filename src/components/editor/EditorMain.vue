@@ -87,12 +87,11 @@ function handleTitleKeydown(event: KeyboardEvent) {
       </div>
     </div>
 
-    <!-- 编辑器容器 -->
+    <!-- 编辑器容器 - 纸张卡片样式 -->
     <div v-else class="editor-container">
-      <!-- 章节信息栏 -->
-      <div class="chapter-info-bar">
-        <div class="chapter-header">
-          <!-- 可编辑的章节标题 -->
+      <div class="paper-card" :style="{ maxWidth: uiStore.editorWidth + 'px' }">
+        <!-- 章节标题居中显示 -->
+        <div class="chapter-title-section">
           <h2
             v-if="!isEditingTitle"
             class="chapter-title editable"
@@ -115,27 +114,22 @@ function handleTitleKeydown(event: KeyboardEvent) {
             <el-tag size="small" type="info">
               {{ chapterStore.currentChapter.status === 'completed' ? '已完成' : '草稿' }}
             </el-tag>
+            <span class="word-count">{{ editorStore.wordCount }} 字</span>
           </div>
         </div>
-        <div class="chapter-stats">
-          <span class="stat-item">
-            <el-icon><Document /></el-icon>
-            {{ editorStore.wordCount }} 字
-          </span>
-        </div>
-      </div>
 
-      <!-- 主编辑区 -->
-      <div class="editor-wrapper" :style="{ maxWidth: uiStore.editorWidth + 'px' }">
-        <textarea
-          v-model="editorStore.content"
-          class="main-textarea"
-          :style="{
-            fontSize: uiStore.fontSize + 'px',
-            lineHeight: uiStore.lineHeight
-          }"
-          placeholder="在此开始你的创作..."
-        ></textarea>
+        <!-- 主编辑区 -->
+        <div class="editor-wrapper">
+          <textarea
+            v-model="editorStore.content"
+            class="main-textarea"
+            :style="{
+              fontSize: uiStore.fontSize + 'px',
+              lineHeight: uiStore.lineHeight
+            }"
+            placeholder="在此开始你的创作..."
+          ></textarea>
+        </div>
       </div>
     </div>
 
@@ -185,116 +179,115 @@ function handleTitleKeydown(event: KeyboardEvent) {
   }
 }
 
+// 编辑器容器 - 居中布局
 .editor-container {
   flex: 1;
   display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  justify-content: center;
+  padding: 32px;
+  overflow-y: auto;
+  background-color: var(--page-bg, #f5f5f5);
 }
 
-.chapter-info-bar {
-  padding: 16px 24px;
-  background-color: var(--card-bg, $bg-base);
-  border-bottom: 1px solid var(--border-color, $border-lighter);
+// 纸张卡片样式
+.paper-card {
+  width: 100%;
+  max-width: 1100px;
+  background-color: var(--paper-bg, #ffffff);
+  border-radius: 8px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+  padding: 48px 64px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  min-height: 600px;
+}
 
-  .chapter-header {
-    display: flex;
+// 章节标题区域 - 居中
+.chapter-title-section {
+  text-align: center;
+  margin-bottom: 32px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--border-color, $border-lighter);
+
+  .chapter-title {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text-title, $light-text-title);
+    margin: 0 0 12px 0;
+    display: inline-flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
 
-    .chapter-title {
-      font-size: 18px;
-      font-weight: 600;
-      color: var(--text-title, $light-text-title);
-      margin: 0;
-      display: flex;
-      align-items: center;
-      gap: 8px;
+    &.editable {
+      cursor: pointer;
+      padding: 8px 16px;
+      border-radius: $border-radius-base;
+      transition: background-color 0.2s ease;
 
-      &.editable {
-        cursor: pointer;
-        padding: 4px 8px;
-        margin: -4px -8px;
-        border-radius: $border-radius-base;
-        transition: background-color 0.2s ease;
+      .edit-hint {
+        font-size: 14px;
+        color: var(--text-placeholder, $text-placeholder);
+        opacity: 0;
+        transition: opacity 0.2s ease;
+      }
+
+      &:hover {
+        background-color: var(--hover-bg, $light-bg-hover);
 
         .edit-hint {
-          font-size: 14px;
-          color: var(--text-placeholder, $text-placeholder);
-          opacity: 0;
-          transition: opacity 0.2s ease;
+          opacity: 1;
         }
-
-        &:hover {
-          background-color: var(--hover-bg, $light-bg-hover);
-
-          .edit-hint {
-            opacity: 1;
-          }
-        }
-      }
-    }
-
-    .title-input {
-      width: 300px;
-
-      :deep(.el-input__inner) {
-        font-size: 18px;
-        font-weight: 600;
-        height: 36px;
       }
     }
   }
 
-  .chapter-stats {
+  .title-input {
+    width: 400px;
+    margin: 0 auto;
+
+    :deep(.el-input__inner) {
+      font-size: 22px;
+      font-weight: 600;
+      text-align: center;
+      height: 44px;
+    }
+  }
+
+  .chapter-meta {
     display: flex;
     align-items: center;
-    gap: 16px;
+    justify-content: center;
+    gap: 12px;
 
-    .stat-item {
-      display: flex;
-      align-items: center;
-      gap: 4px;
+    .word-count {
       font-size: 13px;
       color: var(--text-secondary, $text-secondary);
-
-      .el-icon {
-        font-size: 14px;
-      }
     }
   }
 }
 
+// 编辑区包装
 .editor-wrapper {
   flex: 1;
   display: flex;
   flex-direction: column;
-  margin: 0 auto;
-  width: 100%;
-  padding: 24px;
-  overflow-y: auto;
 }
 
+// 主文本框
 .main-textarea {
   flex: 1;
   width: 100%;
-  min-height: 500px;
-  padding: 24px;
+  min-height: 400px;
+  padding: 0;
   border: none;
-  border-radius: $border-radius-card;
   resize: none;
   font-family: $font-family;
-  background-color: var(--textarea-bg, $bg-base);
+  background-color: transparent;
   color: var(--text-primary, $text-primary);
-  box-shadow: var(--textarea-shadow, $light-card-shadow);
-  transition: box-shadow $transition-duration $transition-ease;
+  line-height: 1.8;
 
   &:focus {
     outline: none;
-    box-shadow: var(--textarea-shadow-focus, $light-card-shadow-hover);
   }
 
   &::placeholder {
@@ -305,15 +298,26 @@ function handleTitleKeydown(event: KeyboardEvent) {
 // 深色主题适配
 :global(html.dark) .editor-main {
   --main-bg: #{$dark-bg-page};
-  --card-bg: #{$dark-bg-base};
+  --page-bg: #{$dark-bg-base};
+  --paper-bg: #{$dark-bg-card};
   --border-color: #{$dark-border-lighter};
   --text-title: #{$dark-text-primary};
   --text-primary: #{$dark-text-primary};
   --text-secondary: #{$dark-text-secondary};
   --text-placeholder: #{$dark-text-placeholder};
-  --textarea-bg: #{$dark-bg-card};
-  --textarea-shadow: #{$dark-card-shadow};
-  --textarea-shadow-focus: 0 0 0 2px #{$primary-color};
   --hover-bg: #{$dark-bg-hover};
+}
+
+// 浅色主题适配
+:global(.theme-light) .editor-main {
+  --main-bg: #f8fafc;
+  --page-bg: #f1f5f9;
+  --paper-bg: #ffffff;
+  --border-color: #e2e8f0;
+  --text-title: #1e293b;
+  --text-primary: #1e293b;
+  --text-secondary: #64748b;
+  --text-placeholder: #94a3b8;
+  --hover-bg: #f1f5f9;
 }
 </style>

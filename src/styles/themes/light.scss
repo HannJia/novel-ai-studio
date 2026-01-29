@@ -1,74 +1,234 @@
 /**
- * NovelAI Studio 浅色主题（方案B - Notion风格）
- * 适合日间使用，清爽简洁
+ * NovelAI Studio 浅色主题
+ * 橙色纸张质感风格 - 适合日间使用
  */
 
-@import './variables.scss';
+@import '../variables.scss';
 
 .theme-light {
-  // 背景色
-  --bg-primary: #{$bg-white};
-  --bg-secondary: #{$bg-page};
-  --bg-tertiary: #{$border-extra-light};
-  --bg-hover: #{$bg-hover};
+  // ==========================================
+  // 背景色层级
+  // ==========================================
+  --bg-base: #ffffff;
+  --bg-surface: #f8fafc;
+  --bg-elevated: #ffffff;
+  --bg-hover: #f1f5f9;
+  --bg-active: #e2e8f0;
 
+  // 兼容旧变量名
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8fafc;
+  --bg-tertiary: #f1f5f9;
+
+  // ==========================================
+  // 纸张质感
+  // ==========================================
+  --paper-bg: #{$paper-bg};
+  --paper-shadow: #{$paper-shadow};
+
+  // ==========================================
   // 文字颜色
-  --text-primary: #{$text-primary};
-  --text-secondary: #{$text-regular};
-  --text-muted: #{$text-secondary};
-  --text-placeholder: #{$text-placeholder};
+  // ==========================================
+  --text-primary: #1e293b;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+  --text-disabled: #cbd5e1;
+  --text-placeholder: #94a3b8;
 
+  // ==========================================
   // 边框颜色
-  --border-base: #{$border-base};
-  --border-light: #{$border-light};
-  --border-lighter: #{$border-lighter};
+  // ==========================================
+  --border-base: #e2e8f0;
+  --border-light: #f1f5f9;
+  --border-lighter: #f8fafc;
+  --border-focus: #{$primary-color};
 
+  // ==========================================
   // 主色调
+  // ==========================================
   --color-primary: #{$primary-color};
   --color-primary-light: #{$primary-light};
   --color-primary-dark: #{$primary-dark};
+  --color-primary-rgb: 249, 115, 22;
 
+  // ==========================================
   // 状态颜色
+  // ==========================================
   --color-success: #{$success-color};
   --color-warning: #{$warning-color};
   --color-danger: #{$danger-color};
   --color-info: #{$info-color};
 
+  // ==========================================
   // 阴影
-  --shadow-base: #{$box-shadow-base};
-  --shadow-light: #{$box-shadow-light};
+  // ==========================================
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-base: 0 4px 6px rgba(0, 0, 0, 0.07);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.15);
+  --shadow-light: 0 2px 8px rgba(0, 0, 0, 0.08);
 
+  // ==========================================
   // 侧边栏
-  --sidebar-bg: #{$bg-white};
-  --sidebar-border: #{$border-light};
-  --sidebar-item-hover: #{$bg-hover};
-  --sidebar-item-active: rgba(64, 158, 255, 0.1);
+  // ==========================================
+  --sidebar-bg: #ffffff;
+  --sidebar-border: #e2e8f0;
+  --sidebar-item-hover: #f1f5f9;
+  --sidebar-item-active: rgba(249, 115, 22, 0.1);
+  --sidebar-item-active-border: #{$primary-color};
 
+  // ==========================================
   // 编辑器
-  --editor-bg: #{$bg-white};
-  --editor-line-number: #{$text-placeholder};
-  --editor-selection: rgba(64, 158, 255, 0.2);
-  --editor-cursor: #{$text-primary};
+  // ==========================================
+  --editor-bg: #f8fafc;
+  --editor-content-bg: #{$paper-bg};
+  --editor-line-number: #94a3b8;
+  --editor-selection: rgba(249, 115, 22, 0.2);
+  --editor-cursor: #1e293b;
+  --editor-gutter-bg: #f8fafc;
 
+  // ==========================================
   // 面板
-  --panel-bg: #{$bg-white};
-  --panel-header-bg: #{$bg-page};
-  --panel-border: #{$border-light};
+  // ==========================================
+  --panel-bg: #ffffff;
+  --panel-header-bg: #f8fafc;
+  --panel-border: #e2e8f0;
 
+  // ==========================================
   // 卡片
-  --card-bg: #{$bg-white};
-  --card-shadow: #{$box-shadow-base};
-  --card-hover-shadow: #{$box-shadow-light};
+  // ==========================================
+  --card-bg: #ffffff;
+  --card-border: #e2e8f0;
+  --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --card-hover-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  --card-hover-border: #cbd5e1;
 
+  // ==========================================
   // 输入框
-  --input-bg: #{$bg-white};
-  --input-border: #{$border-base};
+  // ==========================================
+  --input-bg: #ffffff;
+  --input-border: #e2e8f0;
   --input-focus-border: #{$primary-color};
+  --input-focus-shadow: 0 0 0 3px rgba(249, 115, 22, 0.15);
+  --input-placeholder: #94a3b8;
 
+  // ==========================================
   // 按钮
-  --button-default-bg: #{$bg-white};
-  --button-default-border: #{$border-base};
-  --button-default-text: #{$text-regular};
+  // ==========================================
+  --button-default-bg: #ffffff;
+  --button-default-border: #e2e8f0;
+  --button-default-text: #64748b;
+  --button-default-hover-bg: #f1f5f9;
+
   --button-primary-bg: #{$primary-color};
   --button-primary-text: #ffffff;
+  --button-primary-hover-bg: #{$primary-dark};
+  --button-primary-active-bg: #{$primary-darker};
+
+  // ==========================================
+  // 标签页 Tabs
+  // ==========================================
+  --tabs-bg: transparent;
+  --tabs-item-hover: #f1f5f9;
+  --tabs-item-active: #{$primary-color};
+  --tabs-indicator: #{$primary-color};
+
+  // ==========================================
+  // 下拉菜单
+  // ==========================================
+  --dropdown-bg: #ffffff;
+  --dropdown-border: #e2e8f0;
+  --dropdown-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
+  --dropdown-item-hover: #f1f5f9;
+
+  // ==========================================
+  // 对话框
+  // ==========================================
+  --dialog-bg: #ffffff;
+  --dialog-header-bg: #f8fafc;
+  --dialog-border: #e2e8f0;
+  --dialog-shadow: 0 20px 25px rgba(0, 0, 0, 0.15);
+  --dialog-overlay: rgba(0, 0, 0, 0.5);
+
+  // ==========================================
+  // 滚动条
+  // ==========================================
+  --scrollbar-track: #f1f5f9;
+  --scrollbar-thumb: #cbd5e1;
+  --scrollbar-thumb-hover: #94a3b8;
+
+  // ==========================================
+  // Element Plus 覆盖
+  // ==========================================
+  --el-bg-color: #ffffff;
+  --el-bg-color-page: #f8fafc;
+  --el-bg-color-overlay: #ffffff;
+
+  --el-text-color-primary: #1e293b;
+  --el-text-color-regular: #64748b;
+  --el-text-color-secondary: #94a3b8;
+  --el-text-color-placeholder: #94a3b8;
+  --el-text-color-disabled: #cbd5e1;
+
+  --el-border-color: #e2e8f0;
+  --el-border-color-light: #f1f5f9;
+  --el-border-color-lighter: #f8fafc;
+
+  --el-fill-color: #f1f5f9;
+  --el-fill-color-light: #f8fafc;
+  --el-fill-color-lighter: #ffffff;
+  --el-fill-color-blank: #ffffff;
+
+  --el-color-primary: #{$primary-color};
+  --el-color-primary-light-3: #{$primary-light};
+  --el-color-primary-light-5: rgba(249, 115, 22, 0.5);
+  --el-color-primary-light-7: rgba(249, 115, 22, 0.3);
+  --el-color-primary-light-9: rgba(249, 115, 22, 0.1);
+  --el-color-primary-dark-2: #{$primary-dark};
+
+  --el-color-success: #{$success-color};
+  --el-color-warning: #{$warning-color};
+  --el-color-danger: #{$danger-color};
+  --el-color-info: #{$info-color};
+
+  --el-box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
+  --el-box-shadow-light: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --el-box-shadow-lighter: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --el-box-shadow-dark: 0 10px 15px rgba(0, 0, 0, 0.1);
+
+  --el-mask-color: rgba(0, 0, 0, 0.5);
+  --el-mask-color-extra-light: rgba(0, 0, 0, 0.3);
+
+  // 圆角
+  --el-border-radius-base: #{$border-radius-base};
+  --el-border-radius-small: #{$border-radius-sm};
+  --el-border-radius-round: #{$border-radius-round};
+  --el-border-radius-circle: #{$border-radius-circle};
+}
+
+// ==========================================
+// 全局滚动条样式
+// ==========================================
+.theme-light {
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 4px;
+
+    &:hover {
+      background: var(--scrollbar-thumb-hover);
+    }
+  }
+
+  // Firefox
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }

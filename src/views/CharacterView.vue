@@ -109,40 +109,79 @@ function handleGraphNodeSelect(character: Character) {
 </template>
 
 <style scoped lang="scss">
+// ==========================================
+// 角色管理页面样式 - Gemini 3 Pro 设计方案
+// ==========================================
+
 .character-view {
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--el-bg-color);
+  background-color: var(--bg-base, $dark-bg-base);
 }
 
+// ==========================================
+// 页面头部
+// ==========================================
 .page-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 24px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  padding: $spacing-base $spacing-xl;
+  background-color: var(--bg-surface, $dark-bg-surface);
+  border-bottom: 1px solid var(--border-base, $dark-border-base);
+  flex-shrink: 0;
 
   .header-left {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: $spacing-base;
 
     h1 {
       margin: 0;
-      font-size: 20px;
+      font-size: $font-size-extra-large;
       font-weight: 600;
+      color: var(--text-primary, $dark-text-primary);
     }
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: $spacing-md;
   }
 }
 
+// ==========================================
+// 页面内容
+// ==========================================
 .page-content {
   flex: 1;
   overflow: hidden;
+  padding: $spacing-xl;
 
   &.graph-content {
     padding: 0;
+  }
+}
+
+// ==========================================
+// 按钮组样式覆盖
+// ==========================================
+:deep(.el-button-group) {
+  .el-button {
+    border-color: var(--border-base, $dark-border-base);
+
+    &:not(.is-active):not([type="primary"]) {
+      background-color: var(--bg-elevated, $dark-bg-elevated);
+      color: var(--text-secondary, $dark-text-secondary);
+
+      &:hover {
+        background-color: var(--bg-hover, $dark-bg-hover);
+        color: var(--text-primary, $dark-text-primary);
+      }
+    }
   }
 }
 </style>

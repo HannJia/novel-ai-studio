@@ -21,27 +21,32 @@ const props = defineProps<{
   isFullscreen: boolean
 }>()
 
-const progress = computed(() => {
-  const total = bookStore.currentBook?.wordCount || 0
-  const target = 100000 // 默认目标10万字
-  return Math.min((total / target) * 100, 100)
+// 当前模型名称
+const currentModelName = computed(() => {
+  const name = aiStore.currentConfig?.model || aiStore.defaultConfig?.model || '未配置'
+  if (name.length > 20) {
+    return name.substring(0, 17) + '...'
+  }
+  return name
 })
 
-// AI生成进度
-const generatingProgress = computed(() => aiStore.generatingProgress)
-const isGenerating = computed(() => aiStore.generating)
-// 进度百分比
-const progressPercent = computed(() => {
-  const { current, total } = generatingProgress.value
-  if (total <= 0) return 0
-  return Math.round((current / total) * 100)
+// 保存状态文本
+const saveStatusText = computed(() => {
+  if (editorStore.isSaving) return '保存中...'
+  if (editorStore.hasUnsavedChanges) return '未保存'
+  return '已保存'
 })
-// 续写按钮显示文字
-const continueButtonText = computed(() => {
-  if (!isGenerating.value) return '续写'
-  const stage = generatingProgress.value.stage
-  if (stage) return stage
-  return '生成中...'
+
+// 保存状态类
+const saveStatusClass = computed(() => {
+  if (editorStore.isSaving) return 'saving'
+  if (editorStore.hasUnsavedChanges) return 'unsaved'
+  return 'saved'
+})
+
+// 书籍分卷列表
+const volumeList = computed(() => {
+  return bookStore.currentBook?.volumes || []
 })
 
 function goHome(): void {
@@ -56,101 +61,78 @@ function toggleTheme(): void {
   uiStore.setThemeMode(newMode)
   uiStore.saveSettings()
 }
+
+function handleRefresh(): void {
+  // 刷新当前内容
+  window.location.reload()
+}
 </script>
 
 <template>
   <header class="editor-header">
-    <!-- 左侧：返回和书籍信息 -->
+    <!-- 左侧：返回、书籍信息、保存状态、字数 -->
     <div class="header-left">
       <el-button class="back-btn" text @click="goHome">
         <el-icon><ArrowLeft /></el-icon>
       </el-button>
-      <div class="book-info">
-        <span class="book-title">{{ bookStore.currentBook?.title || '加载中...' }}</span>
-        <span class="book-meta">
-          <el-tag size="small" type="info">{{ bookStore.currentBook?.genre || '' }}</el-tag>
+
+      <!-- 书籍标题下拉选择器 -->
+      <el-dropdown v-if="volumeList.length > 0" trigger="click">
+        <span class="book-title-trigger">
+          {{ bookStore.currentBook?.title || '加载中...' }}
+          <el-icon class="arrow-icon"><ArrowDown /></el-icon>
         </span>
-      </div>
-      <div class="progress-bar">
-        <el-progress
-          :percentage="progress"
-          :stroke-width="6"
-          :show-text="false"
-        />
-        <span class="progress-text">{{ bookStore.currentBook?.wordCount || 0 }} 字</span>
-      </div>
-    </div>
-
-    <!-- 中间：工具栏 -->
-    <div class="header-center">
-      <div class="toolbar-group">
-        <el-tooltip content="保存 (Ctrl+S)" placement="bottom">
-          <el-button
-            class="toolbar-btn"
-            :class="{ 'has-changes': editorStore.hasUnsavedChanges }"
-            @click="$emit('save')"
-            :loading="editorStore.isSaving"
-          >
-            <el-icon><DocumentChecked /></el-icon>
-          </el-button>
-        </el-tooltip>
-
-        <el-divider direction="vertical" />
-
-        <el-tooltip content="AI续写" placement="bottom">
-          <el-button
-            class="toolbar-btn primary"
-            :class="{ generating: aiStore.generating }"
-            @click="$emit('continueWriting')"
-            :loading="aiStore.generating"
-            :disabled="!aiStore.hasConfig"
-          >
-            <el-icon><MagicStick /></el-icon>
-            <span class="btn-text">{{ continueButtonText }}</span>
-          </el-button>
-        </el-tooltip>
-
-        <el-divider direction="vertical" />
-
-        <el-tooltip content="专注模式 (ESC退出)" placement="bottom">
-          <el-button
-            class="toolbar-btn"
-            :class="{ active: focusMode }"
-            @click="$emit('toggleFocus')"
-          >
-            <el-icon><View /></el-icon>
-          </el-button>
-        </el-tooltip>
-
-        <el-tooltip content="全屏" placement="bottom">
-          <el-button
-            class="toolbar-btn"
-            :class="{ active: isFullscreen }"
-            @click="$emit('toggleFullscreen')"
-          >
-            <el-icon><FullScreen /></el-icon>
-          </el-button>
-        </el-tooltip>
-      </div>
-    </div>
-
-    <!-- 右侧：设置和主题切换 -->
-    <div class="header-right">
-      <span class="word-count" v-if="uiStore.showWordCount">
-        <el-icon><Document /></el-icon>
-        {{ editorStore.wordCount }} 字
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item v-for="vol in volumeList" :key="vol.id">
+              {{ vol.title }}
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+      <span v-else class="book-title">
+        {{ bookStore.currentBook?.title || '加载中...' }}
       </span>
 
+      <!-- 保存状态指示器 -->
+      <span class="save-status" :class="saveStatusClass">
+        <span class="status-dot"></span>
+        {{ saveStatusText }}
+      </span>
+
+      <!-- 正文字数 -->
+      <span class="word-count">
+        正文 {{ bookStore.currentBook?.wordCount || 0 }} 字
+      </span>
+    </div>
+
+    <!-- 右侧：AI模型选择、刷新按钮 -->
+    <div class="header-right">
+      <!-- AI模型选择器 -->
+      <el-dropdown trigger="click" @command="() => {}">
+        <span class="model-selector">
+          <el-icon><Monitor /></el-icon>
+          {{ currentModelName }}
+          <el-icon class="arrow-icon"><ArrowDown /></el-icon>
+        </span>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item disabled>
+              当前: {{ currentModelName }}
+            </el-dropdown-item>
+            <el-dropdown-item divided @click="router.push('/config')">
+              <el-icon><Setting /></el-icon>
+              配置AI模型
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+
+      <!-- 主题切换 -->
       <el-tooltip :content="uiStore.isDarkMode ? '切换浅色模式' : '切换深色模式'" placement="bottom">
         <el-button class="theme-btn" text @click="toggleTheme">
           <el-icon v-if="uiStore.isDarkMode"><Sunny /></el-icon>
           <el-icon v-else><Moon /></el-icon>
-        </el-button>
-      </el-tooltip>
-
-      <el-tooltip content="设置面板" placement="bottom">
-        <el-button class="setting-btn" text @click="uiStore.toggleRightPanel">
-          <el-icon><Setting /></el-icon>
         </el-button>
       </el-tooltip>
     </div>
@@ -174,133 +156,119 @@ function toggleTheme(): void {
   display: flex;
   align-items: center;
   gap: 16px;
-  flex: 1;
 
   .back-btn {
     padding: 8px;
     border-radius: $border-radius-large;
+    color: var(--text-secondary, $text-secondary);
 
     &:hover {
       background-color: var(--hover-bg, $light-bg-hover);
-    }
-  }
-
-  .book-info {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-
-    .book-title {
-      font-weight: 600;
-      font-size: 15px;
       color: var(--text-primary, $text-primary);
     }
   }
 
-  .progress-bar {
+  .book-title-trigger {
     display: flex;
     align-items: center;
-    gap: 8px;
-    min-width: 120px;
+    gap: 6px;
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--text-primary, $text-primary);
+    cursor: pointer;
+    padding: 6px 12px;
+    border-radius: $border-radius-base;
+    transition: background-color 0.2s;
 
-    .el-progress {
-      flex: 1;
+    &:hover {
+      background-color: var(--hover-bg, $light-bg-hover);
     }
 
-    .progress-text {
+    .arrow-icon {
       font-size: 12px;
       color: var(--text-secondary, $text-secondary);
-      white-space: nowrap;
     }
   }
-}
 
-.header-center {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  .book-title {
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--text-primary, $text-primary);
+  }
 
-  .toolbar-group {
+  .save-status {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 4px 8px;
-    background-color: var(--toolbar-bg, $light-bg-panel);
-    border-radius: $border-radius-card;
-  }
-
-  .toolbar-btn {
-    padding: 8px 12px;
+    gap: 6px;
+    font-size: 13px;
+    padding: 4px 10px;
     border-radius: $border-radius-large;
-    border: none;
-    background: transparent;
-    color: var(--text-regular, $text-regular);
-    transition: all $transition-duration-fast $transition-ease;
+    background-color: var(--status-bg, rgba(0,0,0,0.05));
 
-    &:hover {
-      background-color: var(--hover-bg, $light-bg-hover);
-      color: var(--text-primary, $text-primary);
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
     }
 
-    &.active {
-      background-color: var(--active-bg, $light-bg-active);
-      color: $primary-color;
-    }
-
-    &.primary {
-      background-color: $primary-color;
-      color: #fff;
-
-      &:hover {
-        background-color: darken($primary-color, 5%);
-      }
-
-      .btn-text {
-        margin-left: 4px;
-      }
-
-      &.generating {
-        min-width: 100px;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        animation: pulse-generating 2s ease-in-out infinite;
-
-        .btn-text {
-          font-size: 12px;
-        }
+    &.saved {
+      color: $success-color;
+      .status-dot {
+        background-color: $success-color;
       }
     }
 
-    &.has-changes {
+    &.unsaved {
       color: $warning-color;
+      .status-dot {
+        background-color: $warning-color;
+      }
+    }
+
+    &.saving {
+      color: $primary-color;
+      .status-dot {
+        background-color: $primary-color;
+        animation: pulse 1s infinite;
+      }
     }
   }
 
-  .el-divider {
-    height: 20px;
-    margin: 0 4px;
+  .word-count {
+    font-size: 13px;
+    color: var(--text-secondary, $text-secondary);
   }
 }
 
 .header-right {
   display: flex;
   align-items: center;
-  gap: 12px;
-  flex: 1;
-  justify-content: flex-end;
+  gap: 8px;
 
-  .word-count {
+  .model-selector {
     display: flex;
     align-items: center;
-    gap: 4px;
-    font-size: 13px;
-    color: var(--text-secondary, $text-secondary);
-    padding: 4px 12px;
-    background-color: var(--toolbar-bg, $light-bg-panel);
+    gap: 8px;
+    padding: 6px 12px;
     border-radius: $border-radius-large;
+    background-color: var(--model-bg, $light-bg-panel);
+    color: var(--text-primary, $text-primary);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+
+    &:hover {
+      background-color: var(--hover-bg, $light-bg-hover);
+    }
+
+    .arrow-icon {
+      font-size: 12px;
+      color: var(--text-secondary, $text-secondary);
+    }
   }
 
-  .theme-btn,
-  .setting-btn {
+  .refresh-btn,
+  .theme-btn {
     padding: 8px;
     border-radius: $border-radius-large;
     color: var(--text-regular, $text-regular);
@@ -309,6 +277,16 @@ function toggleTheme(): void {
       background-color: var(--hover-bg, $light-bg-hover);
       color: var(--text-primary, $text-primary);
     }
+  }
+}
+
+// 脉冲动画
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
   }
 }
 
@@ -320,17 +298,19 @@ function toggleTheme(): void {
   --text-secondary: #{$dark-text-secondary};
   --text-regular: #{$dark-text-regular};
   --hover-bg: #{$dark-bg-hover};
-  --active-bg: #{$dark-bg-active};
-  --toolbar-bg: #{$dark-bg-panel};
+  --model-bg: #{$dark-bg-panel};
+  --status-bg: rgba(255,255,255,0.05);
 }
 
-// 生成中的脉冲动画
-@keyframes pulse-generating {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.85;
-  }
+// 浅色主题适配
+:global(.theme-light) .editor-header {
+  --header-bg: #ffffff;
+  --border-color: #e2e8f0;
+  --text-primary: #1e293b;
+  --text-secondary: #64748b;
+  --text-regular: #64748b;
+  --hover-bg: #f1f5f9;
+  --model-bg: #f8fafc;
+  --status-bg: rgba(0,0,0,0.05);
 }
 </style>

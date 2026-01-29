@@ -77,12 +77,19 @@ public class BookController {
      */
     @PutMapping("/{id}")
     public Result<Book> updateBook(@PathVariable String id, @RequestBody Book book) {
+        System.out.println("=== updateBook 接收到的数据 ===");
+        System.out.println("id: " + id);
+        System.out.println("book.outline: " + (book.getOutline() != null ? book.getOutline().substring(0, Math.min(100, book.getOutline().length())) : "null"));
+        System.out.println("book.volumes: " + (book.getVolumes() != null ? book.getVolumes().substring(0, Math.min(200, book.getVolumes().length())) : "null"));
+
         Book existing = bookService.getById(id);
         if (existing == null) {
             return Result.notFound("书籍不存在");
         }
 
         Book updated = bookService.updateBook(id, book);
+        System.out.println("=== 更新后的数据 ===");
+        System.out.println("updated.volumes: " + (updated.getVolumes() != null ? updated.getVolumes().substring(0, Math.min(200, updated.getVolumes().length())) : "null"));
         return Result.success(updated);
     }
 

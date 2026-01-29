@@ -46,6 +46,11 @@ public class Book {
     private String outline;
 
     /**
+     * 分卷大纲（JSON格式存储）
+     */
+    private String volumes;
+
+    /**
      * 封面图片路径
      */
     private String coverImage;
