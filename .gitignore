@@ -1,0 +1,11 @@
+node_modules/
+dist/
+dist-electron/
+release/
+*.local
+*.log
+*.err.log
+.local-recovery/
+.compare/
+.claude/settings.local.json
+.codex-public-skills-temp/

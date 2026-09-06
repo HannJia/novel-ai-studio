@@ -1,0 +1,89 @@
+{
+  "name": "ai-novel-writer",
+  "version": "0.1.0",
+  "description": "AI 长篇小说写作软件",
+  "private": true,
+  "main": "app-main/main.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
+    "dev:vite": "vite",
+    "dev:electron": "wait-on http://localhost:5173 && node scripts/start-electron.js",
+    "audit:dead-code": "node scripts/run-knip.js",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
+    "test:electron": "node scripts/electron-smoke.js",
+    "test:electron:packaged": "node scripts/electron-smoke.js --packaged",
+    "build:renderer": "vue-tsc --noEmit && vite build",
+    "pack": "npm run build:renderer && electron-builder --dir",
+    "build": "vue-tsc && vite build && electron-builder",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@types/sql.js": "^1.4.10",
+    "@vicons/ionicons5": "^0.13.0",
+    "jszip": "^3.10.1",
+    "mammoth": "^1.12.0",
+    "naive-ui": "^2.44.1",
+    "pinia": "^3.0.4",
+    "sql.js": "^1.14.1",
+    "vue": "^3.5.30",
+    "vue-router": "^4.6.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.8",
+    "@vitest/ui": "^4.1.5",
+    "@vue/test-utils": "^2.4.6",
+    "concurrently": "^9.2.1",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
+    "happy-dom": "^20.11.1",
+    "knip": "^6.29.0",
+    "pdfjs-dist": "^6.3.289",
+    "typescript": "^5.9.3",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.5",
+    "vue-tsc": "^3.2.6",
+    "wait-on": "^9.0.4"
+  },
+  "overrides": {
+    "@xmldom/xmldom": "0.8.15",
+    "fflate": "0.8.3",
+    "nanoid": "^3.3.18",
+    "postcss": "^8.5.26",
+    "brace-expansion": "^2.1.4",
+    "undici": "^7.29.0",
+    "minimatch@3.1.5": {
+      "brace-expansion": "^1.1.18"
+    },
+    "minimatch@10.2.6": {
+      "brace-expansion": "^5.0.9"
+    }
+  },
+  "build": {
+    "appId": "com.ainovelwriter.desktop",
+    "productName": "AI Novel Writer",
+    "asar": true,
+    "electronDist": "node_modules/electron/dist",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "app-main/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "AI-Novel-Writer-${version}-${arch}.${ext}",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}
