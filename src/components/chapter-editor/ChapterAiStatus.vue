@@ -1,6 +1,6 @@
 <template>
-  <div v-if="writing" class="ai-status"><div class="spinner"></div><span>{{ writingText }}</span><n-button size="tiny" @click="emit('stop')">停止</n-button></div>
   <div v-if="completing" class="ai-status"><div class="spinner"></div><span>{{ completingText }}</span></div>
+  <div v-else-if="writing" class="ai-status"><div class="spinner"></div><span>{{ writingText }}</span><n-button size="tiny" @click="emit('stop')">停止</n-button></div>
   <div v-if="backgroundText" class="ai-status background"><div v-if="backgroundPending > 0" class="spinner"></div><span>{{ backgroundText }}</span></div>
 </template>
 

@@ -5,6 +5,7 @@ import type {
 } from '@/types/novel'
 import { callAI } from '@/services/ai'
 import { parseAiJsonObject } from '@/utils/aiJson'
+import { buildBoundKnowledgeContext } from '@/services/knowledgeContext'
 
 export type ChapterPlanDraft = Omit<ChapterPlan, 'id' | 'createdAt' | 'updatedAt'>
 export type StoryStateProposalDraft = Omit<StoryStateProposal, 'id' | 'status' | 'createdAt' | 'updatedAt'>
@@ -162,13 +163,16 @@ export function normalizeStoryArcDrafts(arcs: AiStoryArc[]): StoryArcDraft[] {
 
 export async function generateStoryArcDrafts(novel: Novel, model: ModelConfig): Promise<StoryArcDraft[]> {
   if (!novel.outline.trim()) throw new Error('缺少总大纲，无法提取故事弧线')
+  const knowledgeContext = buildBoundKnowledgeContext(novel, `${novel.title}\n${novel.outline}`, 10, 900)
   const result = await callAI({
     model,
     skillTask: 'planning',
     maxTokens: 3000,
     messages: [{
       role: 'system',
-      content: '你是小说结构编辑。请从总大纲提取跨章节叙事弧线和关键里程碑，只输出严格 JSON，不要解释。',
+      content: `你是小说结构编辑。请从总大纲提取跨章节叙事弧线和关键里程碑，只输出严格 JSON，不要解释。
+
+${knowledgeContext || '当前小说没有匹配的挂载知识库内容。'}`,
     }, {
       role: 'user',
       content: `请分析《${novel.title}》的总大纲，提取 3-6 条真正跨章节发展的故事弧线。\n\n【总大纲】\n${novel.outline.slice(0, 7000)}\n\n【已有角色】\n${novel.characters.map(character => character.name).join('、') || '暂无'}\n\n只输出以下 JSON：\n{"arcs":[{"title":"弧线名","description":"目标、冲突与预期变化","type":"main|sub|character|relationship|mystery|world","importance":1,"characterNames":["角色名"],"nodes":[{"title":"里程碑","description":"发生什么以及产生的变化","targetChapter":1}]}]}\n\n规则：importance 为 1-5；targetChapter 使用从 1 开始的章节号；每条弧线 2-6 个按章节递增的节点；不要把单章事件误当成弧线。`,
@@ -183,13 +187,16 @@ export async function generateStoryArcDrafts(novel: Novel, model: ModelConfig): 
 export async function generateChapterPlanDrafts(novel: Novel, model: ModelConfig): Promise<ChapterPlanDraft[]> {
   const nextChapter = nextWritableChapterIndex(novel)
   const targets = planningTargets(novel)
+  const knowledgeContext = buildBoundKnowledgeContext(novel, `${novel.title}\n${novel.outline}\n${novel.volumes.map(volume => `${volume.title} ${volume.summary}`).join('\n')}`, 10, 900)
   const result = await callAI({
     model,
     skillTask: 'planning',
     maxTokens: 3200,
     messages: [{
       role: 'system',
-      content: '你是长篇小说的章节策划编辑。把总纲拆成 next、near、far 三层滚动计划。只输出严格 JSON，不解释。',
+      content: `你是长篇小说的章节策划编辑。把总纲拆成 next、near、far 三层滚动计划。只输出严格 JSON，不解释。
+
+${knowledgeContext || '当前小说没有匹配的挂载知识库内容。'}`,
     }, {
       role: 'user',
       content: `为《${novel.title}》从第 ${nextChapter + 1} 章开始生成滚动章节计划。
@@ -333,10 +340,12 @@ export async function generateStoryStateProposalDrafts(
   novel: Novel,
   chapter: Chapter,
   model: ModelConfig,
+  activityParentId?: string,
 ): Promise<StoryStateProposalDraft[]> {
   const result = await callAI({
     model,
     skillTask: 'analysis',
+    activityParentId,
     maxTokens: 2200,
     messages: [{
       role: 'system',

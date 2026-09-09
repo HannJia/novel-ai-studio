@@ -22,6 +22,9 @@ export interface KnowledgeBase {
   name: string
   description: string
   entries: KBEntry[]
+  summary?: string
+  summaryLevel?: 'brief' | 'standard' | 'detailed'
+  summaryUpdatedAt?: string
   createdAt: string
 }
 
@@ -67,11 +70,23 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
       name,
       description,
       entries: [],
+      summary: '',
+      summaryLevel: 'standard',
+      summaryUpdatedAt: '',
       createdAt: new Date().toISOString(),
     }
     knowledgeBases.value.push(kb)
     persistence.markDirty(kb.id)
     return kb
+  }
+
+  function updateSummary(id: string, summary: string, level: KnowledgeBase['summaryLevel'] = 'standard') {
+    const kb = getKB(id)
+    if (!kb) return
+    kb.summary = summary
+    kb.summaryLevel = level
+    kb.summaryUpdatedAt = new Date().toISOString()
+    persistence.markDirty(id)
   }
 
   // 删除知识库
@@ -98,6 +113,8 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
       updatedAt: new Date().toISOString(),
     }
     kb.entries.unshift(newEntry)
+    kb.summary = ''
+    kb.summaryUpdatedAt = ''
     persistence.markDirty(kbId)
     return newEntry
   }
@@ -109,6 +126,8 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     const entry = kb.entries.find(e => e.id === entryId)
     if (entry) {
       Object.assign(entry, data, { updatedAt: new Date().toISOString() })
+      kb.summary = ''
+      kb.summaryUpdatedAt = ''
       persistence.markDirty(kbId)
     }
   }
@@ -118,6 +137,8 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     const kb = getKB(kbId)
     if (!kb) return
     kb.entries = kb.entries.filter(e => e.id !== entryId)
+    kb.summary = ''
+    kb.summaryUpdatedAt = ''
     persistence.markDirty(kbId)
   }
 
@@ -173,6 +194,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     adoptImportedKnowledgeBases,
     saveError, saving, hasPendingSaves,
     createKB, deleteKB, getKB,
+    updateSummary,
     addEntry, updateEntry, deleteEntry,
     importFromText, getRelevantEntries,
   }

@@ -9,6 +9,9 @@ export async function loadAllKnowledgeBasesFromDb(): Promise<KnowledgeBase[]> {
     id: row.id,
     name: row.name,
     description: row.description,
+    summary: row.summary || '',
+    summaryLevel: row.summary_level || 'standard',
+    summaryUpdatedAt: row.summary_updated_at || '',
     createdAt: row.created_at,
     entries: []
   }))
@@ -36,7 +39,9 @@ export async function saveKnowledgeBaseToDb(kb: KnowledgeBase) {
 }
 
 export function writeKnowledgeBaseRows(kb: KnowledgeBase) {
-    upsertRow('knowledge_bases', 'id, name, description, created_at', [kb.id, kb.name, kb.description, kb.createdAt])
+    upsertRow('knowledge_bases', 'id, name, description, summary, summary_level, summary_updated_at, created_at', [
+      kb.id, kb.name, kb.description, kb.summary || '', kb.summaryLevel || 'standard', kb.summaryUpdatedAt || '', kb.createdAt,
+    ])
 
     const existingEntryIds = queryAll<{ id: string }>('SELECT id FROM knowledge_entries WHERE kb_id = ?', [kb.id]).map(r => r.id)
     const currentEntryIds = new Set(kb.entries.map(e => e.id))

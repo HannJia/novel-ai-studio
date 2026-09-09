@@ -1,5 +1,4 @@
 import { computed, reactive } from 'vue'
-import router from '@/router'
 
 export type AiActivityStatus = 'running' | 'completed' | 'failed'
 
@@ -17,6 +16,11 @@ export interface AiActivity {
 const activities = reactive<AiActivity[]>([])
 const MAX_VISIBLE_COMPLETED = 20
 
+function currentRoutePath(): string {
+  if (typeof window === 'undefined') return '/'
+  return window.location.hash.replace(/^#/, '') || '/'
+}
+
 function trimActivities() {
   const completed = activities.filter(item => item.status !== 'running')
   if (completed.length <= MAX_VISIBLE_COMPLETED) return
@@ -32,7 +36,7 @@ export function startAiActivity(name: string, parentId?: string): AiActivity {
     name,
     parentId,
     status: 'running',
-    route: router.currentRoute.value.fullPath,
+    route: currentRoutePath(),
     startedAt: new Date().toISOString(),
   }
   activities.push(activity)
@@ -75,7 +79,8 @@ export function openAiActivity(activity: AiActivity) {
     parentId = parent.parentId
   }
   acknowledgeAiActivity(rootId)
-  if (target && target !== router.currentRoute.value.fullPath) void router.push(target)
+  if (!target || target === currentRoutePath()) return
+  void import('@/router').then(({ default: router }) => router.push(target))
 }
 
 export function useAiActivities() {

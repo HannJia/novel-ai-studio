@@ -3,9 +3,10 @@ import { useNovelStore } from '@/stores/novel'
 import { useConfigStore } from '@/stores/config'
 import { applySkillInstructions, type ChatMessage } from '@/services/ai'
 import { chatWithOptionalSearch } from '@/services/chatSearch'
+import { buildBoundKnowledgeContext } from '@/services/knowledgeContext'
 import type { Novel } from '@/types/novel'
 
-function chatContext(book: Novel, webSearch: boolean): string {
+function chatContext(book: Novel, webSearch: boolean, query: string): string {
   return [
     `你是小说《${book.title}》的 AI 写作助手。类型：${book.genreLabel}/${book.subGenreLabel}。`,
     `当前本地日期：${new Date().toLocaleDateString('sv-SE')}。不得把旧资料当成最新事实。`,
@@ -18,8 +19,9 @@ function chatContext(book: Novel, webSearch: boolean): string {
     `【总纲摘要】\n${book.outline.slice(0, 2500)}`,
     `【主要角色】\n${book.characters.slice(0, 20).map(item => `${item.name}：${item.identity}；${item.status}`).join('\n')}`,
     `【最近章节摘要】\n${book.chapters.filter(item => item.summary).slice(-5).map(item => `第${item.chapterIndex + 1}章：${item.summary.slice(0, 500)}`).join('\n')}`,
+    buildBoundKnowledgeContext(book, query),
     `当前进度：${book.chapters.length}章 / ${book.currentWordCount}字。`,
-  ].join('\n\n')
+  ].filter(Boolean).join('\n\n')
 }
 
 export function useAssistantChat(novelId: () => string) {
@@ -85,7 +87,7 @@ export function useAssistantChat(novelId: () => string) {
     // Bound the entire history, not just each message, for long repeated analyses.
     while (history.length > 1 && history.reduce((sum, item) => sum + item.content.length, 0) > 24000) history.shift()
     const prompt = applySkillInstructions([
-      { role: 'system', content: chatContext(book, requestSearch) }, ...history,
+      { role: 'system', content: chatContext(book, requestSearch, userMessage.content) }, ...history,
     ], config.getSkillPrompt('analysis'))
     try {
       const result = await chatWithOptionalSearch({

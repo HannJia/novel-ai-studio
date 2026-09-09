@@ -23,6 +23,12 @@ const router = createRouter({
       meta: { title: '设置' },
     },
     {
+      path: '/knowledge',
+      name: 'KnowledgeLibrary',
+      component: () => import('@/views/workspace/KnowledgeBase.vue'),
+      meta: { title: '知识库' },
+    },
+    {
       path: '/workspace/:novelId',
       component: () => import('@/views/Workspace.vue'),
       meta: { title: '工作台' },

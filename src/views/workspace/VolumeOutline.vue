@@ -149,6 +149,7 @@ import type { Volume } from '@/types/novel'
 import { parseAiJsonObject } from '@/utils/aiJson'
 import { comparePlanningVersions, type PlanningDiff } from '@/services/planningVersions'
 import { parseVolumeEstimates, parseVolumesFromText } from '@/services/volumeParsing'
+import { buildBoundKnowledgeContext } from '@/services/knowledgeContext'
 
 const props = withDefaults(defineProps<{
   embedded?: boolean
@@ -203,6 +204,11 @@ async function generateVolumes() {
 
   try {
     const messages = buildVolumePlanningPrompt(novel.value)
+    const knowledgeContext = buildBoundKnowledgeContext(novel.value, `${novel.value.title}\n${novel.value.outline}`, 10, 900)
+    const userMessage = messages.find(message => message.role === 'user')
+    if (knowledgeContext && userMessage && typeof userMessage.content === 'string') {
+      userMessage.content += `\n\n${knowledgeContext}\n\n请优先依据知识库中的事实、时间线和设定进行分卷规划。`
+    }
     let fullContent = ''
     await callAI({
       model,
@@ -303,11 +309,14 @@ async function regenerateVolume(volume: Volume) {
   if (!model) { msg.warning('请先配置大纲模型'); return }
   regeneratingId.value = volume.id
   try {
+    const knowledgeContext = buildBoundKnowledgeContext(novel.value, `${novel.value.title}\n${novel.value.outline}\n${volume.title}\n${volume.summary}`, 10, 900)
     const result = await callAI({
       model,
       skillTask: 'planning',
       maxTokens: 1800,
-      messages: [{ role: 'system', content: '你是长篇小说分卷编辑。只重写指定分卷，不改动其他分卷，只输出严格 JSON。' }, {
+      messages: [{ role: 'system', content: `你是长篇小说分卷编辑。只重写指定分卷，不改动其他分卷，只输出严格 JSON。
+
+${knowledgeContext || '当前小说没有匹配的挂载知识库内容。'}` }, {
         role: 'user',
         content: `根据全书大纲和当前分卷内容，重新生成第 ${volume.volumeIndex + 1} 卷的局部规划。\n\n【全书大纲】\n${novel.value.outline.slice(0, 7000)}\n\n【当前分卷】\n${JSON.stringify(volume)}\n\n输出：{"title":"卷名","theme":"主题","summary":"剧情概要","keyTurningPoints":"关键转折","characterChanges":"角色变化","estimatedChapters":20,"estimatedWordCount":5}`,
       }],

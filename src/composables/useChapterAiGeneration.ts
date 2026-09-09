@@ -86,6 +86,7 @@ export function useChapterAiGeneration(options: ChapterAiGenerationOptions) {
         maxTokens,
         taskName: streamOptions.taskName || '正文生成',
         activityParentId: streamOptions.activityParentId,
+        shouldStop: () => stopAtNaturalSentence,
         onChunk: (chunk) => {
           if (stopAtNaturalSentence) return
           options.content.value += chunk

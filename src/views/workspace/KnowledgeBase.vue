@@ -3,6 +3,7 @@
     <div class="kb-header">
       <h2 class="page-title">知识库</h2>
       <div class="header-actions">
+        <n-button v-if="!hasNovelContext" size="small" secondary @click="router.push('/')">返回书架</n-button>
         <n-button size="small" type="primary" @click="showCreateModal = true">
           + 创建知识库
         </n-button>
@@ -27,9 +28,11 @@
         <div class="kb-card-info">
           <h3>{{ kb.name }}</h3>
           <p>{{ kb.description || '暂无描述' }}</p>
-          <span class="kb-card-meta">{{ kb.entries.length }} 条目 · {{ formatDate(kb.createdAt) }}</span>
+          <p v-if="kb.summary" class="kb-summary-preview">摘要：{{ kb.summary.slice(0, 180) }}{{ kb.summary.length > 180 ? '...' : '' }}</p>
+          <span class="kb-card-meta">{{ kb.entries.length }} 条目 · {{ formatDate(kb.createdAt) }}{{ hasNovelContext && isBound(kb.id) ? ' · 本书已挂载' : '' }}</span>
         </div>
         <n-button
+          v-if="hasNovelContext"
           size="tiny"
           :type="isBound(kb.id) ? 'warning' : 'default'"
           @click.stop="toggleBind(kb.id)"
@@ -52,9 +55,23 @@
         <h3>{{ selectedKB?.name }}</h3>
         <div class="detail-actions">
           <n-button size="small" @click="showImportModal = true">📥 导入</n-button>
+          <n-button size="small" secondary :loading="summarizingKB" @click="summarizeSelectedKB">整理摘要</n-button>
           <n-button size="small" type="primary" @click="openAddEntry">+ 添加条目</n-button>
         </div>
       </div>
+
+      <section class="kb-summary-panel paper-panel">
+        <div class="kb-summary-toolbar">
+          <div>
+            <h4>知识库摘要</h4>
+            <p>摘要在书架层面维护，挂载到小说后 AI 优先读取摘要，再按问题读取相关条目。</p>
+          </div>
+          <n-select v-model:value="summaryLevel" :options="summaryLevelOptions" size="small" style="width:120px;" />
+        </div>
+        <p v-if="selectedKB?.summary" class="kb-summary-content">{{ selectedKB.summary }}</p>
+        <p v-else class="empty-hint">还没有摘要，点击“整理摘要”生成。</p>
+        <span v-if="selectedKB?.summaryUpdatedAt" class="kb-summary-time">上次整理：{{ formatDateTime(selectedKB.summaryUpdatedAt) }}</span>
+      </section>
 
       <!-- 筛选栏 -->
       <div class="filter-bar">
@@ -162,15 +179,17 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { NButton, NInput, NSelect, NModal, NPopconfirm, useMessage } from 'naive-ui'
-import { useKnowledgeStore, kbCategories, type KBEntry } from '@/stores/knowledge'
+import { useKnowledgeStore, kbCategories, type KBEntry, type KnowledgeBase } from '@/stores/knowledge'
 import { useNovelStore } from '@/stores/novel'
 import { useConfigStore } from '@/stores/config'
 import { callAI } from '@/services/ai'
 import { readKnowledgeFile } from '@/services/knowledgeImport'
+import { parseAiJsonObject } from '@/utils/aiJson'
 
 const route = useRoute()
+const router = useRouter()
 const kbStore = useKnowledgeStore()
 const novelStore = useNovelStore()
 const configStore = useConfigStore()
@@ -178,6 +197,7 @@ const msg = useMessage()
 
 const novelId = computed(() => route.params.novelId as string)
 const novel = computed(() => novelStore.getNovel(novelId.value))
+const hasNovelContext = computed(() => Boolean(route.params.novelId))
 
 const knowledgeBases = computed(() => kbStore.knowledgeBases)
 const selectedKBId = ref('')
@@ -197,6 +217,15 @@ const entryForm = ref({ title: '', category: '其他', content: '', tagsText: ''
 const importCategory = ref('其他')
 const importText = ref('')
 const uploadFileName = ref('')
+const summarizingEntryIds = ref(new Set<string>())
+const summarizingKB = ref(false)
+const summaryLevel = ref<NonNullable<KnowledgeBase['summaryLevel']>>('standard')
+const summaryLevelOptions = [
+  { label: '简略', value: 'brief' },
+  { label: '标准', value: 'standard' },
+  { label: '详细', value: 'detailed' },
+]
+const validCategories = new Set(kbCategories.map(item => item.value))
 
 const filteredEntries = computed(() => {
   if (!selectedKB.value) return []
@@ -214,7 +243,10 @@ const filteredEntries = computed(() => {
   return list
 })
 
-function selectKB(id: string) { selectedKBId.value = id }
+function selectKB(id: string) {
+  selectedKBId.value = id
+  summaryLevel.value = kbStore.getKB(id)?.summaryLevel || 'standard'
+}
 
 function getCategoryIcon(cat: string) {
   return kbCategories.find(c => c.value === cat)?.icon || '📝'
@@ -222,6 +254,10 @@ function getCategoryIcon(cat: string) {
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('zh-CN')
+}
+
+function formatDateTime(iso: string) {
+  return new Date(iso).toLocaleString('zh-CN', { hour12: false })
 }
 
 function doCreateKB() {
@@ -308,27 +344,102 @@ function doImport() {
 async function autoSummarizeEntry(kbId: string, entryId: string, content: string) {
   const model = configStore.getModelForTask('review')
   if (!model || content.length < 20) return
+  if (summarizingEntryIds.value.has(entryId)) return
+  summarizingEntryIds.value = new Set(summarizingEntryIds.value).add(entryId)
   try {
+    const parts: string[] = []
+    for (let start = 0; start < content.length; start += 6000) {
+      let part = ''
+      await callAI({
+        model,
+        skillTask: 'analysis',
+        messages: [
+          { role: 'system', content: '你是知识库整理专家。提取资料中的事实、时间、人物、地点、因果关系、规则和关键数字，去掉重复内容，不得编造。' },
+          { role: 'user', content: `这是长资料第 ${Math.floor(start / 6000) + 1} 段，请整理成可复用摘要：\n\n${content.slice(start, start + 6000)}` },
+        ],
+        stream: true,
+        onChunk: chunk => { part += chunk },
+      })
+      if (part.trim()) parts.push(part.trim())
+    }
+    if (!parts.length) return
+    let summary = parts.join('\n')
+    if (parts.length > 1) {
+      let consolidated = ''
+      await callAI({
+        model,
+        skillTask: 'analysis',
+        messages: [
+          { role: 'system', content: '你是知识库总编。合并分段摘要，去重并按主题整理，只保留资料中明确出现的事实。' },
+          { role: 'user', content: `请将以下分段摘要合并为一份统一摘要，控制在 6000 字以内：\n\n${summary.slice(0, 18000)}` },
+        ],
+        stream: true,
+        onChunk: chunk => { consolidated += chunk },
+      })
+      if (consolidated.trim()) summary = consolidated.trim()
+    }
+    let category = ''
+    try {
+      const result = await callAI({
+        model,
+        skillTask: 'analysis',
+        maxTokens: 120,
+        messages: [
+          { role: 'system', content: `你是知识库分类器。只输出 JSON：{"category":"分类"}。分类只能是：${kbCategories.map(item => item.value).join('、')}。` },
+          { role: 'user', content: `请根据标题和资料摘要选择最合适的一个分类：\n${summary.slice(0, 3500)}` },
+        ],
+      })
+      const parsed = parseAiJsonObject<{ category?: string }>(result.content)
+      if (parsed?.category && validCategories.has(parsed.category)) category = parsed.category
+    } catch {
+      // 分类失败不影响摘要保存
+    }
+    kbStore.updateEntry(kbId, entryId, { summary: summary.slice(0, 12000), ...(category ? { category } : {}) })
+  } catch {
+    // 总结失败时静默处理，用户可手动重新触发
+  } finally {
+    const next = new Set(summarizingEntryIds.value)
+    next.delete(entryId)
+    summarizingEntryIds.value = next
+  }
+}
+
+async function summarizeSelectedKB() {
+  const kb = selectedKB.value
+  const model = configStore.getModelForTask('review')
+  if (!kb || !model || summarizingKB.value) return
+  if (!kb.entries.length) {
+    msg.warning('请先添加或导入资料')
+    return
+  }
+  summarizingKB.value = true
+  try {
+    const source = kb.entries.map(entry =>
+      `【${entry.category}】${entry.title}\n${(entry.summary || entry.content).slice(0, 3000)}`,
+    ).join('\n\n').slice(0, 30000)
+    const detail = summaryLevel.value === 'brief'
+      ? '控制在 800 字以内，只保留最重要的主题、时间、人物、地点、规则和关键数字。'
+      : summaryLevel.value === 'detailed'
+        ? '控制在 6000 字以内，按主题整理，并完整保留重要时间线、人物关系、地点、制度、事件和数字。'
+        : '控制在 2500 字以内，按主题整理，保留重要时间线、人物关系、地点、制度、事件和数字。'
     let summary = ''
     await callAI({
       model,
       skillTask: 'analysis',
       messages: [
-        {
-          role: 'system' as const,
-          content: '你是一个精炼的文本总结专家。你需要对给定的小说设定/世界观/知识库内容进行简洁准确的总结，提取核心信息和关键数据。总结应保留所有重要的数值、名称、关系和规则，便于后续写作参考。'
-        },
-        {
-          role: 'user' as const,
-          content: `请对以下内容进行总结，保留核心设定和关键数据：\n\n${content}`
-        }
+        { role: 'system', content: '你是知识库总编。只根据提供的资料整理摘要，不得补充资料外的事实。' },
+        { role: 'user', content: `请整理知识库“${kb.name}”的统一摘要。\n${detail}\n使用清晰的小标题和列表，方便后续 AI 写作快速理解。\n\n${source}` },
       ],
       stream: true,
-      onChunk: (c) => { summary += c },
+      onChunk: chunk => { summary += chunk },
     })
-    kbStore.updateEntry(kbId, entryId, { summary })
-  } catch {
-    // 总结失败时静默处理，用户可手动重新触发
+    if (!summary.trim()) throw new Error('AI 没有返回摘要')
+    kbStore.updateSummary(kb.id, summary.trim(), summaryLevel.value)
+    msg.success('知识库摘要已更新')
+  } catch (error) {
+    msg.error(error instanceof Error ? error.message : '摘要整理失败')
+  } finally {
+    summarizingKB.value = false
   }
 }
 
@@ -353,6 +464,7 @@ function isBound(kbId: string) {
 }
 
 function toggleBind(kbId: string) {
+  if (!hasNovelContext.value) return
   if (isBound(kbId)) {
     novelStore.unbindKnowledgeBase(novelId.value, kbId)
     msg.success('已解绑知识库')
@@ -394,6 +506,7 @@ function toggleBind(kbId: string) {
 .kb-card-info { flex: 1; }
 .kb-card-info h3 { font-size: 16px; font-weight: 600; color: var(--text-color-primary); margin-bottom: 2px; }
 .kb-card-info p { font-size: 13px; color: var(--text-color-tertiary); margin: 0; }
+.kb-summary-preview { color: var(--text-color-secondary) !important; line-height: 1.5; }
 .kb-card-meta { font-size: 11px; color: var(--text-color-disabled); }
 
 /* 知识库详情 */
@@ -430,6 +543,13 @@ function toggleBind(kbId: string) {
 .entry-actions { display: flex; gap: 4px; }
 
 .empty-hint { text-align: center; color: var(--text-color-tertiary); padding: 40px; font-size: 14px; }
+
+.kb-summary-panel { margin-bottom: var(--space-md); padding: 16px; }
+.kb-summary-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.kb-summary-toolbar h4 { margin: 0 0 4px; font-size: 15px; color: var(--text-color-primary); }
+.kb-summary-toolbar p { margin: 0; color: var(--text-color-tertiary); font-size: 12px; line-height: 1.6; }
+.kb-summary-content { margin: 14px 0 0; white-space: pre-wrap; color: var(--text-color-secondary); line-height: 1.7; font-size: 13px; }
+.kb-summary-time { display: block; margin-top: 10px; color: var(--text-color-disabled); font-size: 11px; }
 
 /* 表单 */
 .form-group { display: flex; flex-direction: column; gap: 8px; }

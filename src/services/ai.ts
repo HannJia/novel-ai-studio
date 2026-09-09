@@ -19,6 +19,7 @@ export interface ChatCompletionOptions {
   maxTokens?: number // 覆盖模型默认 maxTokens
   skillTask?: Exclude<WritingSkillTask, 'all'>
   activityParentId?: string
+  shouldStop?: () => boolean
 }
 
 export function applySkillInstructions(messages: ChatMessage[], instructions: string): ChatMessage[] {
@@ -157,7 +158,7 @@ async function chatCompletion(options: ChatCompletionOptions): Promise<ChatCompl
 
 // 流式调用（SSE）— 不重试，但有超时保护
 async function chatCompletionStream(options: ChatCompletionOptions): Promise<ChatCompletionResult> {
-  const { model, messages, onChunk, signal, maxTokens } = options
+  const { model, messages, onChunk, signal, maxTokens, shouldStop } = options
   const url = `${openAiV1BaseUrl(model.baseUrl)}/chat/completions`
 
   const mergedSignal = mergeSignals(signal, STREAM_TIMEOUT)
@@ -211,6 +212,10 @@ async function chatCompletionStream(options: ChatCompletionOptions): Promise<Cha
         if (delta) {
           fullContent += delta
           onChunk?.(delta)
+          if (shouldStop?.()) {
+            await reader.cancel()
+            return { content: fullContent }
+          }
         }
       } catch (parseErr) {
         console.warn('SSE 解析失败:', data, parseErr)

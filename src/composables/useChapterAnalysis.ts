@@ -12,6 +12,7 @@ export interface ChapterStructureAnalysisOptions {
   includeCharacters?: boolean
   includeDataChanges?: boolean
   replaceExistingAiTimeline?: boolean
+  activityParentId?: string
 }
 
 export interface DataPanelScanTarget {
@@ -19,6 +20,7 @@ export interface DataPanelScanTarget {
   chapterIndex: number
   content: string
   panels: DataPanelItem[]
+  activityParentId?: string
 }
 
 interface UseChapterAnalysisOptions {
@@ -109,6 +111,7 @@ export function useChapterAnalysis(options: UseChapterAnalysisOptions) {
         formatActiveGlobalPlanText(targetNovel),
       ),
       stream: true,
+      activityParentId: analysisOptions.activityParentId,
       onChunk: chunk => { result += chunk },
     })
 
@@ -232,6 +235,7 @@ ${buildDataScanContent(targetContent, targetPanels)}
 [{"itemId":"数据对象ID","itemName":"数据对象名","fieldName":"字段名","oldValue":"旧值","newValue":"新值","confidence":"clear|possible","reason":"正文原文依据，尽量引用关键短句"}]`,
         }],
         stream: true,
+        activityParentId: target?.activityParentId,
         onChunk: chunk => { result += chunk },
       })
       const parsed = parseAiJsonArray<Record<string, any>>(result)

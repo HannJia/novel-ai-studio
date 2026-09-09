@@ -211,6 +211,7 @@ function initializeSchema(database: Database) {
       title TEXT, content TEXT, summary TEXT,
       banned_review TEXT DEFAULT '', content_review TEXT DEFAULT '',
       content_review_signature TEXT DEFAULT '',
+      review_rewrite_blocked_signature TEXT DEFAULT '',
       scene_notes TEXT DEFAULT '[]',
       versions TEXT DEFAULT '[]',
       word_count INTEGER DEFAULT 0,
@@ -382,6 +383,9 @@ function initializeSchema(database: Database) {
   database.exec(schema)
   // Existing local databases predate planning version snapshots.
   try { database.run("ALTER TABLE novels ADD COLUMN writing_mode TEXT") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE knowledge_bases ADD COLUMN summary TEXT DEFAULT ''") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE knowledge_bases ADD COLUMN summary_level TEXT DEFAULT 'standard'") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE knowledge_bases ADD COLUMN summary_updated_at TEXT DEFAULT ''") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE novels ADD COLUMN chat_web_search INTEGER DEFAULT 0") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE novels ADD COLUMN chapter_plan_confirmed INTEGER DEFAULT 0") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE chat_messages ADD COLUMN search_record TEXT") } catch { /* already migrated */ }
@@ -389,6 +393,7 @@ function initializeSchema(database: Database) {
   try { database.run("ALTER TABLE volumes ADD COLUMN versions TEXT DEFAULT '[]'") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE chapters ADD COLUMN scene_notes TEXT DEFAULT '[]'") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE chapters ADD COLUMN versions TEXT DEFAULT '[]'") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE chapters ADD COLUMN review_rewrite_blocked_signature TEXT DEFAULT ''") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE data_panels ADD COLUMN versions TEXT DEFAULT '[]'") } catch { /* already migrated */ }
   // One-time separation of explicitly tagged inspiration messages in existing
   // test books. Move complete records atomically; never infer from message text.

@@ -497,6 +497,29 @@
       </div>
     </div>
 
+        <section class="form-section paper-panel knowledge-mount-section">
+          <div class="knowledge-mount-header">
+            <div>
+              <h3 class="section-title">📚 挂载知识库</h3>
+              <p class="section-hint">只读取本书勾选的资料，AI 自动写作和辅助写作都可以使用。每本小说的挂载关系独立保存。</p>
+            </div>
+            <n-switch v-model:value="form.knowledgeEnabled" />
+          </div>
+          <div v-if="form.knowledgeEnabled">
+            <n-checkbox-group v-if="availableKnowledgeBases.length" v-model:value="selectedKnowledgeBaseIds">
+              <div class="knowledge-mount-list">
+                <n-checkbox v-for="kb in availableKnowledgeBases" :key="kb.id" :value="kb.id">
+                  <span class="knowledge-mount-item">
+                    <strong>{{ kb.name }}</strong>
+                    <small>{{ kb.entries.length }} 条资料{{ kb.description ? ` · ${kb.description}` : '' }}</small>
+                  </span>
+                </n-checkbox>
+              </div>
+            </n-checkbox-group>
+            <p v-else class="section-hint">书架还没有知识库，请先返回书架创建。</p>
+          </div>
+        </section>
+
     <!-- 底部操作栏 -->
     <div class="wizard-footer" id="wizard-footer">
       <n-button v-if="currentStep > 0" @click="currentStep--" size="large">
@@ -533,12 +556,13 @@
 import { ref, reactive, computed } from 'vue'
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import {
-  NButton, NIcon, NInput, NInputNumber, NSelect, NModal, NRadioButton, NRadioGroup, useDialog, useMessage
+  NButton, NIcon, NInput, NInputNumber, NSelect, NModal, NRadioButton, NRadioGroup, NSwitch, NCheckbox, NCheckboxGroup, useDialog, useMessage
 } from 'naive-ui'
 import { ArrowBackOutline } from '@vicons/ionicons5'
 import { genres, themeTags } from '@/data/genres'
 import { styleDimensions, personalityTags, payoffPatterns } from '@/data/styles'
 import { useNovelStore } from '@/stores/novel'
+import { useKnowledgeStore } from '@/stores/knowledge'
 import type { CreateWizardForm } from '@/types/novel'
 import InspirationChat from '@/components/InspirationChat.vue'
 import CreationModePicker from '@/components/CreationModePicker.vue'
@@ -546,6 +570,7 @@ import type { InspirationMessage } from '@/services/inspiration'
 
 const router = useRouter()
 const novelStore = useNovelStore()
+const knowledgeStore = useKnowledgeStore()
 const message = useMessage()
 const dialog = useDialog()
 
@@ -566,6 +591,7 @@ const previousCreationState = ref<{
 } | null>(null)
 const showInspiration = computed(() => !choosingCreationOptions.value && setupMethod.value === 'inspiration' && !reviewingInspiration.value)
 const showSettings = computed(() => !choosingCreationOptions.value && (setupMethod.value === 'custom' || reviewingInspiration.value))
+const availableKnowledgeBases = computed(() => knowledgeStore.knowledgeBases)
 
 function openCreationOptions() {
   if (choosingCreationOptions.value || creating.value) return
@@ -760,6 +786,8 @@ TXT 内容或任意片段摘录：
 // 表单数据
 const form = reactive<CreateWizardForm>({
   writingMode: 'manual',
+  knowledgeEnabled: false,
+  knowledgeBaseIds: [],
   genre: '',
   subGenre: '',
   tags: [],
@@ -767,6 +795,11 @@ const form = reactive<CreateWizardForm>({
   targetWordCountMax: 120,
   writingStyle: novelStore.defaultWritingStyle(),
   settings: novelStore.defaultSettings(),
+})
+
+const selectedKnowledgeBaseIds = computed<string[]>({
+  get: () => form.knowledgeBaseIds || [],
+  set: value => { form.knowledgeBaseIds = value },
 })
 
 // 当前选中的大类
@@ -1080,8 +1113,17 @@ async function handleCreate() {
 </script>
 
 <style scoped>
-      .reference-import-panel {
+.reference-import-panel {
   margin-bottom: var(--space-lg);
+}
+
+.knowledge-mount-section { margin-top: var(--space-lg); }
+.knowledge-mount-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.knowledge-mount-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; margin-top: 12px; }
+.knowledge-mount-item { display: inline-flex; flex-direction: column; gap: 2px; }
+.knowledge-mount-item small { color: var(--text-color-tertiary); font-size: 12px; line-height: 1.5; }
+@media (max-width: 680px) {
+  .knowledge-mount-list { grid-template-columns: minmax(0, 1fr); }
 }
 
 .settings-preview {

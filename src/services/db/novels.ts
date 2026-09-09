@@ -113,6 +113,7 @@ export async function loadAllNovelsFromDb(): Promise<Novel[]> {
       bannedReview: r.banned_review || '',
       contentReview: r.content_review || '',
       contentReviewSignature: r.content_review_signature || '',
+      reviewRewriteBlockedSignature: r.review_rewrite_blocked_signature || '',
       sceneNotes: JSON.parse(r.scene_notes || '[]'),
       versions: JSON.parse(r.versions || '[]'),
       wordCount: r.word_count,
@@ -258,7 +259,7 @@ export function writeNovelRows(novel: Novel) {
       execute('DELETE FROM chapters WHERE id = ?', [id])
     }
     for (const c of novel.chapters) {
-      upsertRow('chapters', 'id, novel_id, volume_index, chapter_index, title, content, summary, banned_review, content_review, content_review_signature, scene_notes, versions, word_count, status, created_at, updated_at', [c.id, novel.id, c.volumeIndex, c.chapterIndex, c.title, c.content, c.summary, c.bannedReview || '', c.contentReview || '', c.contentReviewSignature || '', JSON.stringify(c.sceneNotes || []), JSON.stringify(c.versions || []), c.wordCount, c.status, c.createdAt, c.updatedAt])
+      upsertRow('chapters', 'id, novel_id, volume_index, chapter_index, title, content, summary, banned_review, content_review, content_review_signature, review_rewrite_blocked_signature, scene_notes, versions, word_count, status, created_at, updated_at', [c.id, novel.id, c.volumeIndex, c.chapterIndex, c.title, c.content, c.summary, c.bannedReview || '', c.contentReview || '', c.contentReviewSignature || '', c.reviewRewriteBlockedSignature || '', JSON.stringify(c.sceneNotes || []), JSON.stringify(c.versions || []), c.wordCount, c.status, c.createdAt, c.updatedAt])
     }
 
     // 4. 角色：只写入有变化的行 + 删除已移除的

@@ -314,6 +314,7 @@ export interface Chapter {
   bannedReview?: string   // 违禁词审查结果
   contentReview?: string  // 内容一致性审查结果
   contentReviewSignature?: string // 内容审查对应的正文签名
+  reviewRewriteBlockedSignature?: string // 该版正文自动重写已用尽，避免重复循环
   wordCount: number       // 正文字数
   status: 'draft' | 'writing' | 'completed' | 'reviewed' | 'finalized' | 'locked'
   sceneNotes?: SceneNote[]
@@ -395,6 +396,8 @@ export interface Novel {
 // 创建向导表单数据
 export interface CreateWizardForm {
   writingMode?: 'manual' | 'ai'
+  knowledgeEnabled?: boolean
+  knowledgeBaseIds?: string[]
   // 第一页
   genre: string
   subGenre: string

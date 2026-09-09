@@ -6,6 +6,7 @@ import { useKnowledgeStore } from '@/stores/knowledge'
 import { buildSemanticRecords, formatEvidence, queryPersistedSemanticEvidence, retrieveSemanticEvidence } from '@/services/semanticIndex'
 import { isRemoteEmbeddingEnabled } from '@/services/embeddings'
 import { formatChapterPlanContext } from '@/services/storyPlanning'
+import { buildBoundKnowledgeSignature } from '@/services/knowledgeContext'
 
 export interface WritingContext {
   outlineContext: string
@@ -212,6 +213,7 @@ function buildContextSignature(novel: Novel, currentChapter: Chapter, contextWin
     planSig,
     dataSig,
     novel.knowledgeBaseIds?.join(',') || '',
+    buildBoundKnowledgeSignature(novel),
   ].join('|')
 }
 

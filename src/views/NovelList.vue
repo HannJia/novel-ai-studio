@@ -4,6 +4,7 @@
     <div class="list-header">
       <h1 class="page-title">我的书架</h1>
       <div class="header-actions">
+        <n-button secondary @click="$router.push('/knowledge')">📚 知识库</n-button>
         <n-button secondary @click="exportProject">备份项目</n-button>
         <n-button secondary @click="openImportPicker">导入项目</n-button>
         <input ref="importInput" class="hidden-file-input" type="file" accept=".json,application/json" @change="handleImportFile" />

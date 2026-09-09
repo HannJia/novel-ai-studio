@@ -202,12 +202,12 @@ export function buildChapterPrompt(
   writingPlan?: string,
 ): ChatMessage[] {
   const existingWordCount = existingContent ? existingContent.replace(/\s/g, '').length : 0
-  const remainingWords = Math.max(0, 2500 - existingWordCount)
+  const remainingWords = Math.max(0, 2000 - existingWordCount)
   const isContinuation = existingWordCount > 50
 
   const system = `你是一位网文写手，正在创作长篇小说《${novel.title}》。
 
-【章节长度与收束原则】单章建议写到 2000~2500 字。字数是规划范围，不是截断点；接近目标时应提前收束当前场景，不得在动作、对话、决定或场景目标尚未产生结果时停笔。原则上不要超过 3000 字，但若已接近上限，必须先用尽可能短的篇幅完成当前剧情节拍，再结束本章，绝不能为了卡字数留下半截剧情。${isContinuation ? `当前本章已写 ${existingWordCount} 字，请只续写完成本章节拍所需的内容。` : ''}
+【章节长度与收束原则】单章最低 2000 字。正文接近 2000 字时必须主动收束当前场景，通常控制在 2000~2200 字，原则上不要超过 2400 字；达到 2000 字后不得为了凑字继续开启新场景或新冲突。不得在动作、对话、决定或场景目标尚未产生结果时停笔，必须先用尽可能短的篇幅完成当前剧情节拍，再结束本章。${isContinuation ? `当前本章已写 ${existingWordCount} 字，请只续写完成本章节拍所需的内容。` : ''}
 
 【写作风格要求】
 ${formatStyle(novel)}`
@@ -220,7 +220,7 @@ ${formatStyle(novel)}`
       wordRequirement = `1. 本章已有 ${existingWordCount} 字，建议再写约 **${remainingWords} 字**并自然收束。请根据当前剧情节拍决定准确停点，不得因达到字数而强行截断`
     }
   } else {
-    wordRequirement = `1. 目标长度为 **2000~2500 字**。从约 2200 字起主动收束当前场景；字数是软目标，章节核心行动必须形成阶段性结果后才能结束`
+    wordRequirement = `1. 目标长度为 **2000~2200 字**。从接近 2000 字起主动收束当前场景；达到 2000 字后只补写完成当前剧情节拍所需的最短内容，不要开启新场景或新冲突`
   }
 
   const continuationContext = isContinuation

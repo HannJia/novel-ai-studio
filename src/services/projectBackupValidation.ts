@@ -63,7 +63,7 @@ const book = object({
   volumes: list(object({ id, volumeIndex: integer, ...strings('title theme summary keyTurningPoints characterChanges'),
     estimatedChapters: number, estimatedWordCount: number, versions }), 10_000),
   chapters: list(object({ id, volumeIndex: integer, chapterIndex: integer, ...strings('title content summary'),
-    bannedReview: optional(text), contentReview: optional(text), contentReviewSignature: optional(text),
+    bannedReview: optional(text), contentReview: optional(text), contentReviewSignature: optional(text), reviewRewriteBlockedSignature: optional(text),
     wordCount: integer, status: oneOf('draft', 'writing', 'completed', 'reviewed', 'finalized', 'locked'), ...times, versions,
     sceneNotes: optional(list(object({ id, title: text, content: text, source, ...times }), 10_000)),
   }), 30_000),

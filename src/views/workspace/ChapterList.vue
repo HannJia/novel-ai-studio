@@ -12,7 +12,7 @@
           </template>
           确定清空所有章节？此操作不可撤销。
         </n-popconfirm>
-        <n-button v-if="novel?.chapters?.length" size="small" @click="batchGenerateEmptyChapters">
+        <n-button v-if="novel?.writingMode === 'ai' && novel.chapters.length" size="small" @click="batchGenerateEmptyChapters">
           批量生成空章
         </n-button>
         <n-button v-if="novel?.chapters?.length" size="small" @click="batchReviewChapters">
@@ -270,13 +270,14 @@ function clearAllChapters() {
 
 function batchGenerateEmptyChapters() {
   if (!novel.value) return
+  if (novel.value.writingMode !== 'ai') return
   const queuedNovelId = novelId.value
   const model = configStore.getModelForTask('writing')
   if (!model) {
     message.warning('请先配置写作模型')
     return
   }
-  const targets = novel.value.chapters.filter(ch => !ch.content.trim())
+  const targets = novel.value.chapters.filter(ch => !ch.content.trim() && ch.status !== 'locked')
   if (targets.length === 0) {
     message.info('没有需要批量生成的空白章节')
     return
@@ -285,9 +286,9 @@ function batchGenerateEmptyChapters() {
   chapterBackgroundQueue.enqueueBatch('批量生成章节', targets.map(chapter => ({
     name: `生成第${chapter.chapterIndex + 1}章`,
     task: async () => {
-       const currentNovel = novelStore.getNovel(queuedNovelId)
+      const currentNovel = novelStore.getNovel(queuedNovelId)
       const currentChapter = currentNovel?.chapters.find(ch => ch.id === chapter.id)
-      if (!currentNovel || !currentChapter) return
+      if (currentNovel?.writingMode !== 'ai' || !currentChapter || currentChapter.content.trim() || currentChapter.status === 'locked') return
       let ctx = buildWritingContext(currentNovel, currentChapter)
       ctx = await augmentWritingContextWithVectorMemory(currentNovel, currentChapter, ctx, configStore.embedding)
       const messages = buildChapterPrompt(
@@ -307,6 +308,9 @@ function batchGenerateEmptyChapters() {
         maxTokens: 4000,
         onChunk: chunk => { generated += chunk },
       })
+      const latestNovel = novelStore.getNovel(queuedNovelId)
+      const latestChapter = latestNovel?.chapters.find(ch => ch.id === chapter.id)
+      if (latestNovel?.writingMode !== 'ai' || !latestChapter || latestChapter.content.trim() || latestChapter.status === 'locked') return
       novelStore.updateChapter(currentNovel.id, currentChapter.id, {
         content: generated,
         status: 'writing',

@@ -104,21 +104,35 @@
             <span>AI 任务</span>
             <span v-if="runningAiActivities.length" class="ai-task-count">{{ runningAiActivities.length }}</span>
           </div>
-          <button
-            v-for="activity in aiActivities"
-            :key="activity.id"
-            type="button"
-            class="ai-task-row"
-            :class="`ai-task-${activity.status}`"
-            :title="activity.status === 'completed' ? '点击返回任务位置并标记已读' : '点击返回任务位置'"
-            @click="openAiActivity(activity)"
-          >
-            <span class="ai-task-indicator" :class="{ 'ai-task-indicator-done': activity.status === 'completed' }"></span>
-            <span class="ai-task-name">{{ activity.name }}</span>
-            <span class="ai-task-state">
-              {{ activity.status === 'running' ? '进行中' : activity.status === 'completed' ? '已完成' : '失败' }}
-            </span>
-          </button>
+          <template v-for="activity in aiActivities" :key="activity.id">
+            <button
+              type="button"
+              class="ai-task-row"
+              :class="`ai-task-${activity.status}`"
+              :title="activity.status === 'completed' ? '点击返回任务位置并标记已读' : '点击返回任务位置'"
+              @click="openAiActivity(activity)"
+            >
+              <span class="ai-task-indicator" :class="{ 'ai-task-indicator-done': activity.status === 'completed' }"></span>
+              <span class="ai-task-name">{{ activity.name }}</span>
+              <span class="ai-task-state">
+                {{ activity.status === 'running' ? '进行中' : activity.status === 'completed' ? '已完成' : '失败' }}
+              </span>
+            </button>
+            <details v-if="childActivitiesOf(activity.id).length" class="ai-task-children" :open="activity.status === 'running'">
+              <summary>执行步骤（{{ childActivitiesOf(activity.id).length }}）</summary>
+              <div v-for="child in childActivitiesOf(activity.id)" :key="child.id" class="ai-task-child">
+                <span class="ai-task-indicator" :class="{
+                  'ai-task-indicator-done': child.status === 'completed',
+                  'ai-task-indicator-running': child.status === 'running',
+                  'ai-task-indicator-failed': child.status === 'failed',
+                }"></span>
+                <span class="ai-task-name">{{ child.name }}</span>
+                <span class="ai-task-state">
+                  {{ child.status === 'running' ? '进行中' : child.status === 'completed' ? '已完成' : '失败' }}
+                </span>
+              </div>
+            </details>
+          </template>
         </div>
       </nav>
 
@@ -193,7 +207,11 @@ const novelStore = useNovelStore()
 const msg = useMessage()
 const showRenameModal = ref(false)
 const renameTitle = ref('')
-const { activities: aiActivities, runningActivities: runningAiActivities } = useAiActivities()
+const {
+  activities: aiActivities,
+  runningActivities: runningAiActivities,
+  childrenOf: childActivitiesOf,
+} = useAiActivities()
 
 const novelId = computed(() => route.params.novelId as string)
 const novel = computed(() => novelStore.getNovel(novelId.value))
@@ -419,6 +437,29 @@ const getProgress = computed(() => {
   color: var(--text-color-primary);
 }
 
+.ai-task-child {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 25px;
+  padding: 3px 12px 3px 27px;
+  color: var(--text-color-tertiary);
+  font-size: 11px;
+}
+
+.ai-task-children {
+  margin: 0 12px 4px 27px;
+  color: var(--text-color-tertiary);
+  font-size: 10px;
+}
+
+.ai-task-children summary {
+  padding: 2px 0;
+  cursor: pointer;
+  user-select: none;
+}
+
 .ai-task-indicator {
   width: 7px;
   height: 7px;
@@ -433,6 +474,16 @@ const getProgress = computed(() => {
 }
 
 .ai-task-failed .ai-task-indicator {
+  border-color: var(--color-error);
+  background: var(--color-error);
+}
+
+.ai-task-indicator-running {
+  border-color: var(--color-warning);
+  background: var(--color-warning);
+}
+
+.ai-task-indicator-failed {
   border-color: var(--color-error);
   background: var(--color-error);
 }

@@ -24,7 +24,7 @@
           <div class="review-section-content">
             <p class="revision-meta">{{ pendingRevision.reason || 'AI 生成的正文修订建议' }}</p>
             <pre class="revision-diff">{{ pendingRevision.diff }}</pre>
-            <div class="action-row"><n-button size="small" type="primary" :disabled="revisionLoading" @click="emit('approve-revision')">确认写入</n-button><n-button size="small" :disabled="revisionLoading" @click="emit('reject-revision')">拒绝</n-button></div>
+            <div class="action-row"><n-button v-if="allowRewrite || pendingRevision.source === 'user'" size="small" type="primary" :disabled="revisionLoading" @click="emit('approve-revision')">确认写入</n-button><n-button size="small" :disabled="revisionLoading" @click="emit('reject-revision')">拒绝</n-button></div>
           </div>
         </section>
 
@@ -39,7 +39,7 @@
           <button class="review-section-title" @click="emit('toggle-section', 'contentReview')">内容审查 {{ loading ? '(生成中...)' : '' }}<span>{{ expanded.contentReview ? '▼' : '▶' }}</span></button>
           <div v-if="expanded.contentReview" class="review-section-content">
             <div class="banned-content" v-html="renderedContentReview"></div>
-            <div v-if="!loading" class="rewrite-actions">
+            <div v-if="!loading && allowRewrite" class="rewrite-actions">
               <textarea :value="editableReview" class="editable-review" rows="4" placeholder="编辑审查意见后选择性重写" @input="emit('update-editable-review', ($event.target as HTMLTextAreaElement).value)"></textarea>
               <div class="action-row"><n-button size="small" type="primary" :disabled="aiWriting || completing" @click="emit('rewrite', editableReview)">选择性重写</n-button><n-button size="small" :disabled="aiWriting || completing" @click="emit('rewrite', '')">全部重写</n-button></div>
             </div>
@@ -89,7 +89,7 @@ type SectionKey = 'summary' | 'contentReview' | 'localScan' | 'aiReview' | 'cont
 defineProps<{
   open: boolean; hasContent: boolean; summary: string; loading: boolean; endingCheck: ChapterEndingCheck | null
   pendingRevision: ChapterRevision | null; revisionLoading: boolean; contentReview: string; renderedContentReview: string
-  editableReview: string; aiWriting: boolean; completing: boolean
+  editableReview: string; aiWriting: boolean; completing: boolean; allowRewrite: boolean
   localScanResults: Array<{ word: BannedWordEntry; count: number; positions: number[] }>
   continuityAlerts: Array<{ id: string; level: 'warning' | 'info'; title: string; detail: string; evidence: string }>
   bannedResult: string; renderedBannedResult: string; expanded: Record<SectionKey, boolean>

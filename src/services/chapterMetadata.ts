@@ -46,6 +46,7 @@ export async function requestChapterMetadata(options: {
   chapterTitle: string
   chapterIndex: number
   signal?: AbortSignal
+  activityParentId?: string
   maxAttempts?: number
 }): Promise<ChapterMetadata> {
   const requireTitle = isPlaceholderChapterTitle(options.chapterTitle)
@@ -66,6 +67,7 @@ export async function requestChapterMetadata(options: {
       skillTask: 'analysis',
       messages,
       signal: options.signal,
+      activityParentId: options.activityParentId,
       maxTokens: 900,
     })
     lastOutput = result.content
