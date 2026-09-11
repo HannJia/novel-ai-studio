@@ -188,6 +188,7 @@ function initializeSchema(database: Database) {
       chapter_plans TEXT DEFAULT '[]', -- next / near / far 章节计划
       chapter_plan_confirmed INTEGER DEFAULT 0,
       story_state_proposals TEXT DEFAULT '[]', -- 待审批的故事状态变更
+      story_clock TEXT DEFAULT '{}', -- JSON
       status TEXT DEFAULT 'creating',
       created_at TEXT, updated_at TEXT
     );
@@ -215,6 +216,8 @@ function initializeSchema(database: Database) {
       scene_notes TEXT DEFAULT '[]',
       versions TEXT DEFAULT '[]',
       word_count INTEGER DEFAULT 0,
+      story_days_elapsed REAL DEFAULT 0,
+      story_day REAL,
       status TEXT DEFAULT 'draft',
       created_at TEXT, updated_at TEXT
     );
@@ -293,6 +296,8 @@ function initializeSchema(database: Database) {
       name TEXT,
       fields TEXT,
       related_keywords TEXT,
+      owner_item_id TEXT,
+      equipment_state TEXT DEFAULT 'stored',
       last_mention_chapter_index INTEGER,
       created_at TEXT,
       updated_at TEXT
@@ -310,6 +315,7 @@ function initializeSchema(database: Database) {
       new_value TEXT,
       reason TEXT,
       confidence TEXT DEFAULT 'clear',
+      mutation TEXT,
       chapter_index INTEGER,
       status TEXT,
       created_at TEXT
@@ -388,13 +394,19 @@ function initializeSchema(database: Database) {
   try { database.run("ALTER TABLE knowledge_bases ADD COLUMN summary_updated_at TEXT DEFAULT ''") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE novels ADD COLUMN chat_web_search INTEGER DEFAULT 0") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE novels ADD COLUMN chapter_plan_confirmed INTEGER DEFAULT 0") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE novels ADD COLUMN story_clock TEXT DEFAULT '{}'") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE chat_messages ADD COLUMN search_record TEXT") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE chat_messages ADD COLUMN failed INTEGER DEFAULT 0") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE volumes ADD COLUMN versions TEXT DEFAULT '[]'") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE chapters ADD COLUMN scene_notes TEXT DEFAULT '[]'") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE chapters ADD COLUMN versions TEXT DEFAULT '[]'") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE chapters ADD COLUMN review_rewrite_blocked_signature TEXT DEFAULT ''") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE chapters ADD COLUMN story_days_elapsed REAL DEFAULT 0") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE chapters ADD COLUMN story_day REAL") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE data_panels ADD COLUMN versions TEXT DEFAULT '[]'") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE data_panels ADD COLUMN owner_item_id TEXT") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE data_panels ADD COLUMN equipment_state TEXT DEFAULT 'stored'") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE data_panel_changes ADD COLUMN mutation TEXT") } catch { /* already migrated */ }
   // One-time separation of explicitly tagged inspiration messages in existing
   // test books. Move complete records atomically; never infer from message text.
   const novelColumns = database.exec('PRAGMA table_info(novels)')[0].values

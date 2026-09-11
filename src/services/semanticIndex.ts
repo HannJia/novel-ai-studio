@@ -3,6 +3,7 @@ import type { KnowledgeBase } from '@/stores/knowledge'
 import type { EmbeddingConfig } from '@/stores/config'
 import { execute, initDb, queryAll, runTransaction } from '@/services/database'
 import { embedTextsWithProvider, isRemoteEmbeddingEnabled } from '@/services/embeddings'
+import { equipmentSnapshot, formatEquipmentTotals } from '@/services/dataPanelEquipment'
 
 export type SemanticSourceType = 'knowledge' | 'chapter' | 'character' | 'event' | 'story_arc' | 'chapter_plan' | 'data_panel'
 
@@ -250,7 +251,7 @@ function chapterPlanRecord(novelId: string, plan: NonNullable<Novel['chapterPlan
   }
 }
 
-function dataPanelRecord(novelId: string, item: DataPanelItem): SemanticRecord {
+function dataPanelRecord(novelId: string, item: DataPanelItem, items: DataPanelItem[]): SemanticRecord {
   const fields = item.fields.map(field => `${field.name}:${field.value}${field.unit || ''}`).join('；')
   return {
     id: `${novelId}:data_panel:${item.id}`,
@@ -258,7 +259,10 @@ function dataPanelRecord(novelId: string, item: DataPanelItem): SemanticRecord {
     sourceType: 'data_panel',
     sourceId: item.id,
     title: `数据 ${item.name}`,
-    content: compact([item.category, item.name, fields, item.relatedKeywords.join('、')].join('\n')),
+    content: compact([item.category, item.name, fields, item.relatedKeywords.join('、'),
+      item.ownerItemId ? equipmentSnapshot(item, items) : '',
+      formatEquipmentTotals(items, item.id),
+    ].join('\n')),
     metadata: { category: item.category, lastMentionChapterIndex: item.lastMentionChapterIndex },
   }
 }
@@ -284,7 +288,7 @@ export function buildSemanticRecords(novel: Novel, knowledgeBases: KnowledgeBase
   records.push(...(novel.eventLog || []).map(event => eventRecord(novel.id, event)))
   records.push(...(novel.storyArcs || []).map(arc => storyArcRecord(novel.id, arc)))
   records.push(...(novel.chapterPlans || []).map(plan => chapterPlanRecord(novel.id, plan)))
-  records.push(...(novel.dataPanels || []).map(item => dataPanelRecord(novel.id, item)))
+  records.push(...(novel.dataPanels || []).map(item => dataPanelRecord(novel.id, item, novel.dataPanels)))
 
   const boundIds = new Set(novel.knowledgeBaseIds || [])
   for (const kb of knowledgeBases) {

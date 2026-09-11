@@ -29,7 +29,7 @@
                 <strong>{{ change.itemName }} · {{ change.fieldName }} <span class="confidence-badge">明确</span></strong>
               </label>
               <div class="change-values">{{ change.oldValue }} → {{ change.newValue }}</div>
-              <n-input size="small" :value="drafts[change.id] ?? change.newValue" placeholder="可编辑后再应用" @update:value="value => emit('update-draft', change.id, value)" />
+              <n-input v-if="!change.mutation" size="small" :value="drafts[change.id] ?? change.newValue" placeholder="可编辑后再应用" @update:value="value => emit('update-draft', change.id, value)" />
               <p>{{ change.reason }}</p>
               <div class="change-actions">
                 <n-button size="tiny" type="primary" @click="emit('apply-change', change.id)">应用</n-button>
@@ -79,6 +79,7 @@
               <small v-if="field.calculationError" role="alert" style="color: var(--color-error)">{{ field.calculationError }}（保留原值）</small>
             </div>
           </div>
+          <EquipmentSummary :item="item" :items="items" />
           <div v-if="item.relatedKeywords.length" class="data-keywords">关键词：{{ item.relatedKeywords.join('、') }}</div>
         </div>
       </div>
@@ -90,6 +91,7 @@
 import { NButton, NInput, NInputNumber, NPopconfirm, NSelect } from 'naive-ui'
 import { getDataPanelRuleLabel } from '@/services/dataPanel'
 import type { DataPanelChange, DataPanelItem } from '@/types/novel'
+import EquipmentSummary from '@/components/data-panel/EquipmentSummary.vue'
 
 defineProps<{
   open: boolean
@@ -125,7 +127,9 @@ const emit = defineEmits<{
 }>()
 
 function statusLabel(status: DataPanelChange['status']) { return status === 'pending' ? '待确认' : status === 'accepted' ? '已应用' : '已忽略' }
-function categoryIcon(category: string) { return ({ 角色: '人', 作物: '苗', 资源: '数', 建筑: '筑', 任务: '任', 自定义: '值' } as Record<string, string>)[category] || '值' }
+function categoryIcon(category: string) {
+  return ({ 角色: '人', 作物: '苗', 资源: '数', 建筑: '筑', 任务: '任', 装备: '装', 道具: '具', 自定义: '值' } as Record<string, string>)[category] || '值'
+}
 </script>
 
 <style scoped>

@@ -7,6 +7,12 @@ import type {
 } from '@/types/novel'
 import { evaluateFormula } from './safeFormula'
 
+export const STORY_CLOCK_SOURCE = '__story_clock__'
+
+function normalizeStoryClockSource(value?: string): string {
+  return value === '故事时间' || value === '当前故事日' ? STORY_CLOCK_SOURCE : (value || '')
+}
+
 export type DataPanelHistoryCleanup =
   | { mode: 'all' }
   | { mode: 'count'; value: number }
@@ -248,7 +254,7 @@ export function parseDataPanelAutomationRules(
           trigger: 'elapsed_days',
           amount,
           interval: Math.max(1, Number(elapsedMatch[1])),
-          sourceFieldName: sourceMatch?.[1]?.trim() || defaultDayField,
+          sourceFieldName: normalizeStoryClockSource(sourceMatch?.[1]?.trim() || defaultDayField),
           enabled: true,
         }
       }
@@ -280,7 +286,9 @@ export function formatDataPanelAutomationRules(fields: DataPanelField[]): string
       } else if (rule.trigger === 'on_mention') {
         lines.push(`${field.name}｜每次出现 ${signedLabel(rule.amount)}`)
       } else {
-        const source = rule.sourceFieldName ? `（基于：${rule.sourceFieldName}）` : ''
+        const source = rule.sourceFieldName
+          ? `（基于：${rule.sourceFieldName === STORY_CLOCK_SOURCE ? '故事时间' : rule.sourceFieldName}）`
+          : ''
         lines.push(`${field.name}｜经过 ${rule.interval} 天 ${signedLabel(rule.amount)}${source}`)
       }
     }
@@ -308,6 +316,7 @@ function ruleDelta(
   item: DataPanelItem,
   chapterIndex: number,
   chapterText: string,
+  storyDay?: number,
 ): { delta: number; steps: number } | null {
   if (!rule.enabled || rule.pendingChapterIndex !== undefined) return null
   if (rule.lastEvaluatedChapterIndex !== undefined && rule.lastEvaluatedChapterIndex >= chapterIndex) return null
@@ -317,6 +326,11 @@ function ruleDelta(
   }
 
   if (rule.trigger === 'elapsed_days') {
+    if (rule.sourceFieldName === STORY_CLOCK_SOURCE) {
+      if (storyDay === undefined || rule.lastSourceValue === undefined) return null
+      const steps = Math.floor(Math.max(0, storyDay - rule.lastSourceValue) / Math.max(1, rule.interval))
+      return steps > 0 ? { delta: steps * rule.amount, steps } : null
+    }
     const source = item.fields.find(field => field.name === rule.sourceFieldName)
     if (!source) return null
     const current = toDataPanelNumber(source.value)
@@ -341,6 +355,7 @@ export function buildDataPanelAutomationSuggestions(
   items: DataPanelItem[],
   chapterIndex: number,
   chapterText: string,
+  storyDay?: number,
 ): DataPanelAutomationSuggestion[] {
   const suggestions: DataPanelAutomationSuggestion[] = []
   for (const item of items) {
@@ -348,7 +363,7 @@ export function buildDataPanelAutomationSuggestions(
       const matchedRules: DataPanelAutomationRule[] = []
       let delta = 0
       for (const rule of field.automationRules || []) {
-        const result = ruleDelta(rule, item, chapterIndex, chapterText)
+        const result = ruleDelta(rule, item, chapterIndex, chapterText, storyDay)
         if (!result) continue
         delta += result.delta
         matchedRules.push(rule)
@@ -370,15 +385,20 @@ export function buildDataPanelAutomationSuggestions(
   return suggestions
 }
 
-export function initializeElapsedRuleBaselines(items: DataPanelItem[]): boolean {
+export function initializeElapsedRuleBaselines(items: DataPanelItem[], storyDay?: number): boolean {
   let changed = false
   for (const item of items) {
     for (const field of item.fields) {
       for (const rule of field.automationRules || []) {
         if (rule.trigger !== 'elapsed_days' || rule.lastSourceValue !== undefined) continue
-        const source = item.fields.find(candidate => candidate.name === rule.sourceFieldName)
-        if (!source) continue
-        rule.lastSourceValue = toDataPanelNumber(source.value)
+        if (rule.sourceFieldName === STORY_CLOCK_SOURCE) {
+          if (storyDay === undefined) continue
+          rule.lastSourceValue = storyDay
+        } else {
+          const source = item.fields.find(candidate => candidate.name === rule.sourceFieldName)
+          if (!source) continue
+          rule.lastSourceValue = toDataPanelNumber(source.value)
+        }
         changed = true
       }
     }
@@ -386,14 +406,16 @@ export function initializeElapsedRuleBaselines(items: DataPanelItem[]): boolean 
   return changed
 }
 
-export function settleDataPanelAutomationRules(item: DataPanelItem, change: DataPanelChange): void {
+export function settleDataPanelAutomationRules(item: DataPanelItem, change: DataPanelChange, storyDay?: number): void {
   const field = item.fields.find(candidate => candidate.id === change.fieldId || candidate.name === change.fieldName)
   if (!field) return
   for (const rule of field.automationRules || []) {
     if (rule.pendingChapterIndex !== change.chapterIndex) continue
     rule.lastEvaluatedChapterIndex = change.chapterIndex
     rule.appliedCount = (rule.appliedCount || 0) + 1
-    if (rule.trigger === 'elapsed_days') {
+    if (rule.trigger === 'elapsed_days' && rule.sourceFieldName === STORY_CLOCK_SOURCE) {
+      if (storyDay !== undefined) rule.lastSourceValue = storyDay
+    } else if (rule.trigger === 'elapsed_days') {
       const source = item.fields.find(candidate => candidate.name === rule.sourceFieldName)
       if (source) rule.lastSourceValue = toDataPanelNumber(source.value)
     }

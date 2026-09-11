@@ -26,6 +26,19 @@
       <span><strong>{{ automationRuleCount }}</strong> 条自动规则</span>
     </div>
 
+    <section class="story-clock-panel">
+      <div>
+        <strong>故事时间</strong>
+        <span class="story-clock-hint">用于计算作物成长、任务倒计时、建筑进度和角色状态变化</span>
+      </div>
+      <div class="story-clock-controls">
+        <span>当前故事日</span>
+        <n-input-number v-model:value="storyDayDraft" :min="0" :max="100000000" :step="1" size="small" />
+        <n-input v-model:value="storyLabelDraft" placeholder="显示名称（可选）" size="small" />
+        <n-button size="small" type="primary" @click="saveStoryClock">保存时间</n-button>
+      </div>
+    </section>
+
     <div class="filter-bar">
       <n-input v-model:value="query" clearable placeholder="搜索名称、关键词或字段" />
       <n-select v-model:value="categoryFilter" :options="categoryFilterOptions" />
@@ -76,6 +89,7 @@
               </div>
             </div>
 
+            <EquipmentSummary :item="item" :items="dataPanels" />
             <div class="object-meta">
               <span v-if="item.relatedKeywords.length">{{ item.relatedKeywords.join('、') }}</span>
               <span>{{ item.lastMentionChapterIndex === undefined ? '尚未在正文出现' : `最近第 ${item.lastMentionChapterIndex + 1} 章` }}</span>
@@ -102,11 +116,15 @@
             <div class="timeline-point"></div>
             <div>
               <div class="timeline-entry-header">
-                <strong>第 {{ change.chapterIndex + 1 }} 章 · {{ change.fieldName }}</strong>
+                <strong>第 {{ change.chapterIndex + 1 }} 章 · {{ change.itemName }} · {{ change.fieldName }}</strong>
                 <n-tag size="small" :type="changeStatusType(change.status)">{{ changeStatusLabel(change.status) }}</n-tag>
               </div>
               <p>{{ change.oldValue }} → {{ change.newValue }}</p>
               <small>{{ change.reason }}</small>
+              <div v-if="change.status === 'pending'" class="change-actions">
+                <n-button size="tiny" type="primary" @click="confirmChange(change.id)">应用</n-button>
+                <n-button size="tiny" @click="novelStore.rejectDataPanelChange(novelId, change.id)">忽略</n-button>
+              </div>
             </div>
           </div>
         </div>
@@ -119,9 +137,18 @@
         <div class="form-grid">
           <n-form-item label="名称"><n-input v-model:value="form.name" placeholder="数据对象名称" /></n-form-item>
           <n-form-item label="分类"><n-select v-model:value="form.category" :options="categoryOptions" /></n-form-item>
+          <n-form-item v-if="form.category === '装备' || form.category === '道具'" label="归属对象">
+            <n-select v-model:value="form.ownerItemId" clearable :options="ownerOptions" placeholder="选择归属的角色或对象" />
+          </n-form-item>
+          <n-form-item v-if="form.category === '装备' || form.category === '道具'" label="装备状态">
+            <n-select v-model:value="form.equipmentState" :options="equipmentStateOptions" />
+          </n-form-item>
           <n-form-item label="关联关键词" class="span-2"><n-input v-model:value="form.keywords" placeholder="用顿号或逗号分隔" /></n-form-item>
           <n-form-item label="字段与自动规则" class="span-2">
             <DataPanelFieldEditor v-model:fields="structuredFields" v-model:automation-text="form.automation" />
+          </n-form-item>
+          <n-form-item v-if="form.category === '装备' || form.category === '道具'" class="span-2">
+            <EquipmentFieldEditor v-model:fields="structuredFields" />
           </n-form-item>
         </div>
       </n-form>
@@ -147,12 +174,15 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
-  NButton, NDropdown, NEmpty, NForm, NFormItem, NIcon, NInput, NModal,
+  NButton, NDropdown, NEmpty, NForm, NFormItem, NIcon, NInput, NInputNumber, NModal,
   NPopconfirm, NSelect, NTag, useMessage,
 } from 'naive-ui'
 import { AddOutline, CreateOutline, DownloadOutline, TrashOutline, TimeOutline } from '@vicons/ionicons5'
 import { useNovelStore } from '@/stores/novel'
 import DataPanelFieldEditor from '@/components/data-panel/DataPanelFieldEditor.vue'
+import EquipmentFieldEditor from '@/components/data-panel/EquipmentFieldEditor.vue'
+import EquipmentSummary from '@/components/data-panel/EquipmentSummary.vue'
+import { equipmentStateOptions } from '@/services/dataPanelEquipment'
 import {
   calculateDataPanelFieldValues,
   dataPanelsToMarkdown,
@@ -162,7 +192,7 @@ import {
   parseDataPanelFields,
   parseDataPanelAutomationRules,
 } from '@/services/dataPanel'
-import type { DataPanelCategory, DataPanelChange, DataPanelField, DataPanelItem } from '@/types/novel'
+import type { DataPanelCategory, DataPanelChange, DataPanelField, DataPanelItem, EquipmentState } from '@/types/novel'
 
 const route = useRoute()
 const novelStore = useNovelStore()
@@ -179,14 +209,16 @@ const historyStatus = ref('all')
 const historyField = ref('all')
 const showEditor = ref(false)
 const editingItemId = ref('')
-const form = ref({ name: '', category: '自定义' as DataPanelCategory, keywords: '', automation: '' })
+const form = ref({ name: '', category: '自定义' as DataPanelCategory, keywords: '', automation: '', ownerItemId: '', equipmentState: 'stored' as EquipmentState })
 const structuredFields = ref<DataPanelField[]>([])
+const storyDayDraft = ref(0)
+const storyLabelDraft = ref('')
 const showVersionModal = ref(false)
 const versionItem = ref<DataPanelItem | null>(null)
 const selectedVersionId = ref('')
 const versionOptions = computed(() => (versionItem.value?.versions || []).slice().reverse().map(version => ({ label: `${version.label} · ${new Date(version.savedAt).toLocaleString('zh-CN')}`, value: version.id })))
 
-const categoryOptions = ['角色', '作物', '资源', '建筑', '任务', '自定义'].map(value => ({ label: value, value }))
+const categoryOptions = ['角色', '作物', '资源', '建筑', '任务', '装备', '道具', '自定义'].map(value => ({ label: value, value }))
 const categoryFilterOptions = [{ label: '全部分类', value: 'all' }, ...categoryOptions]
 const recentFilterOptions = [
   { label: '全部出现记录', value: 'all' },
@@ -204,6 +236,14 @@ const exportOptions = [
   { label: '导出 JSON', key: 'json' },
   { label: '导出 Markdown', key: 'markdown' },
 ]
+const ownerOptions = computed(() => dataPanels.value
+  .filter(item => item.id !== editingItemId.value && item.category === '角色')
+  .map(item => ({ label: `${item.name}（${item.category}）`, value: item.id })))
+
+watch(() => novel.value?.storyClock, clock => {
+  storyDayDraft.value = clock?.currentDay || 0
+  storyLabelDraft.value = clock?.label || ''
+}, { immediate: true, deep: true })
 
 const totalFieldCount = computed(() => dataPanels.value.reduce((sum, item) => sum + item.fields.length, 0))
 const pendingChangeCount = computed(() => (novel.value?.dataPanelChanges || []).filter(change => change.status === 'pending').length)
@@ -240,6 +280,20 @@ function splitKeywords(value: string): string[] {
   return value.split(/[、,，\n]/).map(item => item.trim()).filter(Boolean)
 }
 
+function saveStoryClock() {
+  if (!novel.value) return
+  novelStore.setStoryClock(novelId.value, storyDayDraft.value, storyLabelDraft.value)
+  const latest = [...novel.value.chapters]
+    .filter(chapter => ['completed', 'finalized', 'locked'].includes(chapter.status))
+    .sort((a, b) => b.chapterIndex - a.chapterIndex)[0]
+  if (latest) novelStore.queueAutomaticDataPanelChanges(
+    novelId.value,
+    latest.chapterIndex,
+    `故事时间已推进至第 ${storyDayDraft.value + 1} 天`,
+  )
+  message.success('故事时间已保存，相关自动规则已重新计算')
+}
+
 function openEditor(item?: DataPanelItem) {
   editingItemId.value = item?.id || ''
   form.value = item
@@ -248,8 +302,10 @@ function openEditor(item?: DataPanelItem) {
         category: item.category,
         keywords: item.relatedKeywords.join('、'),
         automation: formatDataPanelAutomationRules(item.fields),
+        ownerItemId: item.ownerItemId || '',
+        equipmentState: item.equipmentState || 'stored',
       }
-    : { name: '', category: '自定义', keywords: '', automation: '' }
+    : { name: '', category: '自定义', keywords: '', automation: '', ownerItemId: '', equipmentState: 'stored' }
   structuredFields.value = item
     ? item.fields.map(field => ({ ...field, automationRules: field.automationRules?.map(rule => ({ ...rule })) }))
     : parseDataPanelFields('')
@@ -294,12 +350,19 @@ function saveItem() {
     name,
     category: form.value.category,
     relatedKeywords: splitKeywords(form.value.keywords),
+    ownerItemId: form.value.ownerItemId || undefined,
+    equipmentState: form.value.equipmentState,
     fields,
   }
   if (editingItemId.value) novelStore.updateDataPanelItem(novelId.value, editingItemId.value, payload)
   else novelStore.addDataPanelItem(novelId.value, payload)
   showEditor.value = false
   message.success('数据已保存')
+}
+
+function confirmChange(id: string) {
+  if (novelStore.applyDataPanelChange(novelId.value, id)) message.success('数据记忆已应用')
+  else message.warning('当前数据已变化，请检查这条记录')
 }
 
 function removeItem(itemId: string) {
@@ -364,6 +427,7 @@ function exportDataPanels(key: string) {
 .data-header { gap: 16px; }
 .header-actions, .icon-actions, .modal-actions { gap: 8px; }
 .modal-actions { justify-content: flex-end; }
+.change-actions { display: flex; gap: 8px; margin-top: 8px; }
 
 .page-subtitle {
   margin: 4px 0 0;
@@ -379,6 +443,52 @@ function exportDataPanels(key: string) {
   color: var(--text-color-tertiary);
   font-size: 13px;
   border-bottom: 1px solid var(--border-color-light);
+}
+
+.story-clock-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 8px 0 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-color-light);
+  border-left: 3px solid var(--primary-color);
+  background: var(--card-color);
+}
+
+.story-clock-panel > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.story-clock-hint {
+  color: var(--text-color-tertiary);
+  font-size: 12px;
+}
+
+.story-clock-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.story-clock-controls > span {
+  color: var(--text-color-secondary);
+  font-size: 13px;
+}
+
+@media (max-width: 760px) {
+  .story-clock-panel {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .story-clock-controls {
+    justify-content: flex-start;
+  }
 }
 
 .data-summary strong { color: var(--text-color-primary); }

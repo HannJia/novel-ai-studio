@@ -111,8 +111,8 @@ function mergeSessionSecrets(data: ConfigData): ConfigData {
   const secrets = readSessionSecrets()
   return {
     ...data,
-    models: data.models.map(model => ({ ...model, apiKey: secrets.models[model.id] || '' })),
-    embedding: data.embedding ? { ...data.embedding, apiKey: secrets.embedding || '' } : undefined,
+    models: data.models.map(model => ({ ...model, apiKey: secrets.models[model.id] || model.apiKey || '' })),
+    embedding: data.embedding ? { ...data.embedding, apiKey: secrets.embedding || data.embedding.apiKey || '' } : undefined,
   }
 }
 
@@ -253,7 +253,9 @@ export const useConfigStore = defineStore('config', () => {
         const persisted = readLocalConfig()
         if (persisted) {
           if (isLocalDevelopment()) {
-            data = persisted
+            // Keep local development convenient even if an earlier build
+            // redacted the browser copy and left the secret in sessionStorage.
+            data = mergeSessionSecrets(persisted)
           } else if (containsPersistedSecrets(persisted)) {
             writeSessionSecrets(persisted)
             localStorage.setItem(STORAGE_KEY, JSON.stringify(redactConfigSecrets(persisted)))

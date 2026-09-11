@@ -31,7 +31,7 @@ describe('advisor mode switching', () => {
     scope.stop()
   })
 
-  it('cancels a previous explicit request and ignores its late result', async () => {
+  it('ignores the late result of an explicitly stopped request', async () => {
     const store = useNovelStore()
     const book = store.addNovel({ genre: 'urban', subGenre: 'business', tags: [], targetWordCountMin: 20, targetWordCountMax: 30, writingStyle: store.defaultWritingStyle(), settings: store.defaultSettings() })
     const chapter = store.addChapter(book.id, { content: '陈安走进厂房。' })!
@@ -42,6 +42,7 @@ describe('advisor mode switching', () => {
     const advisor = scope.run(() => useWritingAdvisor({ currentNovel: ref(book), currentChapter: ref(chapter), currentContent: ref(chapter.content), textarea: ref(null) }))!
     const first = advisor.analyze('scene')
     const signal = vi.mocked(requestWritingAdvice).mock.calls[0][0].signal
+    advisor.stop('scene')
     const second = advisor.analyze('chapter')
     expect(signal?.aborted).toBe(true)
     resolvers[0]({ mode: 'scene', suggestions: [] } as unknown as WritingAdviceResult)
@@ -53,6 +54,34 @@ describe('advisor mode switching', () => {
     expect(advisor.result.value?.mode).toBe('chapter')
     expect(advisor.lastMode.value).toBe('chapter')
     expect(advisor.analyzing.value).toBe(false)
+    scope.stop()
+  })
+
+  it('runs different analysis modes in parallel and retains both results', async () => {
+    const store = useNovelStore()
+    const book = store.addNovel({ genre: 'urban', subGenre: 'business', tags: [], targetWordCountMin: 20, targetWordCountMax: 30, writingStyle: store.defaultWritingStyle(), settings: store.defaultSettings() })
+    const chapter = store.addChapter(book.id, { content: '陈安走进厂房。' })!
+    vi.spyOn(useConfigStore(), 'getModelForTask').mockReturnValue({ id: 'x', name: 'test', modelName: 'test', apiKey: 'fixture', baseUrl: 'https://example.test', maxTokens: 1000, temperature: 1, topP: 1 })
+    const resolvers: Array<(value: WritingAdviceResult) => void> = []
+    vi.mocked(requestWritingAdvice).mockImplementation(() => new Promise(resolve => resolvers.push(resolve)))
+    const scope = effectScope()
+    const advisor = scope.run(() => useWritingAdvisor({ currentNovel: ref(book), currentChapter: ref(chapter), currentContent: ref(chapter.content), textarea: ref(null) }))!
+    const scene = advisor.analyze('scene')
+    const sceneSignal = vi.mocked(requestWritingAdvice).mock.calls[0][0].signal
+    const chapterAnalysis = advisor.analyze('chapter')
+    expect(sceneSignal?.aborted).toBe(false)
+    expect(advisor.analyzingModes.value).toEqual(['scene', 'chapter'])
+    resolvers[0]({ mode: 'scene', suggestions: [] } as unknown as WritingAdviceResult)
+    await scene
+    expect(advisor.lastMode.value).toBe('chapter')
+    expect(advisor.result.value).toBeNull()
+    expect(advisor.analyzingModes.value).toEqual(['chapter'])
+    resolvers[1]({ mode: 'chapter', suggestions: [] } as unknown as WritingAdviceResult)
+    await chapterAnalysis
+    expect(advisor.result.value?.mode).toBe('chapter')
+    advisor.selectMode('scene')
+    expect(advisor.result.value?.mode).toBe('scene')
+    expect(advisor.analyzingModes.value).toEqual([])
     scope.stop()
   })
 })

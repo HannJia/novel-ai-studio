@@ -34,12 +34,25 @@ const field = object({
   id, ...strings('name value unit note'),
   type: optional(oneOf('text', 'number', 'percent', 'days', 'countdown', 'formula')),
   formula: optional(text), calculationError: optional(text), autoCalculate: optional(boolean),
+  modifier: optional(object({ attribute: text, operation: oneOf('flat', 'percent') })),
   automationRules: optional(list(object({
     id, trigger: oneOf('per_chapter', 'on_mention', 'elapsed_days'), amount: number, interval: number, enabled: boolean,
     schedule: optional(list(number, 1000)), sourceFieldName: optional(text),
     lastEvaluatedChapterIndex: optional(number), lastSourceValue: optional(number), appliedCount: optional(integer), pendingChapterIndex: optional(number),
   }), 100)),
 })
+const equipmentState = oneOf('stored', 'equipped', 'consumed', 'lost')
+const dataCategory = oneOf('角色', '作物', '资源', '建筑', '任务', '装备', '道具', '自定义')
+const mutation: Check = (value, path) => {
+  const kind = (value as { kind?: unknown } | null)?.kind
+  if (kind === 'create') object({ kind: oneOf('create'), item: object({
+    name: text, category: dataCategory, fields: list(field, 1000), relatedKeywords: list(text),
+    ownerItemName: optional(text), equipmentState: optional(equipmentState),
+  }) })(value, path)
+  else if (kind === 'equipment') object({ kind: oneOf('equipment'), ownerItemName: text, state: equipmentState })(value, path)
+  else if (kind === 'field') object({ kind: oneOf('field'), field })(value, path)
+  else fail(path)
+}
 const settings = object({
   protagonist: object({ ...strings('name gender age background initialPower cheatDescription romanceTendency'), personality: list(text, 1000) }),
   supportingCharacters: list(object(strings('name relationship personality role')), 1000),
@@ -58,13 +71,16 @@ const book = object({
   id, ...strings('title genre subGenre genreLabel subGenreLabel outline synopsis'), tags: list(text, 1000),
   targetWordCountMin: number, targetWordCountMax: number, currentWordCount: integer,
   writingStyle: object(strings('narrativePov toneStyle descriptionDensity dialogueStyle combatStyle pacingControl emotionExpression')),
-  writingMode: optional(oneOf('manual', 'ai')), chatWebSearchEnabled: optional(boolean), settings,
+  writingMode: optional(oneOf('manual', 'ai')), chatWebSearchEnabled: optional(boolean), storyClock: optional(object({
+    currentDay: number, label: text, lastChapterIndex: optional(number), updatedAt: date,
+  })), settings,
   status: oneOf('creating', 'writing', 'archived', 'trash', 'completed'), ...times, knowledgeBaseIds: list(id, 1000),
   volumes: list(object({ id, volumeIndex: integer, ...strings('title theme summary keyTurningPoints characterChanges'),
     estimatedChapters: number, estimatedWordCount: number, versions }), 10_000),
   chapters: list(object({ id, volumeIndex: integer, chapterIndex: integer, ...strings('title content summary'),
     bannedReview: optional(text), contentReview: optional(text), contentReviewSignature: optional(text), reviewRewriteBlockedSignature: optional(text),
-    wordCount: integer, status: oneOf('draft', 'writing', 'completed', 'reviewed', 'finalized', 'locked'), ...times, versions,
+    wordCount: integer, storyDaysElapsed: optional(number), storyDay: optional(number),
+    status: oneOf('draft', 'writing', 'completed', 'reviewed', 'finalized', 'locked'), ...times, versions,
     sceneNotes: optional(list(object({ id, title: text, content: text, source, ...times }), 10_000)),
   }), 30_000),
   characters: list(object({ id, ...strings('name identity personality powerLevel faction description avatarColor'), aliases: list(text),
@@ -93,10 +109,11 @@ const book = object({
     targetId: id, parentId: optional(id), ...strings('targetTitle oldValue newValue reason evidence'),
     field: oneOf('status', 'targetChapter'), chapterIndex: number, status: oneOf('pending', 'accepted', 'rejected'), source, ...times,
   }))),
-  dataPanels: list(object({ id, category: oneOf('角色', '作物', '资源', '建筑', '任务', '自定义'), name: text,
-    fields: list(field, 1000), relatedKeywords: list(text), lastMentionChapterIndex: optional(number), versions, ...times })),
+  dataPanels: list(object({ id, category: oneOf('角色', '作物', '资源', '建筑', '任务', '装备', '道具', '自定义'), name: text,
+    fields: list(field, 1000), relatedKeywords: list(text), ownerItemId: optional(id), equipmentState: optional(oneOf('stored', 'equipped', 'consumed', 'lost')), lastMentionChapterIndex: optional(number), versions, ...times })),
   dataPanelChanges: list(object({ id, itemId: id, fieldId: id, ...strings('itemName fieldName oldValue newValue reason'),
-    confidence: optional(oneOf('clear', 'possible', 'none')), chapterIndex: number, status: oneOf('pending', 'accepted', 'rejected'), createdAt: date })),
+    confidence: optional(oneOf('clear', 'possible', 'none')), mutation: optional(mutation),
+    chapterIndex: number, status: oneOf('pending', 'accepted', 'rejected'), createdAt: date })),
 })
 const knowledge = object({ id, name: text, description: text, createdAt: date,
   entries: list(object({ id, ...strings('category title content summary'), tags: list(text), ...times })) })

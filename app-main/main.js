@@ -92,6 +92,7 @@ function createWindow() {
     minHeight: 700,
     title: 'AI 长篇小说写作软件',
     autoHideMenuBar: true,
+    show: !isSmokeTest,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -136,6 +137,7 @@ function createWindow() {
             security: await window.electronAPI?.configSecurityStatus?.(),
           };
         })()`)
+        result.appVersion = app.getVersion()
         console.log(`ELECTRON_SMOKE_RESULT ${JSON.stringify(result)}`)
         app.exit(result.rendered && result.bridgeAvailable && result.nodeIsolated ? 0 : 1)
       } catch (error) {

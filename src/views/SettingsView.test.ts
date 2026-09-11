@@ -5,6 +5,7 @@ import { flushPromises, shallowMount } from '@vue/test-utils'
 import SettingsView from './SettingsView.vue'
 import { useConfigStore } from '@/stores/config'
 import { listAvailableModels } from '@/services/ai'
+import { version as appVersion } from '../../package.json'
 
 vi.mock('@/services/ai', async importOriginal => ({
   ...await importOriginal<object>(), listAvailableModels: vi.fn(), testConnection: vi.fn(),
@@ -49,6 +50,10 @@ afterEach(async () => {
 })
 
 describe('模型原始名称与配置备注', () => {
+  it('shows the package version in the about section', () => {
+    expect(mountSettings().find('.about-section').text()).toContain(`v${appVersion}`)
+  })
+
   it('has no duplicate global writing-mode setting or setter', async () => {
     const store = useConfigStore()
     const wrapper = mountSettings()

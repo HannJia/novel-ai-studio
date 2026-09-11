@@ -44,6 +44,25 @@ function largeNovel(): Novel {
 }
 
 describe('large novel SQLite persistence', () => {
+  it('round-trips equipment ownership, modifiers and pending creations through SQLite', async () => {
+    const novel = largeNovel()
+    novel.id = 'equipment-roundtrip'
+    novel.dataPanels = [
+      { id: 'hero-db', name: '林澈', category: '角色', fields: [{ id: 'attack-db', name: '攻击力', value: '20', unit: '', note: '', type: 'number' }],
+        relatedKeywords: [], createdAt: novel.createdAt, updatedAt: novel.updatedAt },
+      { id: 'sword-db', name: '铁剑', category: '装备', ownerItemId: 'hero-db', equipmentState: 'equipped',
+        fields: [{ id: 'bonus-db', name: '攻击加成', value: '10', unit: '', note: '', type: 'number', modifier: { attribute: '攻击力', operation: 'flat' } }],
+        relatedKeywords: [], createdAt: novel.createdAt, updatedAt: novel.updatedAt },
+    ]
+    novel.dataPanelChanges = [{ id: 'proposal-db', itemId: 'new:ring', fieldId: '__create__', itemName: '戒指', fieldName: '新增对象',
+      oldValue: '未记录', newValue: '戒指', reason: '获得戒指', confidence: 'clear', chapterIndex: 0, status: 'pending', createdAt: novel.createdAt,
+      mutation: { kind: 'create', item: { name: '戒指', category: '装备', fields: [], relatedKeywords: [], ownerItemName: '林澈', equipmentState: 'stored' } } }]
+    await saveNovelToDb(novel)
+    const loaded = (await loadAllNovelsFromDb()).find(book => book.id === novel.id)!
+    expect(loaded.dataPanels[1]).toMatchObject(novel.dataPanels[1])
+    expect(loaded.dataPanelChanges).toEqual(novel.dataPanelChanges)
+  })
+
   it('saves and reloads 5,000 history rows within the regression budget', async () => {
     const novel = largeNovel()
     novel.writingMode = 'manual'

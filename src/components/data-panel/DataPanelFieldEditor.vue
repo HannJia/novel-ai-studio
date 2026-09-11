@@ -64,7 +64,7 @@
 import { computed, ref, watch } from 'vue'
 import { NButton, NEmpty, NIcon, NInput, NInputNumber, NRadioButton, NRadioGroup, NSelect } from 'naive-ui'
 import { TrashOutline } from '@vicons/ionicons5'
-import { calculateDataPanelFieldValues, createDataPanelId, formatDataPanelFields, parseDataPanelFields } from '@/services/dataPanel'
+import { calculateDataPanelFieldValues, createDataPanelId, formatDataPanelFields, parseDataPanelFields, STORY_CLOCK_SOURCE } from '@/services/dataPanel'
 import type { DataPanelAutomationRule, DataPanelField, DataPanelFieldType } from '@/types/novel'
 
 interface RuleRow {
@@ -96,7 +96,10 @@ const triggerOptions = [
   { label: '每次出现', value: 'on_mention' },
   { label: '经过天数', value: 'elapsed_days' },
 ]
-const fieldOptions = computed(() => props.fields.map(field => ({ label: field.name || '未命名字段', value: field.name })))
+const fieldOptions = computed(() => [
+  { label: '故事时间（当前故事日）', value: STORY_CLOCK_SOURCE },
+  ...props.fields.map(field => ({ label: field.name || '未命名字段', value: field.name })),
+])
 
 watch(() => props.fields, fields => {
   advancedFieldsText.value = formatDataPanelFields(fields)
@@ -127,7 +130,10 @@ function removeField(id: string) {
 }
 
 function applyAdvancedFields() {
-  emit('update:fields', parseDataPanelFields(advancedFieldsText.value))
+  emit('update:fields', parseDataPanelFields(advancedFieldsText.value).map(field => {
+    const previous = props.fields.find(candidate => candidate.name === field.name)
+    return previous ? { ...field, id: previous.id, modifier: previous.modifier } : field
+  }))
 }
 
 function addRule() {
@@ -165,7 +171,8 @@ function parseRules(text: string): RuleRow[] {
     const [fieldName = '', spec = ''] = line.split(/[|｜]/).map(value => value.trim())
     if (!fieldName || !spec) continue
     const elapsed = spec.match(/经过\s*(\d+(?:\.\d+)?)\s*天(?:后)?\s*([+-]?\s*\d+(?:\.\d+)?)/)
-    const source = spec.match(/基于\s*[:：]\s*([^）)]+)/)?.[1]?.trim() || ''
+    const rawSource = spec.match(/基于\s*[:：\s]*([^）)]+)/)?.[1]?.trim() || ''
+    const source = rawSource === '故事时间' || rawSource === '当前故事日' ? STORY_CLOCK_SOURCE : rawSource
     if (elapsed) {
       parsed.push({ id: createDataPanelId(), fieldName, trigger: 'elapsed_days', amount: Number(elapsed[2].replace(/\s/g, '')), interval: Number(elapsed[1]), schedule: '', sourceFieldName: source })
       continue

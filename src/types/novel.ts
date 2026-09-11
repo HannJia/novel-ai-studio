@@ -144,6 +144,13 @@ export interface DataPanelAutomationRule {
   pendingChapterIndex?: number
 }
 
+export interface StoryClock {
+  currentDay: number
+  label: string
+  lastChapterIndex?: number
+  updatedAt: string
+}
+
 export interface DataPanelField {
   id: string
   name: string
@@ -153,11 +160,13 @@ export interface DataPanelField {
   type?: DataPanelFieldType
   formula?: string
   autoCalculate?: boolean
+  modifier?: { attribute: string; operation: 'flat' | 'percent' }
   calculationError?: string // 无效公式保留原值，但必须显示错误，不能冒充已计算
   automationRules?: DataPanelAutomationRule[]
 }
 
-export type DataPanelCategory = '角色' | '作物' | '资源' | '建筑' | '任务' | '自定义'
+export type DataPanelCategory = '角色' | '作物' | '资源' | '建筑' | '任务' | '装备' | '道具' | '自定义'
+export type EquipmentState = 'stored' | 'equipped' | 'consumed' | 'lost'
 
 // 数据面板对象
 export interface DataPanelItem {
@@ -166,6 +175,8 @@ export interface DataPanelItem {
   name: string
   fields: DataPanelField[]
   relatedKeywords: string[]
+  ownerItemId?: string // 装备/道具明确归属的角色或其他数据对象
+  equipmentState?: EquipmentState
   lastMentionChapterIndex?: number
   versions?: DataPanelVersion[]
   createdAt: string
@@ -180,6 +191,20 @@ export interface DataPanelVersion {
 }
 
 // 数据面板变更建议
+export interface DataPanelItemDraft {
+  name: string
+  category: DataPanelCategory
+  fields: DataPanelField[]
+  relatedKeywords: string[]
+  ownerItemName?: string
+  equipmentState?: EquipmentState
+}
+
+export type DataPanelMutation =
+  | { kind: 'create'; item: DataPanelItemDraft }
+  | { kind: 'equipment'; ownerItemName: string; state: EquipmentState }
+  | { kind: 'field'; field: DataPanelField }
+
 export interface DataPanelChange {
   id: string
   itemId: string
@@ -190,6 +215,7 @@ export interface DataPanelChange {
   newValue: string
   reason: string
   confidence?: 'clear' | 'possible' | 'none'
+  mutation?: DataPanelMutation
   chapterIndex: number
   status: 'pending' | 'accepted' | 'rejected'
   createdAt: string
@@ -316,6 +342,8 @@ export interface Chapter {
   contentReviewSignature?: string // 内容审查对应的正文签名
   reviewRewriteBlockedSignature?: string // 该版正文自动重写已用尽，避免重复循环
   wordCount: number       // 正文字数
+  storyDaysElapsed?: number // 本章明确经过的故事天数
+  storyDay?: number         // 本章完成后对应的故事日
   status: 'draft' | 'writing' | 'completed' | 'reviewed' | 'finalized' | 'locked'
   sceneNotes?: SceneNote[]
   versions?: ChapterVersion[]
@@ -380,6 +408,7 @@ export interface Novel {
   chatHistory: DialogueMessage[] // 书内助手对话，不含创建前的灵感讨论
   inspirationHistory?: DialogueMessage[] // 创建时确认保留的灵感存档，不受助手历史上限影响
   chatWebSearchEnabled?: boolean // 默认关闭，按书记忆对话联网选择
+  storyClock?: StoryClock  // 故事内时间轴，用于驱动数据面板自动计算
   knowledgeBaseIds: string[]  // 绑定的知识库 ID 列表
   eventLog: EventLogEntry[]   // 事件表（自动+手动）
   storyArcs?: StoryArc[]      // 跨章节叙事弧线

@@ -62,7 +62,7 @@ describe('WritingAdvisorSidebar', () => {
   })
 
   it('提供同时分析全部范围的入口', async () => {
-    const wrapper = shallowMount(WritingAdvisorSidebar, { props: baseProps })
+    const wrapper = shallowMount(WritingAdvisorSidebar, { props: baseProps, global: { renderStubDefaultSlot: true } })
     const button = wrapper.findAllComponents({ name: 'Button' }).find(item => item.text() === '同时分析全部范围')!
     expect(button.exists()).toBe(true)
     button.vm.$emit('click')

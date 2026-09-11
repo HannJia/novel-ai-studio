@@ -9,3 +9,13 @@ release/
 .compare/
 .claude/settings.local.json
 .codex-public-skills-temp/
+.env
+.env.*
+!.env.example
+*.db
+*.db.bak
+*.sqlite
+*.sqlite3
+*.pfx
+*.p12
+novel-writer-config.json

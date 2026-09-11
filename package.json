@@ -1,7 +1,16 @@
 {
   "name": "ai-novel-writer",
-  "version": "1.0.0",
-  "description": "AI 长篇小说写作软件",
+  "version": "1.0.1",
+  "description": "本地优先的 AI 长篇小说写作软件，支持作者主笔、AI 写作、知识库与剧情数据记忆",
+  "author": "HannJia",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HannJia/novel-ai-studio.git"
+  },
+  "homepage": "https://github.com/HannJia/novel-ai-studio#readme",
+  "bugs": {
+    "url": "https://github.com/HannJia/novel-ai-studio/issues"
+  },
   "private": true,
   "main": "app-main/main.js",
   "scripts": {
@@ -77,7 +86,7 @@
         "nsis"
       ],
       "artifactName": "AI-Novel-Writer-${version}-${arch}.${ext}",
-      "signAndEditExecutable": false
+      "signExecutable": false
     },
     "nsis": {
       "oneClick": false,

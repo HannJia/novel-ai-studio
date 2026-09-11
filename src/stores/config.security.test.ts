@@ -83,6 +83,27 @@ describe('本地开发环境', () => {
     expect(restored.models[0].apiKey).toBe('local-dev-secret')
     expect(restored.securityStatus.storage).toBe('local-development')
   })
+
+  it('本地开发环境可从会话密钥恢复旧版脱敏配置', async () => {
+    setBrowserLocation('localhost')
+    local.setItem('novel-writer-config', JSON.stringify({
+      models: [{
+        id: 'redacted', name: '旧配置', baseUrl: 'https://example.test', apiKey: '', modelName: 'test-model',
+        maxTokens: 4096, temperature: 0.7, topP: 0.9,
+      }],
+      assignments: { writing: 'redacted' },
+    }))
+    session.setItem('novel-writer-session-secrets', JSON.stringify({
+      models: { redacted: 'recovered-secret' },
+      embedding: '',
+    }))
+
+    const store = useConfigStore()
+    await store.loadConfig()
+
+    expect(store.models[0].apiKey).toBe('recovered-secret')
+    expect(store.securityStatus.storage).toBe('local-development')
+  })
 })
 
 describe('对话 / 联网模型分配', () => {

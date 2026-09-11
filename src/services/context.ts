@@ -7,6 +7,7 @@ import { buildSemanticRecords, formatEvidence, queryPersistedSemanticEvidence, r
 import { isRemoteEmbeddingEnabled } from '@/services/embeddings'
 import { formatChapterPlanContext } from '@/services/storyPlanning'
 import { buildBoundKnowledgeSignature } from '@/services/knowledgeContext'
+import { equipmentSnapshot, formatEquipmentTotals } from '@/services/dataPanelEquipment'
 
 export interface WritingContext {
   outlineContext: string
@@ -119,15 +120,17 @@ function formatCharacter(c: Character): string {
   return entry
 }
 
-function formatDataPanelItem(item: Novel['dataPanels'][number]): string {
+function formatDataPanelItem(item: Novel['dataPanels'][number], panels: Novel['dataPanels']): string {
   const fields = item.fields
     .map(field => {
       const type = field.type && field.type !== 'text' ? `（${field.type}${field.formula ? `:${field.formula}` : ''}）` : ''
       return `${field.name}${type}=${field.value}${field.unit ? field.unit : ''}`
     })
     .join('；')
+  const owner = ['装备', '道具'].includes(item.category) ? `，${equipmentSnapshot(item, panels)}` : ''
+  const effective = formatEquipmentTotals(panels, item.id)
   const keywords = item.relatedKeywords.length > 0 ? `，关键词：${item.relatedKeywords.join('、')}` : ''
-  return `• [${item.category}] ${item.name}：${fields || '暂无字段'}${keywords}`
+  return `• [${item.category}] ${item.name}：${fields || '暂无字段'}${owner}${keywords}${effective ? `\n${effective}` : ''}`
 }
 
 function buildStageSummary(novel: Novel, chapterIdx: number, limit: number): string {
@@ -184,7 +187,9 @@ function buildContextSignature(novel: Novel, currentChapter: Chapter, contextWin
       item.id,
       item.name,
       item.updatedAt,
-      item.fields.map(f => `${f.name}:${f.value}`).join(','),
+      item.ownerItemId || '',
+      item.equipmentState || '',
+      item.fields.map(f => `${f.name}:${f.value}:${JSON.stringify(f.modifier || {})}`).join(','),
     ].join(':'))
     .join('|')
   const planSig = (novel.chapterPlans || [])
@@ -290,6 +295,9 @@ export function buildWritingContext(
   const storyArcContext = buildStoryArcContext(novel, currentChapter, budget)
   const timelineContext = buildTimelineContext(novel, currentChapter, budget)
   const chapterGuidance = formatChapterPlanContext(novel, chapterIdx)
+  const storyClockContext = novel.storyClock
+    ? `\n\n【故事时间】当前为${novel.storyClock.label || `第 ${novel.storyClock.currentDay + 1} 天`}（故事日 ${novel.storyClock.currentDay}）。涉及成长、倒计时、资源产出和状态变化时，必须以这个时间为准。`
+    : ''
 
   let lastParagraph = ''
   if (chapterIdx > 0) {
@@ -349,7 +357,7 @@ export function buildWritingContext(
   }
 
   const result = {
-    outlineContext: outlineContext + volumeContext + storyArcContext + timelineContext + characterContext + globalPlanContext + knowledgeContext + (semanticEvidence ? `\n\n【语义记忆召回】\n${semanticEvidence}` : ''),
+    outlineContext: outlineContext + storyClockContext + volumeContext + storyArcContext + timelineContext + characterContext + globalPlanContext + knowledgeContext + (semanticEvidence ? `\n\n【语义记忆召回】\n${semanticEvidence}` : ''),
     previousSummary,
     lastParagraph,
     chapterGuidance,
@@ -422,7 +430,7 @@ export function buildChapterFactCard(
         || relevantCharacters.some(char => text.includes(char.name) || char.name.includes(item.name))
     })
     .slice(0, 10)
-    .map(formatDataPanelItem)
+    .map(item => formatDataPanelItem(item, allDataPanels))
   const globalNumericData = allDataPanels
     .filter(item => !relatedData.some(line => line.includes(`] ${item.name}：`)))
     .filter(item => {
@@ -430,7 +438,7 @@ export function buildChapterFactCard(
       return /(时间|日期|天|日|月|剩余|倒计时|成熟|进度|资源|灵石|数量|库存|等级|境界|阶段|月例|采收)/.test(source)
     })
     .slice(0, 8)
-    .map(formatDataPanelItem)
+    .map(item => formatDataPanelItem(item, allDataPanels))
   return [
     `【本章写作事实卡】`,
     `章节：第${chapterIdx + 1}章 ${currentChapter.title}`,

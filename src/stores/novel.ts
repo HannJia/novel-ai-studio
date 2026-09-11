@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Novel, Chapter, Volume, Character, DialogueMessage, CreateWizardForm, WritingStyle, NovelSettings, DataPanelItem, DataPanelChange, ChapterRevision, ChapterRevisionSource, EventLogEntry, StoryArc, StoryArcNode, ChapterPlan, StoryStateProposal, SceneNote, ChapterVersion, DataPanelVersion } from '@/types/novel'
+import type { Novel, Chapter, Volume, Character, DialogueMessage, CreateWizardForm, WritingStyle, NovelSettings, DataPanelItem, DataPanelChange, ChapterRevision, ChapterRevisionSource, EventLogEntry, StoryArc, StoryArcNode, ChapterPlan, StoryStateProposal, SceneNote, ChapterVersion, DataPanelVersion, StoryClock } from '@/types/novel'
 import { genres } from '@/data/genres'
 import { loadAllNovelsFromDb, saveNovelToDb, deleteNovelFromDb } from '@/services/db/novels'
 import { createRevisionPersistence } from './revisionPersistence'
@@ -15,6 +15,7 @@ import {
   type DataPanelHistoryCleanup,
 } from '@/services/dataPanel'
 import { appendPlanningVersion, createPlanningSnapshot } from '@/services/planningVersions'
+import { equipmentSnapshot } from '@/services/dataPanelEquipment'
 
 // 生成唯一 ID
 function generateId(): string {
@@ -37,7 +38,15 @@ function chapterSnapshot(chapter: Chapter): string {
 }
 
 function dataPanelSnapshot(item: DataPanelItem): string {
-  return JSON.stringify({ category: item.category, name: item.name, fields: item.fields, relatedKeywords: item.relatedKeywords, lastMentionChapterIndex: item.lastMentionChapterIndex })
+  return JSON.stringify({
+    category: item.category,
+    name: item.name,
+    fields: item.fields,
+    relatedKeywords: item.relatedKeywords,
+    ownerItemId: item.ownerItemId,
+    equipmentState: item.equipmentState,
+    lastMentionChapterIndex: item.lastMentionChapterIndex,
+  })
 }
 
 function cleanCharacterName(value: string): string {
@@ -206,6 +215,7 @@ export const useNovelStore = defineStore('novel', () => {
       storyStateProposals: [],
       dataPanels: [],
       dataPanelChanges: [],
+      storyClock: { currentDay: 0, label: '第 1 天', lastChapterIndex: -1, updatedAt: now },
       status: 'creating',
       createdAt: now,
       updatedAt: now,
@@ -263,6 +273,8 @@ export const useNovelStore = defineStore('novel', () => {
       sceneNotes: chapterData.sceneNotes || [],
       versions: chapterData.versions || [],
       wordCount: countNovelWords(chapterData.content || ''),
+      storyDaysElapsed: Number.isFinite(Number(chapterData.storyDaysElapsed)) ? Math.max(0, Number(chapterData.storyDaysElapsed)) : 0,
+      storyDay: chapterData.storyDay,
       status: 'draft',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -1011,10 +1023,14 @@ export const useNovelStore = defineStore('novel', () => {
       name: itemData.name || '未命名数据',
       fields: itemData.fields || [],
       relatedKeywords: itemData.relatedKeywords || [],
+      ownerItemId: itemData.ownerItemId,
+      equipmentState: itemData.equipmentState,
       lastMentionChapterIndex: itemData.lastMentionChapterIndex,
       createdAt: now,
       updatedAt: now,
     }
+    calculateDataPanelFields(item)
+    initializeElapsedRuleBaselines([item], novel.storyClock?.currentDay ?? 0)
     novel.dataPanels.push(item)
     touchNovel(novel, now)
     return item
@@ -1029,6 +1045,8 @@ export const useNovelStore = defineStore('novel', () => {
     const after = dataPanelSnapshot({ ...item, ...updates } as DataPanelItem)
     if (before !== after) item.versions = appendSnapshot<DataPanelVersion>(item.versions, before, '编辑前版本')
     Object.assign(item, updates, { updatedAt: new Date().toISOString() })
+    calculateDataPanelFields(item)
+    initializeElapsedRuleBaselines([item], novel.storyClock?.currentDay ?? 0)
     touchNovel(novel, new Date().toISOString())
   }
 
@@ -1043,6 +1061,8 @@ export const useNovelStore = defineStore('novel', () => {
         category: snapshot.category as DataPanelItem['category'], name: String(snapshot.name || item.name),
         fields: Array.isArray(snapshot.fields) ? snapshot.fields as DataPanelItem['fields'] : item.fields,
         relatedKeywords: Array.isArray(snapshot.relatedKeywords) ? snapshot.relatedKeywords.map(String) : item.relatedKeywords,
+        ownerItemId: snapshot.ownerItemId,
+        equipmentState: snapshot.equipmentState,
         lastMentionChapterIndex: snapshot.lastMentionChapterIndex,
       })
       return true
@@ -1053,6 +1073,12 @@ export const useNovelStore = defineStore('novel', () => {
     const novel = getNovel(novelId)
     if (!novel?.dataPanels) return
     novel.dataPanels = novel.dataPanels.filter(i => i.id !== itemId)
+    for (const item of novel.dataPanels) {
+      if (item.ownerItemId === itemId) {
+        delete item.ownerItemId
+        item.equipmentState = 'stored'
+      }
+    }
     if (novel.dataPanelChanges) {
       novel.dataPanelChanges = novel.dataPanelChanges.filter(c => c.itemId !== itemId)
     }
@@ -1064,9 +1090,9 @@ export const useNovelStore = defineStore('novel', () => {
     if (!novel) return null
     if (!novel.dataPanelChanges) novel.dataPanelChanges = []
     const exists = novel.dataPanelChanges.some(c =>
-      c.itemId === change.itemId &&
-      c.fieldId === change.fieldId &&
-      c.chapterIndex === change.chapterIndex
+      change.mutation?.kind === 'create' && c.mutation?.kind === 'create'
+        ? c.itemName === change.itemName && (c.status === 'pending' || c.chapterIndex === change.chapterIndex)
+        : c.itemId === change.itemId && c.fieldId === change.fieldId && c.chapterIndex === change.chapterIndex
     )
     if (exists) return null
     const entry: DataPanelChange = {
@@ -1086,6 +1112,47 @@ export const useNovelStore = defineStore('novel', () => {
     if (!novel?.dataPanelChanges || !novel.dataPanels) return false
     const change = novel.dataPanelChanges.find(c => c.id === changeId)
     if (!change || change.status !== 'pending') return false
+    if (change.mutation) {
+      const mutation = change.mutation
+      const now = new Date().toISOString()
+      const resolveOwner = (name: string): string | undefined => {
+        if (!name.trim()) return undefined
+        const candidates = novel.dataPanels.filter(item => item.category === '角色' && item.name === name)
+        if (candidates.length === 1) return candidates[0].id
+        if (candidates.length > 1) return undefined
+        return addDataPanelItem(novelId, { name, category: '角色', fields: [], relatedKeywords: [name] })?.id
+      }
+      if (mutation.kind === 'create') {
+        const draft = mutation.item
+        if (novel.dataPanels.some(item => item.name === draft.name && item.category === draft.category)) return false
+        const created = addDataPanelItem(novelId, {
+          ...JSON.parse(JSON.stringify(draft)),
+          ownerItemId: resolveOwner(draft.ownerItemName || ''),
+          lastMentionChapterIndex: change.chapterIndex,
+        })
+        if (!created) return false
+        change.itemId = created.id
+      } else {
+        const item = novel.dataPanels.find(candidate => candidate.id === change.itemId)
+        if (!item) return false
+        if (mutation.kind === 'equipment') {
+          if (equipmentSnapshot(item, novel.dataPanels) !== change.oldValue) return false
+          if ((item.lastMentionChapterIndex ?? -1) > change.chapterIndex) return false
+          item.versions = appendSnapshot<DataPanelVersion>(item.versions, dataPanelSnapshot(item), '装备状态变更前')
+          item.ownerItemId = resolveOwner(mutation.ownerItemName)
+          item.equipmentState = mutation.state
+        } else {
+          if (item.fields.some(field => field.name === mutation.field.name)) return false
+          item.fields.push(JSON.parse(JSON.stringify(mutation.field)))
+          calculateDataPanelFields(item)
+        }
+        item.lastMentionChapterIndex = change.chapterIndex
+        item.updatedAt = now
+      }
+      change.status = 'accepted'
+      touchNovel(novel, now)
+      return true
+    }
     const item = novel.dataPanels.find(i => i.id === change.itemId)
     const field = item?.fields.find(f => f.id === change.fieldId || f.name === change.fieldName)
     if (!field || !item) return false
@@ -1095,7 +1162,7 @@ export const useNovelStore = defineStore('novel', () => {
     field.value = value
     change.newValue = value
     calculateDataPanelFields(item)
-    settleDataPanelAutomationRules(item, change)
+    settleDataPanelAutomationRules(item, change, novel.storyClock?.currentDay)
     item.lastMentionChapterIndex = change.chapterIndex
     item.updatedAt = new Date().toISOString()
     change.status = 'accepted'
@@ -1109,7 +1176,7 @@ export const useNovelStore = defineStore('novel', () => {
     const change = novel.dataPanelChanges.find(c => c.id === changeId)
     if (!change || change.status !== 'pending') return
     const item = novel.dataPanels?.find(candidate => candidate.id === change.itemId)
-    if (item) settleDataPanelAutomationRules(item, change)
+    if (item && !change.mutation) settleDataPanelAutomationRules(item, change, novel.storyClock?.currentDay)
     change.status = 'rejected'
     touchNovel(novel, new Date().toISOString())
   }
@@ -1121,7 +1188,10 @@ export const useNovelStore = defineStore('novel', () => {
     const selected = changeIds
       .map(changeId => novel.dataPanelChanges!.find(item => item.id === changeId))
       .filter((change): change is DataPanelChange => !!change && change.status === 'pending')
-      .sort((a, b) => a.chapterIndex - b.chapterIndex || a.createdAt.localeCompare(b.createdAt))
+      .sort((a, b) => a.chapterIndex - b.chapterIndex
+        || Number(!(a.mutation?.kind === 'create' && a.mutation.item.category === '角色'))
+          - Number(!(b.mutation?.kind === 'create' && b.mutation.item.category === '角色'))
+        || a.createdAt.localeCompare(b.createdAt))
     for (const change of selected) {
       const changeId = change.id
       if (applyDataPanelChange(novelId, changeId, drafts[changeId])) applied++
@@ -1155,8 +1225,9 @@ export const useNovelStore = defineStore('novel', () => {
   function queueAutomaticDataPanelChanges(novelId: string, chapterIndex: number, chapterText: string): number {
     const novel = getNovel(novelId)
     if (!novel?.dataPanels?.length) return 0
-    const initialized = initializeElapsedRuleBaselines(novel.dataPanels)
-    const suggestions = buildDataPanelAutomationSuggestions(novel.dataPanels, chapterIndex, chapterText)
+    const currentStoryDay = novel.storyClock?.currentDay
+    const initialized = initializeElapsedRuleBaselines(novel.dataPanels, currentStoryDay)
+    const suggestions = buildDataPanelAutomationSuggestions(novel.dataPanels, chapterIndex, chapterText, currentStoryDay)
     let added = 0
     for (const suggestion of suggestions) {
       const { rules, ...change } = suggestion
@@ -1167,6 +1238,47 @@ export const useNovelStore = defineStore('novel', () => {
     }
     if (initialized || added) touchNovel(novel, new Date().toISOString())
     return added
+  }
+
+  function advanceStoryClock(novelId: string, elapsedDays: number, chapterIndex?: number): StoryClock | null {
+    const novel = getNovel(novelId)
+    if (!novel) return null
+    const days = Math.max(0, Number(elapsedDays) || 0)
+    const now = new Date().toISOString()
+    const current = novel.storyClock || { currentDay: 0, label: '第 1 天', updatedAt: now }
+    initializeElapsedRuleBaselines(novel.dataPanels || [], current.currentDay)
+    novel.storyClock = {
+      currentDay: Math.round((current.currentDay + days) * 100) / 100,
+      label: `第 ${Math.round((current.currentDay + days) * 100) / 100 + 1} 天`,
+      lastChapterIndex: chapterIndex ?? current.lastChapterIndex,
+      updatedAt: now,
+    }
+    if (chapterIndex !== undefined) {
+      const chapter = novel.chapters.find(item => item.chapterIndex === chapterIndex)
+      if (chapter) {
+        chapter.storyDaysElapsed = days
+        chapter.storyDay = novel.storyClock.currentDay
+      }
+    }
+    touchNovel(novel, now)
+    return novel.storyClock
+  }
+
+  function setStoryClock(novelId: string, currentDay: number, label?: string): StoryClock | null {
+    const novel = getNovel(novelId)
+    if (!novel) return null
+    const now = new Date().toISOString()
+    const day = Math.max(0, Math.round((Number(currentDay) || 0) * 100) / 100)
+    const current = novel.storyClock || { currentDay: 0, label: '第 1 天', updatedAt: now }
+    initializeElapsedRuleBaselines(novel.dataPanels || [], current.currentDay)
+    novel.storyClock = {
+      ...current,
+      currentDay: day,
+      label: label?.trim() || `第 ${day + 1} 天`,
+      updatedAt: now,
+    }
+    touchNovel(novel, now)
+    return novel.storyClock
   }
 
   return {
@@ -1241,6 +1353,8 @@ export const useNovelStore = defineStore('novel', () => {
     rejectDataPanelChanges,
     cleanupDataPanelChanges,
     queueAutomaticDataPanelChanges,
+    advanceStoryClock,
+    setStoryClock,
     defaultWritingStyle,
     defaultSettings,
     initStore,

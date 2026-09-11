@@ -38,12 +38,26 @@ interface NovelRow {
   writing_mode?: string
   chat_web_search?: number
   inspiration_history?: string
-  knowledge_base_ids: string; chapter_plans?: string; story_state_proposals?: string
+  knowledge_base_ids: string; chapter_plans?: string; story_state_proposals?: string; story_clock?: string
   chapter_plan_confirmed?: number
   status: string; created_at: string; updated_at: string
 }
 
 function rowToNovel(row: NovelRow): Novel {
+  let storyClock: Novel['storyClock'] | undefined
+  try {
+    const parsed = JSON.parse(row.story_clock || '{}')
+    if (Number.isFinite(Number(parsed?.currentDay))) {
+      storyClock = {
+        currentDay: Math.max(0, Number(parsed.currentDay)),
+        label: typeof parsed.label === 'string' && parsed.label.trim() ? parsed.label : `第 ${Number(parsed.currentDay) + 1} 天`,
+        lastChapterIndex: Number.isFinite(Number(parsed.lastChapterIndex)) ? Number(parsed.lastChapterIndex) : undefined,
+        updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : row.updated_at,
+      }
+    }
+  } catch {
+    storyClock = undefined
+  }
   return {
     id: row.id,
     title: row.title,
@@ -78,6 +92,7 @@ function rowToNovel(row: NovelRow): Novel {
     chapterPlans: JSON.parse(row.chapter_plans || '[]'),
     chapterPlanConfirmed: row.chapter_plan_confirmed === 1,
     storyStateProposals: JSON.parse(row.story_state_proposals || '[]'),
+    storyClock,
   }
 }
 
@@ -117,6 +132,8 @@ export async function loadAllNovelsFromDb(): Promise<Novel[]> {
       sceneNotes: JSON.parse(r.scene_notes || '[]'),
       versions: JSON.parse(r.versions || '[]'),
       wordCount: r.word_count,
+      storyDaysElapsed: Number(r.story_days_elapsed) || 0,
+      storyDay: r.story_day === null || r.story_day === undefined ? undefined : Number(r.story_day),
       status: r.status,
       createdAt: r.created_at,
       updatedAt: r.updated_at
@@ -193,6 +210,8 @@ export async function loadAllNovelsFromDb(): Promise<Novel[]> {
       name: r.name,
       fields: JSON.parse(r.fields || '[]'),
       relatedKeywords: JSON.parse(r.related_keywords || '[]'),
+      ownerItemId: r.owner_item_id || undefined,
+      equipmentState: r.equipment_state || undefined,
       lastMentionChapterIndex: r.last_mention_chapter_index ?? undefined,
       versions: JSON.parse(r.versions || '[]'),
       createdAt: r.created_at,
@@ -210,6 +229,7 @@ export async function loadAllNovelsFromDb(): Promise<Novel[]> {
       newValue: r.new_value,
       reason: r.reason,
       confidence: r.confidence || 'clear',
+      mutation: r.mutation ? JSON.parse(r.mutation) : undefined,
       chapterIndex: r.chapter_index,
       status: r.status,
       createdAt: r.created_at
@@ -229,12 +249,12 @@ export async function saveNovelToDb(novel: Novel) {
 // Synchronous SQL writer, also used by a single whole-project import transaction.
 export function writeNovelRows(novel: Novel) {
     // 1. 更新主表
-    upsertRow('novels', 'id, title, genre, sub_genre, genre_label, sub_genre_label, tags, target_min, target_max, current_word_count, writing_style, settings, outline, synopsis, knowledge_base_ids, chapter_plans, chapter_plan_confirmed, story_state_proposals, status, created_at, updated_at, writing_mode, chat_web_search, inspiration_history', [
+    upsertRow('novels', 'id, title, genre, sub_genre, genre_label, sub_genre_label, tags, target_min, target_max, current_word_count, writing_style, settings, outline, synopsis, knowledge_base_ids, chapter_plans, chapter_plan_confirmed, story_state_proposals, story_clock, status, created_at, updated_at, writing_mode, chat_web_search, inspiration_history', [
       novel.id, novel.title, novel.genre, novel.subGenre, novel.genreLabel, novel.subGenreLabel,
       JSON.stringify(novel.tags), novel.targetWordCountMin, novel.targetWordCountMax, novel.currentWordCount,
       JSON.stringify(novel.writingStyle), JSON.stringify(novel.settings), novel.outline, novel.synopsis,
       JSON.stringify(novel.knowledgeBaseIds), JSON.stringify(novel.chapterPlans || []), novel.chapterPlanConfirmed ? 1 : 0,
-      JSON.stringify(novel.storyStateProposals || []), novel.status, novel.createdAt, novel.updatedAt, novel.writingMode || null,
+      JSON.stringify(novel.storyStateProposals || []), JSON.stringify(novel.storyClock || {}), novel.status, novel.createdAt, novel.updatedAt, novel.writingMode || null,
       novel.chatWebSearchEnabled ? 1 : 0,
       JSON.stringify(novel.inspirationHistory || []),
     ])
@@ -259,7 +279,7 @@ export function writeNovelRows(novel: Novel) {
       execute('DELETE FROM chapters WHERE id = ?', [id])
     }
     for (const c of novel.chapters) {
-      upsertRow('chapters', 'id, novel_id, volume_index, chapter_index, title, content, summary, banned_review, content_review, content_review_signature, review_rewrite_blocked_signature, scene_notes, versions, word_count, status, created_at, updated_at', [c.id, novel.id, c.volumeIndex, c.chapterIndex, c.title, c.content, c.summary, c.bannedReview || '', c.contentReview || '', c.contentReviewSignature || '', c.reviewRewriteBlockedSignature || '', JSON.stringify(c.sceneNotes || []), JSON.stringify(c.versions || []), c.wordCount, c.status, c.createdAt, c.updatedAt])
+      upsertRow('chapters', 'id, novel_id, volume_index, chapter_index, title, content, summary, banned_review, content_review, content_review_signature, review_rewrite_blocked_signature, scene_notes, versions, word_count, story_days_elapsed, story_day, status, created_at, updated_at', [c.id, novel.id, c.volumeIndex, c.chapterIndex, c.title, c.content, c.summary, c.bannedReview || '', c.contentReview || '', c.contentReviewSignature || '', c.reviewRewriteBlockedSignature || '', JSON.stringify(c.sceneNotes || []), JSON.stringify(c.versions || []), c.wordCount, c.storyDaysElapsed || 0, c.storyDay ?? null, c.status, c.createdAt, c.updatedAt])
     }
 
     // 4. 角色：只写入有变化的行 + 删除已移除的
@@ -323,9 +343,10 @@ export function writeNovelRows(novel: Novel) {
       execute('DELETE FROM data_panels WHERE id = ?', [id])
     }
     for (const item of novel.dataPanels || []) {
-      upsertRow('data_panels', 'id, novel_id, category, name, fields, related_keywords, last_mention_chapter_index, versions, created_at, updated_at', [
+      upsertRow('data_panels', 'id, novel_id, category, name, fields, related_keywords, owner_item_id, equipment_state, last_mention_chapter_index, versions, created_at, updated_at', [
         item.id, novel.id, item.category, item.name, JSON.stringify(item.fields || []),
-        JSON.stringify(item.relatedKeywords || []), item.lastMentionChapterIndex ?? null, JSON.stringify(item.versions || []), item.createdAt, item.updatedAt
+        JSON.stringify(item.relatedKeywords || []), item.ownerItemId ?? null, item.equipmentState ?? 'stored', item.lastMentionChapterIndex ?? null,
+        JSON.stringify(item.versions || []), item.createdAt, item.updatedAt
       ])
     }
 
@@ -337,9 +358,10 @@ export function writeNovelRows(novel: Novel) {
       execute('DELETE FROM data_panel_changes WHERE id = ?', [id])
     }
     for (const change of novel.dataPanelChanges || []) {
-      upsertRow('data_panel_changes', 'id, novel_id, item_id, field_id, item_name, field_name, old_value, new_value, reason, confidence, chapter_index, status, created_at', [
+      upsertRow('data_panel_changes', 'id, novel_id, item_id, field_id, item_name, field_name, old_value, new_value, reason, confidence, mutation, chapter_index, status, created_at', [
         change.id, novel.id, change.itemId, change.fieldId, change.itemName, change.fieldName,
-        change.oldValue, change.newValue, change.reason, change.confidence || 'clear', change.chapterIndex, change.status, change.createdAt
+        change.oldValue, change.newValue, change.reason, change.confidence || 'clear', change.mutation ? JSON.stringify(change.mutation) : null,
+        change.chapterIndex, change.status, change.createdAt
       ])
     }
 }

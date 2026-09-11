@@ -8,6 +8,7 @@ import {
   parseDataPanelAutomationRules,
   pruneDataPanelChangeHistory,
   settleDataPanelAutomationRules,
+  STORY_CLOCK_SOURCE,
 } from './dataPanel'
 import type { DataPanelChange, DataPanelField, DataPanelItem } from '@/types/novel'
 
@@ -81,6 +82,30 @@ describe('数据面板自动规则', () => {
     expect(buildDataPanelAutomationSuggestions([panel], 0, '')).toHaveLength(0)
     panel.fields[0].value = '8'
     expect(buildDataPanelAutomationSuggestions([panel], 1, '')).toMatchObject([{ newValue: '3' }])
+  })
+
+  it('故事时间推进会驱动作物成长，并保留待确认状态', () => {
+    const fields = parseDataPanelAutomationRules(
+      '已成长｜经过 1 天 +1（基于：故事时间）',
+      [field('已成长', '0', '天')],
+    )
+    const panel = item(fields)
+    expect(panel.fields[0].automationRules?.[0].sourceFieldName).toBe(STORY_CLOCK_SOURCE)
+    expect(initializeElapsedRuleBaselines([panel], 0)).toBe(true)
+    const suggestions = buildDataPanelAutomationSuggestions([panel], 0, '', 20)
+    expect(suggestions).toMatchObject([{ oldValue: '0', newValue: '20' }])
+    expect(panel.fields[0].value).toBe('0')
+  })
+
+  it('新建数据对象时以当前故事日建立基线，不会补算加入前的历史时间', () => {
+    const fields = parseDataPanelAutomationRules(
+      '已成长｜经过 1 天 +1（基于：故事时间）',
+      [field('已成长', '0', '天')],
+    )
+    const panel = item(fields)
+    expect(initializeElapsedRuleBaselines([panel], 20)).toBe(true)
+    expect(buildDataPanelAutomationSuggestions([panel], 3, '', 20)).toHaveLength(0)
+    expect(buildDataPanelAutomationSuggestions([panel], 4, '', 25)).toMatchObject([{ oldValue: '0', newValue: '5' }])
   })
 })
 

@@ -5,6 +5,7 @@ const path = require('path')
 const { spawn } = require('child_process')
 
 const projectRoot = path.resolve(__dirname, '..')
+const expectedVersion = require('../package.json').version
 const devServerUrl = 'http://localhost:5173'
 
 function serverReady() {
@@ -73,6 +74,9 @@ async function main() {
     const result = JSON.parse(match[1])
     if (!result.rendered || !result.bridgeAvailable || !result.nodeIsolated) {
       throw new Error(`Electron 安全检查未通过：${JSON.stringify(result)}`)
+    }
+    if (result.appVersion !== expectedVersion) {
+      throw new Error(`Electron 版本不一致：期望 ${expectedVersion}，实际 ${result.appVersion}`)
     }
     console.log(`Electron smoke passed: ${JSON.stringify(result)}`)
   } finally {

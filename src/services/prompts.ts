@@ -5,6 +5,7 @@ import type { ReviewContext } from '@/services/context'
 import type { ChatMessage } from '@/services/ai'
 import type { ChapterEndingCheck } from '@/services/chapterEnding'
 import { genres } from '@/data/genres'
+import { DATA_MEMORY_OUTPUT, DATA_MEMORY_RULES } from '@/services/dataPanelExtraction'
 
 // 查找分类名称
 function findGenreNames(genreVal: string, subGenreVal: string): { genre: string; subGenre: string } {
@@ -486,16 +487,22 @@ ${dataPanelText || '无'}
   "globalPlans": [
     {"id":"全书规划ID","status":"developing或resolved","hintCount":1,"note":"说明变化原因"}
   ],
-  "dataChanges": [
-    {"itemId":"数据对象ID","itemName":"数据对象名","fieldName":"字段名","oldValue":"旧值","newValue":"新值","reason":"正文原文依据，尽量引用关键短句"}
-  ]
+  "timeAdvanceDays": 0,
+  "newItems": [],
+  "equipmentChanges": [],
+  "dataChanges": []
 }
+
+其中 newItems、equipmentChanges、dataChanges 按以下结构填充：
+${DATA_MEMORY_OUTPUT}
 
 【规则】
 1. events 提取 1-5 个关键事件；如果正文出现新埋伏笔，type 必须填 "伏笔"，status 填 "planted"，scope 按影响范围填写。
 2. characters 只输出本章明确出场或首次出现的角色，没有则输出 []。
 3. globalPlans 只更新已记录全书规划中本章有明确推进或回收证据的条目，没有则输出 []。
-4. dataChanges 只有正文明确写到数值变化、时间推进、等级提升、资源增减、成长进度变化时才输出，没有则输出 []。`,
+4. timeAdvanceDays 只填写正文明确表达的故事内时间推进天数；例如“过去三天”填 3，“一个月后”填 30，“转眼十日”填 10。没有明确时间推进填 0，不要根据章节序号、写作时间或常识猜测。
+5. 数据记忆提取要求：
+${DATA_MEMORY_RULES}`,
     },
   ]
 }

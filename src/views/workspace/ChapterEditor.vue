@@ -21,6 +21,22 @@
           placeholder="章节标题"
           @blur="saveTitle"
         />
+        <span
+          class="story-days-control"
+          title="默认由章节分析 AI 自动识别正文中的明确时间；输入框仅用于 AI 未识别或需要手动纠正时"
+        >
+          <span>{{ storyTimeStatus }}</span>
+          <n-input-number
+            v-model:value="chapterStoryDays"
+            size="tiny"
+            :min="0"
+            :max="100000"
+            :step="1"
+            :disabled="isChapterLocked || aiWriting || completing"
+            @update:value="updateChapterStoryDays"
+          />
+          天
+        </span>
       </div>
       <div class="topbar-right">
         <button
@@ -242,12 +258,19 @@
         <n-input v-model:value="dataItemForm.name" placeholder="如：灵稻田、主角面板、金币库存" />
         <label>分类</label>
         <n-select v-model:value="dataItemForm.category" :options="dataCategoryOptions" />
+        <template v-if="dataItemForm.category === '装备' || dataItemForm.category === '道具'">
+          <label>归属对象</label>
+          <n-select v-model:value="dataItemForm.ownerItemId" clearable :options="dataOwnerOptions" placeholder="选择归属的角色或对象" />
+          <label>装备状态</label>
+          <n-select v-model:value="dataItemForm.equipmentState" :options="equipmentStateOptions" />
+        </template>
         <label>快速模板</label>
         <n-select :options="dataTemplateOptions" placeholder="选择模板填充字段" @update:value="applyDataTemplate" />
         <label>关联关键词（用顿号或逗号分隔）</label>
         <n-input v-model:value="dataItemForm.keywordsText" placeholder="如：灵稻、稻田、农田" />
         <label>字段与自动规则</label>
         <DataPanelFieldEditor v-model:fields="dataEditorFields" v-model:automation-text="dataItemForm.automationText" />
+        <EquipmentFieldEditor v-if="dataItemForm.category === '装备' || dataItemForm.category === '道具'" v-model:fields="dataEditorFields" />
       </div>
       <template #footer>
         <div class="data-form-actions">
@@ -374,7 +397,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NInput, NModal, NSelect, useDialog, useMessage } from 'naive-ui'
+import { NButton, NInput, NInputNumber, NModal, NSelect, useDialog, useMessage } from 'naive-ui'
 import { useNovelStore } from '@/stores/novel'
 import { useConfigStore } from '@/stores/config'
 import { useKnowledgeStore } from '@/stores/knowledge'
@@ -409,7 +432,9 @@ import {
   parseDataPanelFields,
   parseDataPanelAutomationRules,
 } from '@/services/dataPanel'
-import type { DataPanelCategory, DataPanelField, DataPanelItem, ChapterRevision } from '@/types/novel'
+import type { DataPanelCategory, DataPanelField, DataPanelItem, ChapterRevision, EquipmentState } from '@/types/novel'
+import EquipmentFieldEditor from '@/components/data-panel/EquipmentFieldEditor.vue'
+import { equipmentStateOptions, equipmentSnapshot, formatEquipmentTotals } from '@/services/dataPanelEquipment'
 
 const route = useRoute()
 const router = useRouter()
@@ -467,14 +492,26 @@ const dataItemForm = ref({
   keywordsText: '',
   fieldsText: '',
   automationText: '',
+  ownerItemId: '',
+  equipmentState: 'stored' as EquipmentState,
 })
 const dataEditorFields = ref<DataPanelField[]>([])
+const chapterStoryDays = ref(0)
+const storyTimeStatus = computed(() => {
+  if (chapter.value?.storyDay !== undefined) return '已记录 · 本章经过'
+  return chapterStoryDays.value > 0 ? '手动兜底' : '等待AI识别'
+})
+watch(() => chapter.value?.storyDaysElapsed, value => {
+  chapterStoryDays.value = value || 0
+})
 const dataCategoryOptions = [
   { label: '角色', value: '角色' },
   { label: '作物', value: '作物' },
   { label: '资源', value: '资源' },
   { label: '建筑', value: '建筑' },
   { label: '任务', value: '任务' },
+  { label: '装备', value: '装备' },
+  { label: '道具', value: '道具' },
   { label: '自定义', value: '自定义' },
 ]
 const dataTemplateOptions = [
@@ -507,6 +544,9 @@ const chapterVersionOptions = computed(() => (chapter.value?.versions || []).sli
   value: version.id,
 })))
 const dataPanels = computed(() => novel.value?.dataPanels || [])
+const dataOwnerOptions = computed(() => dataPanels.value
+  .filter(item => item.id !== editingDataItemId.value && item.category === '角色')
+  .map(item => ({ label: `${item.name}（${item.category}）`, value: item.id })))
 const { scanningDataChanges, analyzeChapterStructure, scanDataPanelChanges } = useChapterAnalysis({
   currentNovelId: novelId,
   currentChapterId: chapterId,
@@ -609,6 +649,13 @@ function toggleWritingMode() {
   message.info(nextMode === 'manual'
     ? '已切换为辅助写作'
     : '已切换为 AI 自动写作')
+}
+
+function updateChapterStoryDays(value: number | null) {
+  chapterStoryDays.value = Math.max(0, Number(value) || 0)
+  if (chapter.value && !isChapterLocked.value) {
+    novelStore.updateChapter(novelId.value, chapterId.value, { storyDaysElapsed: chapterStoryDays.value })
+  }
 }
 
 watch(writingMode, mode => {
@@ -750,9 +797,9 @@ function applyDataTemplate(template: string) {
   const templates: Record<string, { category: DataPanelCategory; fields: string; keywords: string; automation?: string }> = {
     crop: {
       category: '作物',
-      fields: '已成长=0=天=days\n成熟周期=30=天=days\n剩余成熟=30=天=formula=成熟周期-已成长\n成长进度=0=%=percent',
+      fields: '已成长=0=天=days\n成熟周期=100=天=days\n额外成熟度=0=%=percent\n成熟度=0=%=formula=已成长/成熟周期*100+额外成熟度\n剩余成熟=100=天=formula=成熟周期*(100-成熟度)/100',
       keywords: '成熟、采收、生长、药圃、灵草',
-      automation: '已成长｜每章 +1\n成长进度｜每章 +5, +4',
+      automation: '已成长｜经过 1 天 +1（基于：故事时间）',
     },
     forecast: {
       category: '作物',
@@ -811,6 +858,8 @@ function openDataItemModal(item?: DataPanelItem) {
       keywordsText: item.relatedKeywords.join('、'),
       fieldsText: '',
       automationText: formatDataPanelAutomationRules(item.fields),
+      ownerItemId: item.ownerItemId || '',
+      equipmentState: item.equipmentState || 'stored',
     }
     dataEditorFields.value = item.fields.map(field => ({
       ...field,
@@ -818,7 +867,7 @@ function openDataItemModal(item?: DataPanelItem) {
     }))
   } else {
     editingDataItemId.value = ''
-    dataItemForm.value = { name: '', category: '自定义', keywordsText: '', fieldsText: '', automationText: '' }
+    dataItemForm.value = { name: '', category: '自定义', keywordsText: '', fieldsText: '', automationText: '', ownerItemId: '', equipmentState: 'stored' }
     dataEditorFields.value = []
   }
   showDataItemModal.value = true
@@ -854,6 +903,8 @@ function saveDataItem() {
       category: dataItemForm.value.category,
       fields: mergedFields,
       relatedKeywords,
+      ownerItemId: dataItemForm.value.ownerItemId || undefined,
+      equipmentState: dataItemForm.value.equipmentState,
     })
   } else {
     novelStore.addDataPanelItem(novelId.value, {
@@ -861,6 +912,8 @@ function saveDataItem() {
       category: dataItemForm.value.category,
       fields,
       relatedKeywords,
+      ownerItemId: dataItemForm.value.ownerItemId || undefined,
+      equipmentState: dataItemForm.value.equipmentState,
     })
   }
   showDataItemModal.value = false
@@ -920,7 +973,7 @@ function formatSelectedDataPanels(limit = 1200) {
       const type = field.type && field.type !== 'text' ? `（${field.type}${field.formula ? `:${field.formula}` : ''}）` : ''
       return `  - ${field.name}${type}：${field.value}${field.unit ? ` ${field.unit}` : ''}`
     }).join('\n')
-    return `- ${item.name}\n${fieldLines}`
+    return `- ${item.name}（${equipmentSnapshot(item, dataPanels.value)}）\n${fieldLines}\n${formatEquipmentTotals(dataPanels.value, item.id)}`
   })
   const context = `\n\n【本章关联数据面板（已确认事实，只能参考，不要擅自修改）】\n${lines.join('\n')}`
   return context.length > limit ? context.slice(0, limit) : context
@@ -1047,6 +1100,7 @@ function toggleHighlight() {
 onMounted(() => {
   if (chapter.value) {
     content.value = chapter.value.content
+    chapterStoryDays.value = chapter.value.storyDaysElapsed || 0
     endingCheckResult.value = null
     pendingRevision.value = null
     bannedResult.value = chapter.value.bannedReview || ''
@@ -1098,6 +1152,7 @@ watch(
     if (chapter.value) {
       // 重新加载内容
       content.value = chapter.value.content
+      chapterStoryDays.value = chapter.value.storyDaysElapsed || 0
       selectedDataPanelIds.value = new Set()
       selectedDataChangeIds.value = new Set()
       recommendedDataPanelIds.value = new Set()
@@ -2028,7 +2083,15 @@ async function completeChapter() {
       return
     }
 
-    novelStore.updateChapter(novelId.value, chapterId.value, { status: 'completed' })
+    const manuallyEnteredDays = Math.max(0, Number(chapterStoryDays.value) || 0)
+    const storyTimeAlreadyApplied = chapter.value.storyDay !== undefined
+    novelStore.updateChapter(novelId.value, chapterId.value, {
+      status: 'completed',
+      ...(manuallyEnteredDays > 0 ? { storyDaysElapsed: manuallyEnteredDays } : {}),
+    })
+    if (manuallyEnteredDays > 0 && !storyTimeAlreadyApplied) {
+      novelStore.advanceStoryClock(novelId.value, manuallyEnteredDays, chapter.value.chapterIndex)
+    }
     novelStore.completeChapterPlans(novelId.value, chapter.value.chapterIndex)
     message.success('本章已通过审查并完成')
     const nextPlan = novelStore.ensureNextChapterPlan(novelId.value, chapter.value.chapterIndex)
@@ -2048,10 +2111,10 @@ async function completeChapter() {
     const completedChapterId = chapterId.value
     const completedChapterIndex = chapter.value.chapterIndex
     const completedContent = content.value
-    if (novel.value.dataPanels.length && completedContent.trim()) {
+    if (completedContent.trim()) {
       chapterBackgroundQueue.enqueue('数据面板变化扫描', async () => {
         const currentNovel = novelStore.getNovel(completedNovelId)
-        if (!currentNovel?.dataPanels.length) return
+        if (!currentNovel) return
         await scanDataPanelChanges(reviewModel, {
           novelId: completedNovelId,
           chapterIndex: completedChapterIndex,
@@ -2558,6 +2621,18 @@ function redo() {
   max-width: 300px;
   margin: 0 20px;
 }
+
+.story-days-control {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--text-color-tertiary);
+}
+
+.story-days-control :deep(.n-input-number) { width: 92px; max-width: 100%; }
 
 .chapter-title-input :deep(input) {
   text-align: center;

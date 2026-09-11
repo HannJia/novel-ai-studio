@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { buildReviewContext, buildWritingContext, selectRelevantCharacters } from './context'
+import { buildChapterFactCard, buildReviewContext, buildWritingContext, selectRelevantCharacters } from './context'
+import { buildSemanticRecords } from './semanticIndex'
 import type { Novel } from '@/types/novel'
 
 function createNovel(characterNames: string[]): Novel {
@@ -115,6 +116,22 @@ function createNovel(characterNames: string[]): Novel {
 }
 
 describe('写作上下文', () => {
+  it('事实卡和检索记忆区分基础值与装备后的生效值', () => {
+    const novel = createNovel(['林青'])
+    novel.dataPanels = [
+      { id: 'hero', name: '林青', category: '角色', fields: [{ id: 'attack', name: '攻击力', value: '20', unit: '', note: '' }],
+        relatedKeywords: ['林青'], createdAt: novel.createdAt, updatedAt: novel.updatedAt },
+      { id: 'sword', name: '铁剑', category: '装备', ownerItemId: 'hero', equipmentState: 'equipped',
+        fields: [{ id: 'bonus', name: '攻击加成', value: '10', unit: '', note: '', modifier: { attribute: '攻击力', operation: 'flat' } }],
+        relatedKeywords: [], createdAt: novel.createdAt, updatedAt: novel.updatedAt },
+    ]
+    expect(buildChapterFactCard(novel, novel.chapters[0])).toContain('生效值 30')
+    expect(buildSemanticRecords(novel).find(record => record.sourceId === 'hero')?.content).toContain('基础 20')
+    expect(buildSemanticRecords(novel).find(record => record.sourceId === 'hero')?.content).toContain('生效值 30')
+    novel.dataPanels[1].equipmentState = 'stored'
+    expect(buildChapterFactCard(novel, novel.chapters[0])).not.toContain('生效值 30')
+  })
+
   it('相关角色筛选保留主角和本章命中角色', () => {
     const novel = createNovel(['林青', '苏瑶', '赵甲', '赵乙', '赵丙', '赵丁'])
     const chars = selectRelevantCharacters(novel, '苏瑶在秘境中遇险', 2)

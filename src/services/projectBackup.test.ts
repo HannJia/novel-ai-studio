@@ -11,6 +11,26 @@ function validBook() {
 }
 
 describe('项目备份格式', () => {
+  it('preserves and validates equipment and structured pending memory', () => {
+    const book = validBook()
+    book.dataPanels = [{ id: 'sword', name: '铁剑', category: '装备', equipmentState: 'stored',
+      fields: [{ id: 'bonus', name: '攻击加成', value: '10', unit: '', note: '', modifier: { attribute: '攻击力', operation: 'flat' } }],
+      relatedKeywords: [], createdAt: book.createdAt, updatedAt: book.updatedAt }]
+    book.dataPanelChanges = [{ id: 'create', itemId: 'new:ring', fieldId: '__create__', itemName: '戒指', fieldName: '新增对象',
+      oldValue: '未记录', newValue: '戒指', reason: '获得戒指', chapterIndex: 0, status: 'pending', createdAt: book.createdAt,
+      mutation: { kind: 'create', item: { name: '戒指', category: '装备', fields: [], relatedKeywords: [], equipmentState: 'stored' } } }]
+    const backup = createProjectBackup([book], [])
+    const parsed = parseProjectBackup(JSON.stringify(backup))
+    expect(parsed.novels[0].dataPanels).toEqual(book.dataPanels)
+    expect(parsed.novels[0].dataPanelChanges).toEqual(book.dataPanelChanges)
+    const corrupt = JSON.parse(JSON.stringify(backup))
+    corrupt.novels[0].dataPanelChanges[0].mutation.kind = 'unknown'
+    expect(() => parseProjectBackup(JSON.stringify(corrupt))).toThrow('mutation')
+    corrupt.novels[0].dataPanelChanges = []
+    corrupt.novels[0].dataPanels[0].fields[0].modifier.operation = 'eval'
+    expect(() => parseProjectBackup(JSON.stringify(corrupt))).toThrow('operation')
+  })
+
   it('preserves separate inspiration archives and validates their nested fields', () => {
     const book = validBook()
     book.inspirationHistory = [{ id: 'idea', role: 'assistant', content: '存档内容', timestamp: book.createdAt,

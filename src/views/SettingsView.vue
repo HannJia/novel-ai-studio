@@ -188,7 +188,7 @@
       <!-- 关于 -->
       <section class="settings-section paper-panel about-section">
         <h3>📖 关于</h3>
-        <p>AI 长篇小说写作软件 v0.1.0</p>
+        <p>AI 长篇小说写作软件 v{{ appVersion }}</p>
         <p class="hint">使用 Electron + Vue 3 + TypeScript 构建</p>
       </section>
     </div>
@@ -221,9 +221,10 @@
             v-model:value="modelForm.apiKey"
             type="password"
             show-password-on="click"
-            placeholder="sk-..."
+            :placeholder="editingModel ? '留空则保留当前 API Key' : 'sk-...'"
             @update:value="handleModelSourceChange"
           />
+          <p v-if="editingModel" class="model-discovery-hint">编辑模型时留空不会清除当前 API Key；只有输入新 Key 才会替换。</p>
         </div>
         <div class="form-item">
           <label>模型名称（原始 ID）</label>
@@ -356,6 +357,7 @@ import { chatSearchProtocolOptions } from '@/services/chatSearch'
 import type { ChatSearchProtocol } from '@/types/chat'
 import type { WritingSkill, WritingSkillTask } from '@/types/skill'
 import type { AiWorkflowMode } from '@/services/aiWorkflow'
+import { version as appVersion } from '../../package.json'
 
 const configStore = useConfigStore()
 const message = useMessage()
@@ -435,7 +437,11 @@ const availableModelOptions = computed(() => availableModels.value.map(model => 
 
 // 表单是否有效
 const isFormValid = computed(() =>
-  Boolean(modelForm.baseUrl.trim() && modelForm.apiKey.trim() && modelForm.modelName.trim())
+  Boolean(
+    modelForm.baseUrl.trim()
+    && modelForm.modelName.trim()
+    && (modelForm.apiKey.trim() || (editingModel.value && configStore.models.some(model => model.id === editingModel.value && model.apiKey))),
+  )
 )
 const isBatchFormValid = computed(() =>
   Boolean(modelForm.baseUrl.trim() && modelForm.apiKey.trim() && selectedModelNames.value.length > 1)
@@ -536,7 +542,12 @@ function selectAllAvailableModels() {
 function handleSaveModel() {
   if (!isFormValid.value) return
   const modelName = modelForm.modelName.trim()
-  const config = { ...modelForm, name: modelForm.name.trim() || modelName, modelName }
+  const existingModel = editingModel.value
+    ? configStore.models.find(model => model.id === editingModel.value)
+    : null
+  const apiKey = modelForm.apiKey.trim() || existingModel?.apiKey || ''
+  if (!apiKey) return
+  const config = { ...modelForm, apiKey, name: modelForm.name.trim() || modelName, modelName }
   if (editingModel.value) {
     configStore.updateModel(editingModel.value, config)
     message.success('模型配置已更新')
