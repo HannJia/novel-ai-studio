@@ -17,6 +17,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
   configEncrypt: (value) => ipcRenderer.invoke('config:encrypt', value),
   configDecrypt: (value) => ipcRenderer.invoke('config:decrypt', value),
   configSecurityStatus: () => ipcRenderer.invoke('config:security-status'),
+  updateGetState: () => ipcRenderer.invoke('update:state'),
+  updateCheck: () => ipcRenderer.invoke('update:check'),
+  updateDownload: () => ipcRenderer.invoke('update:download'),
+  updateCancel: () => ipcRenderer.invoke('update:cancel'),
+  updateInstall: () => ipcRenderer.invoke('update:install'),
+  updateSetAutoCheck: (enabled) => ipcRenderer.invoke('update:auto-check', enabled),
+  updateOpenRelease: () => ipcRenderer.invoke('update:open-release'),
+  onUpdateState: (callback) => {
+    const listener = (_event, state) => callback(state)
+    ipcRenderer.on('update:state', listener)
+    return () => ipcRenderer.removeListener('update:state', listener)
+  },
+  onBeforeUpdate: (callback) => {
+    const listener = (_event, { requestId }) => {
+      Promise.resolve().then(callback)
+        .then(() => ipcRenderer.send('app:update-ready', { requestId, ok: true }))
+        .catch(error => ipcRenderer.send('app:update-ready', {
+          requestId, ok: false, error: error instanceof Error ? error.message : String(error),
+        }))
+    }
+    ipcRenderer.on('app:before-update', listener)
+    return () => ipcRenderer.removeListener('app:before-update', listener)
+  },
   onBeforeClose: (callback) => {
     const listener = () => {
       Promise.resolve()

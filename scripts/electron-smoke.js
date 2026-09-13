@@ -78,6 +78,9 @@ async function main() {
     if (result.appVersion !== expectedVersion) {
       throw new Error(`Electron 版本不一致：期望 ${expectedVersion}，实际 ${result.appVersion}`)
     }
+    if (result.update?.currentVersion !== expectedVersion || result.update?.supported !== false) {
+      throw new Error('更新桥接或冒烟测试的安装隔离未通过')
+    }
     console.log(`Electron smoke passed: ${JSON.stringify(result)}`)
   } finally {
     if (viteProcess) viteProcess.kill()

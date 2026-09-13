@@ -395,6 +395,7 @@
 </template>
 
 <script setup lang="ts">
+import { registerDraftSaver } from '@/services/appLifecycle'
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NInput, NInputNumber, NModal, NSelect, useDialog, useMessage } from 'naive-ui'
@@ -1179,7 +1180,13 @@ watch(
   }
 )
 
+const unregisterDraftSaver = registerDraftSaver(async () => {
+  if (!unsaved.value) return
+  if (!(await saveContent()) || unsaved.value) throw new Error('正文尚未保存完成，请稍后重试。')
+})
+
 onUnmounted(() => {
+  unregisterDraftSaver()
   if (autoSaveTimer) clearInterval(autoSaveTimer)
   if (scanTimer) clearTimeout(scanTimer)
   if (continuityTimer) clearTimeout(continuityTimer)

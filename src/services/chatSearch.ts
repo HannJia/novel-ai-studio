@@ -1,6 +1,7 @@
 import { callAI, openAiV1BaseUrl, type ChatMessage } from '@/services/ai'
 import type { ModelConfig } from '@/stores/config'
 import type { ChatSearchProtocol, ChatSearchRecord, ChatSource } from '@/types/chat'
+import { finishAiActivity, startAiActivity } from './aiActivity'
 
 // Only these documented server-side tools are supported. A model name or /models
 // response does not prove that a relay actually forwards the corresponding tool.
@@ -160,6 +161,7 @@ export async function chatWithOptionalSearch(options: AssistantChatOptions): Pro
   } else {
     body.web_search_options = { search_context_size: 'medium' }
   }
+  const activity = startAiActivity('AI 联网对话')
   const controller = new AbortController()
   const abort = () => controller.abort(signal.reason)
   signal.addEventListener('abort', abort, { once: true })
@@ -179,11 +181,13 @@ export async function chatWithOptionalSearch(options: AssistantChatOptions): Pro
     controller.signal.throwIfAborted()
     return parseSearchResponse(payload, protocol)
   } catch (error) {
+    finishAiActivity(activity, error)
     if (controller.signal.aborted) throw controller.signal.reason
     if (error instanceof TypeError) throw new Error('无法连接联网接口，请检查地址、网络或服务商的跨域支持。')
     if (error instanceof SyntaxError) throw new Error('联网接口没有返回合法 JSON，请检查所选联网协议。')
     throw error
   } finally {
+    if (activity.status === 'running') finishAiActivity(activity)
     clearTimeout(timer)
     signal.removeEventListener('abort', abort)
   }

@@ -1,9 +1,11 @@
 // Electron 主进程 - CommonJS 格式
-const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell, net } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const { fileURLToPath } = require('url')
 const { writeAtomicFile, preserveRecoveryFiles } = require('./durableFiles.cjs')
+const { createUpdateController, LATEST_API } = require('./updater.cjs')
+const { createUpdateHandshake } = require('./updateHandshake.cjs')
 
 // 开发模式下的 Vite 服务器地址
 const VITE_DEV_SERVER_URL = 'http://localhost:5173'
@@ -23,6 +25,55 @@ let closeHandshakeInFlight = false
 let closeHandshakeComplete = false
 let closeHandshakeTimer = null
 let recoveryPrepared = false
+let updates = null
+const updateHandshake = createUpdateHandshake(requestId => {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) {
+    throw new Error('主窗口不可用，未执行更新。')
+  }
+  mainWindow.webContents.send('app:before-update', { requestId })
+})
+
+function getUpdates() {
+  if (updates) return updates
+  const supported = app.isPackaged && process.platform === 'win32' && !isSmokeTest
+  const preferencePath = supported ? path.join(app.getPath('userData'), 'novel-writer-update.json') : ''
+  let autoCheck = true
+  if (preferencePath) {
+    try { autoCheck = JSON.parse(fs.readFileSync(preferencePath, 'utf8')).autoCheck !== false } catch { /* Default on first launch. */ }
+  }
+  updates = createUpdateController({
+    supported, autoCheck, currentVersion: app.getVersion(), arch: process.arch,
+    getUpdater: () => require('electron-updater').autoUpdater,
+    fetchLatest: async () => {
+      const response = await net.fetch(LATEST_API, {
+        headers: { Accept: 'application/vnd.github+json' },
+        signal: AbortSignal.timeout(15000),
+      })
+      if (response.status === 403 || response.status === 429) throw new Error('GitHub 暂时限制了检查频率，请稍后重试。')
+      if (!response.ok) throw new Error(`更新服务暂不可用（${response.status}），请稍后重试。`)
+      const body = await response.text()
+      if (body.length > 1024 * 1024) throw new Error('更新服务返回的数据过大。')
+      return JSON.parse(body)
+    },
+    publish: state => {
+      if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+        mainWindow.webContents.send('update:state', state)
+      }
+    },
+    prepareInstall: () => {
+      if (closeHandshakeInFlight) throw new Error('关闭前保存正在进行，请稍后重试。')
+      return updateHandshake.request()
+    },
+    allowQuit: value => { closeHandshakeComplete = value },
+    savePreference: value => {
+      if (!preferencePath) return
+      ensureUserDataDir()
+      writeAtomicFile(preferencePath, JSON.stringify({ autoCheck: value }))
+    },
+    openExternal: url => shell.openExternal(url),
+  })
+  return updates
+}
 
 app.on('second-instance', () => {
   if (!mainWindow || mainWindow.isDestroyed()) return
@@ -105,6 +156,7 @@ function createWindow() {
   mainWindow.on('close', (event) => {
     if (closeHandshakeComplete || mainWindow.webContents.isDestroyed()) return
     event.preventDefault()
+    if (updateHandshake.busy || updates?.snapshot().phase === 'installing') return
     if (closeHandshakeInFlight) return
     closeHandshakeInFlight = true
     mainWindow.webContents.send('app:before-close')
@@ -117,6 +169,7 @@ function createWindow() {
       })
     }, 10_000)
   })
+  mainWindow.webContents.on('did-finish-load', () => getUpdates().start())
 
   if (isDev) {
     mainWindow.loadURL(VITE_DEV_SERVER_URL)
@@ -135,11 +188,12 @@ function createWindow() {
             bridgeAvailable: typeof window.electronAPI?.configSecurityStatus === 'function',
             nodeIsolated: typeof window.require === 'undefined' && typeof window.process === 'undefined',
             security: await window.electronAPI?.configSecurityStatus?.(),
+            update: await window.electronAPI?.updateGetState?.(),
           };
         })()`)
         result.appVersion = app.getVersion()
         console.log(`ELECTRON_SMOKE_RESULT ${JSON.stringify(result)}`)
-        app.exit(result.rendered && result.bridgeAvailable && result.nodeIsolated ? 0 : 1)
+        app.exit(result.rendered && result.bridgeAvailable && result.nodeIsolated && result.update?.currentVersion === app.getVersion() ? 0 : 1)
       } catch (error) {
         console.error('ELECTRON_SMOKE_ERROR', error)
         app.exit(1)
@@ -269,6 +323,33 @@ ipcMain.on('app:close-ready', (event, result = {}) => {
   if (!isMainWindowSender(event)) return
   void finishCloseHandshake({ event, ok: result.ok === true, error: String(result.error || '') })
 })
+
+function assertUpdateSender(event) {
+  assertMainWindowSender(event)
+  if (event.senderFrame !== mainWindow.webContents.mainFrame || !isTrustedRendererUrl(event.senderFrame?.url)) {
+    throw new Error('拒绝来自非受信任页面的更新请求')
+  }
+}
+
+for (const [channel, method] of [
+  ['update:state', 'snapshot'], ['update:check', 'check'], ['update:download', 'download'],
+  ['update:cancel', 'cancel'], ['update:install', 'install'], ['update:open-release', 'openRelease'],
+]) {
+  ipcMain.handle(channel, event => {
+    assertUpdateSender(event)
+    return getUpdates()[method]()
+  })
+}
+ipcMain.handle('update:auto-check', (event, enabled) => {
+  assertUpdateSender(event)
+  return getUpdates().setAutoCheck(enabled)
+})
+ipcMain.on('app:update-ready', (event, result) => {
+  if (!isMainWindowSender(event) || event.senderFrame !== mainWindow.webContents.mainFrame
+    || !isTrustedRendererUrl(event.senderFrame?.url)) return
+  updateHandshake.respond(result)
+})
+app.on('before-quit', () => updates?.dispose())
 
 ipcMain.handle('config:encrypt', async (event, value) => {
   assertMainWindowSender(event)

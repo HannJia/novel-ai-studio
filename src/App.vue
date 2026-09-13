@@ -2,9 +2,10 @@
   <n-config-provider class="app-provider" :theme="isDark ? darkTheme : undefined" :theme-overrides="themeStore.themeOverrides">
     <n-message-provider>
       <n-dialog-provider>
-        <div class="app-shell" :inert="projectTransferBusy">
+        <div class="app-shell" :inert="projectTransferBusy || appUpdateInstalling">
           <AppHeader />
           <SaveStatusBar />
+          <AppUpdateNotice />
           <main class="main-content">
             <router-view v-slot="{ Component, route }">
               <transition name="page" mode="out-in">
@@ -16,6 +17,7 @@
           </main>
         </div>
         <div v-if="projectTransferBusy" class="project-transfer-overlay" role="status">正在安全导入项目，请勿关闭软件…</div>
+        <div v-if="appUpdateInstalling" class="project-transfer-overlay" role="status">正在保存并准备安装更新，请勿关闭软件…</div>
       </n-dialog-provider>
     </n-message-provider>
   </n-config-provider>
@@ -26,6 +28,8 @@ import { onMounted } from 'vue'
 import { NConfigProvider, NMessageProvider, NDialogProvider, darkTheme } from 'naive-ui'
 import AppHeader from '@/components/AppHeader.vue'
 import SaveStatusBar from '@/components/SaveStatusBar.vue'
+import AppUpdateNotice from '@/components/AppUpdateNotice.vue'
+import { appUpdateInstalling } from '@/services/appLifecycle'
 import { projectTransferBusy } from '@/services/projectTransfer'
 import { useThemeStore } from '@/stores/theme'
 

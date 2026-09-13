@@ -1,4 +1,5 @@
-import { computed, reactive } from 'vue'
+import { computed, reactive, ref } from 'vue'
+import { appUpdateInstalling } from './appLifecycle'
 
 export type AiActivityStatus = 'running' | 'completed' | 'failed'
 
@@ -15,6 +16,8 @@ export interface AiActivity {
 
 const activities = reactive<AiActivity[]>([])
 const MAX_VISIBLE_COMPLETED = 20
+const activeIds = new Set<string>()
+export const activeAiCount = ref(0)
 
 function currentRoutePath(): string {
   if (typeof window === 'undefined') return '/'
@@ -31,6 +34,7 @@ function trimActivities() {
 }
 
 export function startAiActivity(name: string, parentId?: string): AiActivity {
+  if (appUpdateInstalling.value) throw new Error('正在保存并准备安装更新，暂时不能启动 AI 任务。')
   const activity: AiActivity = {
     id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     name,
@@ -40,10 +44,14 @@ export function startAiActivity(name: string, parentId?: string): AiActivity {
     startedAt: new Date().toISOString(),
   }
   activities.push(activity)
+  activeIds.add(activity.id)
+  activeAiCount.value = activeIds.size
   return activity
 }
 
 export function finishAiActivity(activity: AiActivity, error?: unknown) {
+  activeIds.delete(activity.id)
+  activeAiCount.value = activeIds.size
   if (!activities.some(item => item.id === activity.id)) return
   activity.status = error ? 'failed' : 'completed'
   activity.finishedAt = new Date().toISOString()

@@ -19,8 +19,17 @@ vi.mock('@/services/db/aiTasks', () => ({
 }))
 
 import { AiTaskQueue } from './aiTaskQueue'
+import { appUpdateInstalling } from './appLifecycle'
 
 describe('AI background task queue', () => {
+  it('does not queue work after update preparation has started', () => {
+    appUpdateInstalling.value = true
+    const queue = new AiTaskQueue(1)
+    try {
+      expect(() => queue.enqueue('late task', async () => undefined)).toThrow('准备安装更新')
+      expect(queue.pendingCount).toBe(0)
+    } finally { appUpdateInstalling.value = false }
+  })
   it('persists the task record before starting the queued work', async () => {
     taskState.events.length = 0
     taskState.resolveRecord = () => undefined

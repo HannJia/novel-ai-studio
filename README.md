@@ -6,18 +6,33 @@
 
 [下载 Windows 安装包](https://github.com/HannJia/novel-ai-studio/releases/latest) · [更新日志](CHANGELOG.md) · [反馈问题](https://github.com/HannJia/novel-ai-studio/issues)
 
-> 当前版本：**1.0.1**。项目仍在测试阶段，建议定期使用书架上的“备份项目”。软件不内置 AI 额度，AI 功能需要配置自己的模型服务。
+> 当前版本：**1.0.2**。项目仍在测试阶段，建议定期使用书架上的“备份项目”。软件不内置 AI 额度，AI 功能需要配置自己的模型服务。
 
 ## 下载安装
 
 1. 打开 [Releases](https://github.com/HannJia/novel-ai-studio/releases/latest)。
-2. 在 Assets 中下载 `AI-Novel-Writer-1.0.1-x64.exe`，运行安装向导。
+2. 在 Assets 中下载 `AI-Novel-Writer-1.0.2-x64.exe`，运行安装向导。
 3. 首次打开后进入“设置”，添加 API Base URL、API Key 和模型名称，测试连接，并分配大纲、写作、审查和对话模型。
 4. 回到书架，创建小说，选择写作方式与设定准备方式。
 
 发布的安装包面向 **Windows x64**。普通用户不需要安装 Node.js；GitHub 自动提供的 `Source code` 压缩包是源码，不是安装包。macOS / Linux 暂未提供安装包。
 
 安装包尚未进行代码签名，Windows 可能显示未知发布者提示。请核对下载来源与发布页提供的 SHA-256，不要关闭系统安全防护。更新前先备份项目；浏览器开发版与桌面版的数据不会自动互通，需要通过项目备份导入。
+
+## 软件更新
+
+从 **1.0.2** 开始，Windows 安装版支持检查和安装后续更新：
+
+- 启动约 12 秒后自动检查 GitHub 正式版本，持续运行期间每 6 小时再次检查；可在设置中关闭自动检查。
+- 在“设置 → 软件更新”手动检查，查看新版本号、发布日期和更新内容。
+- 发现新版时显示可关闭的提示，只有点击“下载更新”后才下载安装包，支持进度显示与取消下载。
+- 下载完成后等待你确认“安装并重启”，不会在下载完成或普通退出时自动安装。
+- 安装前先保存当前正文、小说、知识库和模型配置；AI 任务、联网对话、后台任务或项目导入未结束时阻止安装，保存失败也不会继续。
+- 检查只访问本仓库的公开版本信息，不上传小说或 API Key；下载校验使用发布清单中的 SHA-512。
+
+**1.0.0 / 1.0.1 没有更新功能，请先手动安装一次 1.0.2。** 浏览器和桌面开发环境不会替换本机软件。无法连接 GitHub 或发布文件不完整时，可以打开发布页手动下载。
+
+发布新版本时，除了 `.exe`，还必须上传同次构建的 `latest.yml`，否则软件不能提供一键下载。完整发布步骤见 [更新发布指南](docs/auto-update.md)。
 
 ## 两种写作模式
 
@@ -109,8 +124,9 @@ npm run dev:vite -- --host localhost --port 5173 --strictPort
 | `npm run build:renderer` | 仅构建前端，不生成安装包 |
 | `npm run build -- --win nsis --x64 --publish never` | 在 Windows 上构建 x64 安装包，不自动发布 |
 | `npm run test:electron:packaged` | 检查已打包桌面程序的启动与安全隔离 |
+| `npm run test:update-download` | 隔离测试真实更新组件的下载与校验，不安装软件 |
 
-安装包输出到 `release/`。依赖、构建产物、本地数据库与密钥文件不应提交到仓库。发布验证结果见 [1.0.1 发布说明](docs/releases/1.0.1.md)。
+安装包输出到 `release/`。依赖、构建产物、本地数据库与密钥文件不应提交到仓库。发布验证结果见 [1.0.2 发布说明](docs/releases/1.0.2.md)。
 
 ## 反馈
 

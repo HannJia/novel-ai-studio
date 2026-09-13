@@ -7,6 +7,8 @@ import { useConfigStore } from './stores/config'
 import { useKnowledgeStore } from './stores/knowledge'
 import { initializeAiTaskHistory } from './services/aiTaskQueue'
 import { showRecoveryScreen } from './services/recoveryScreen'
+import { flushEditorDrafts } from './services/appLifecycle'
+import { prepareUpdateInstall } from './services/updateSafety'
 
 // 全局样式
 import './styles/variables.css'
@@ -35,12 +37,14 @@ async function bootstrap() {
     void initializeAiTaskHistory().catch(error => console.warn('AI task recovery update failed', error))
 
     window.electronAPI?.onBeforeClose?.(async () => {
+      await flushEditorDrafts()
       await Promise.all([
         novelStore.flushPendingSaves(),
         knowledgeStore.flushPendingSaves(),
         configStore.saveConfig(),
       ])
     })
+    window.electronAPI?.onBeforeUpdate?.(prepareUpdateInstall)
   } catch (err) {
     console.error('数据初始化失败:', err)
     showRecoveryScreen(err)

@@ -185,6 +185,11 @@
         </div>
       </section>
 
+      <section class="settings-section paper-panel">
+        <h3>软件更新</h3>
+        <AppUpdatePanel />
+      </section>
+
       <!-- 关于 -->
       <section class="settings-section paper-panel about-section">
         <h3>📖 关于</h3>
@@ -346,6 +351,7 @@
 </template>
 
 <script setup lang="ts">
+import AppUpdatePanel from '@/components/AppUpdatePanel.vue'
 import { ref, computed, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NIcon, NInput, NInputNumber, NSelect, NModal, NSwitch, NTag, useMessage, useDialog } from 'naive-ui'

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { chatWithOptionalSearch, parseSearchResponse, resolveChatSearchProtocol, safeSourceUrl } from './chatSearch'
 import type { ModelConfig } from '@/stores/config'
+import { activeAiCount } from './aiActivity'
+import { appUpdateInstalling } from './appLifecycle'
 
 const model: ModelConfig = {
   id: 'fixture', name: 'fixture', baseUrl: 'https://relay.example/v1', apiKey: 'synthetic-key', modelName: 'gpt-test',
@@ -16,9 +18,32 @@ const responsePayload = {
   }],
 }
 const messages = [{ role: 'user' as const, content: '请查证一个历史年份' }]
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  appUpdateInstalling.value = false
+})
 
 describe('optional server-side chat search', () => {
+  it('tracks a pending web conversation until its response is finished', async () => {
+    let respond!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { respond = resolve })))
+    const request = chatWithOptionalSearch({ model, messages, webSearch: true, signal: new AbortController().signal })
+    expect(activeAiCount.value).toBe(1)
+    respond(new Response(JSON.stringify(responsePayload)))
+    await request
+    expect(activeAiCount.value).toBe(0)
+  })
+
+  it('does not send a web request while preparing an update installation', async () => {
+    const fetcher = vi.fn()
+    vi.stubGlobal('fetch', fetcher)
+    appUpdateInstalling.value = true
+    await expect(chatWithOptionalSearch({ model, messages, webSearch: true, signal: new AbortController().signal }))
+      .rejects.toThrow('准备安装更新')
+    expect(fetcher).not.toHaveBeenCalled()
+    expect(activeAiCount.value).toBe(0)
+  })
+
   it('matches a protocol without treating it as a capability probe', () => {
     expect(resolveChatSearchProtocol(model)).toBe('responses')
     expect(resolveChatSearchProtocol({ ...model, modelName: 'claude-sonnet-test' })).toBe('anthropic')
@@ -92,6 +117,7 @@ describe('optional server-side chat search', () => {
     await expect(chatWithOptionalSearch({ model, messages, webSearch: true, signal: new AbortController().signal }))
       .rejects.toThrow(new RegExp(`${status}`))
     expect(fetcher).toHaveBeenCalledTimes(1)
+    expect(activeAiCount.value).toBe(0)
   })
 
   it('stops an in-flight search and never starts a follow-up request', async () => {
@@ -104,6 +130,7 @@ describe('optional server-side chat search', () => {
     controller.abort()
     await expect(request).rejects.toMatchObject({ name: 'AbortError' })
     expect(fetcher).toHaveBeenCalledTimes(1)
+    expect(activeAiCount.value).toBe(0)
   })
 
   it('rejects tool errors and unfinished answers', () => {

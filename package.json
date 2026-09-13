@@ -1,6 +1,6 @@
 {
   "name": "ai-novel-writer",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "本地优先的 AI 长篇小说写作软件，支持作者主笔、AI 写作、知识库与剧情数据记忆",
   "author": "HannJia",
   "repository": {
@@ -22,6 +22,7 @@
     "test": "vitest run",
     "test:electron": "node scripts/electron-smoke.js",
     "test:electron:packaged": "node scripts/electron-smoke.js --packaged",
+    "test:update-download": "node scripts/update-download-smoke.cjs",
     "build:renderer": "vue-tsc --noEmit && vite build",
     "pack": "npm run build:renderer && electron-builder --dir",
     "build": "vue-tsc && vite build && electron-builder",
@@ -30,10 +31,12 @@
   "dependencies": {
     "@types/sql.js": "^1.4.10",
     "@vicons/ionicons5": "^0.13.0",
+    "electron-updater": "^6.8.9",
     "jszip": "^3.10.1",
     "mammoth": "^1.12.0",
     "naive-ui": "^2.44.1",
     "pinia": "^3.0.4",
+    "semver": "^7.8.5",
     "sql.js": "^1.14.1",
     "vue": "^3.5.30",
     "vue-router": "^4.6.4"
@@ -93,6 +96,12 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "HannJia",
+      "repo": "novel-ai-studio",
+      "releaseType": "release"
     }
   }
 }

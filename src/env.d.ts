@@ -20,6 +20,15 @@ interface ElectronAPI {
   configDecrypt: (value: string) => Promise<string>
   configSecurityStatus: () => Promise<{ encryptionAvailable: boolean }>
   onBeforeClose: (callback: () => void | Promise<void>) => () => void
+  updateGetState: () => Promise<import('./types/update').AppUpdateState>
+  updateCheck: () => Promise<import('./types/update').AppUpdateState>
+  updateDownload: () => Promise<import('./types/update').AppUpdateState>
+  updateCancel: () => Promise<import('./types/update').AppUpdateState>
+  updateInstall: () => Promise<import('./types/update').AppUpdateState>
+  updateSetAutoCheck: (enabled: boolean) => Promise<import('./types/update').AppUpdateState>
+  updateOpenRelease: () => Promise<void>
+  onUpdateState: (callback: (state: import('./types/update').AppUpdateState) => void) => () => void
+  onBeforeUpdate: (callback: () => void | Promise<void>) => () => void
 }
 
 interface Window {
