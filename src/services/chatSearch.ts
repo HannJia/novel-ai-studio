@@ -2,6 +2,7 @@ import { callAI, openAiV1BaseUrl, type ChatMessage } from '@/services/ai'
 import type { ModelConfig } from '@/stores/config'
 import type { ChatSearchProtocol, ChatSearchRecord, ChatSource } from '@/types/chat'
 import { finishAiActivity, startAiActivity } from './aiActivity'
+import { readSearchPayload, SearchResponseError as SearchError } from './searchResponse'
 
 // Only these documented server-side tools are supported. A model name or /models
 // response does not prove that a relay actually forwards the corresponding tool.
@@ -14,8 +15,33 @@ export const chatSearchProtocolOptions: Array<{ label: string; value: ChatSearch
 ]
 
 type Json = Record<string, unknown>
+type ResolvedProtocol = Exclude<ChatSearchProtocol, 'auto'>
 const object = (value: unknown): Json => value && typeof value === 'object' && !Array.isArray(value) ? value as Json : {}
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : []
+
+const protocolInfo: Record<ResolvedProtocol, { label: string; path: string }> = {
+  responses: { label: 'Responses', path: '/responses' },
+  anthropic: { label: 'Claude Messages', path: '/messages' },
+  openrouter: { label: 'OpenRouter', path: '/chat/completions' },
+  'chat-completions': { label: 'Chat Completions', path: '/chat/completions' },
+}
+
+export function searchProtocolDescription(model: Pick<ModelConfig, 'baseUrl' | 'modelName' | 'chatSearchProtocol'>): string {
+  const { label, path } = protocolInfo[resolveChatSearchProtocol(model)]
+  return `${model.chatSearchProtocol && model.chatSearchProtocol !== 'auto' ? '已选择' : '自动推测'}：${label} · ${path}`
+}
+
+function httpSearchError(status: number, protocol: ResolvedProtocol): SearchError {
+  const { label, path } = protocolInfo[protocol]
+  const reason = status === 401 ? '搜索接口未通过身份验证。普通对话可用也不代表此搜索接口接受同一密钥。'
+    : status === 403 ? '搜索接口拒绝访问，请确认服务商的搜索权限、模型权限及访问限制。'
+    : [400, 404, 405, 422].includes(status)
+      ? `接口不接受 ${label} 搜索请求，请向服务商确认 ${path} 及搜索工具支持情况，在模型设置中选择对应协议。`
+    : status === 429 ? '搜索请求被限流或额度不足，请检查服务商的搜索额度与频率限制。'
+    : status >= 500 ? '服务商的搜索接口暂时异常，请稍后重试。'
+    : '搜索接口未接受请求，请检查服务商的接口要求。'
+  return new SearchError(`HTTP_${status}`, reason)
+}
 
 export function safeSourceUrl(value: unknown): string | null {
   if (typeof value !== 'string' || value.length > 4096) return null
@@ -58,6 +84,9 @@ function sourcesFrom(candidates: unknown[]): ChatSource[] {
 export function parseSearchResponse(raw: unknown, protocol: Exclude<ChatSearchProtocol, 'auto'>): { content: string; search: ChatSearchRecord } {
   const data = object(raw)
   if (data.error || data.type === 'error') throw new Error('联网接口返回错误，未获得有效搜索回复。')
+  if ((protocol === 'anthropic' || protocol === 'responses') && Array.isArray(data.choices)) {
+    throw new SearchError('PROTOCOL_MISMATCH', '服务商返回了普通 Chat Completions 格式，与所选搜索协议不匹配。请确认中转接口是否转发搜索工具。')
+  }
   let content = ''
   let searched = false
   let candidates: unknown[] = []
@@ -91,8 +120,22 @@ export function parseSearchResponse(raw: unknown, protocol: Exclude<ChatSearchPr
         candidates.push(...array(part.citations).filter(value => object(value).type === 'web_search_result_location'))
       }
       if (part.type === 'web_search_tool_result') {
-        if (object(part.content).type === 'web_search_tool_result_error') throw new Error('接口的搜索工具执行失败，请检查服务商是否已开通搜索权限或额度。')
-        searched = true
+        const toolError = object(part.content).type === 'web_search_tool_result_error'
+          ? object(part.content)
+          : array(part.content).map(object).find(item => item.type === 'web_search_tool_result_error')
+        if (toolError) {
+          const reasons: Record<string, string> = {
+            unavailable: '服务商的搜索工具当前不可用。',
+            too_many_requests: '服务商的搜索工具被限流，请稍后重试。',
+            max_uses_exceeded: '本次搜索次数达到上限，未自动追加付费请求。',
+            invalid_tool_input: '服务商的搜索工具不接受当前搜索参数。',
+            query_too_long: '搜索词过长，请缩短问题后重试。',
+            request_too_large: '搜索请求过大，请缩短问题后重试。',
+          }
+          const code = typeof toolError.error_code === 'string' && Object.prototype.hasOwnProperty.call(reasons, toolError.error_code) ? toolError.error_code : ''
+          throw new SearchError(code ? `TOOL_${code.toUpperCase()}` : 'TOOL_ERROR', code ? reasons[code] : '服务商返回搜索工具错误，请确认搜索权限及工具支持情况。')
+        }
+        searched ||= Array.isArray(part.content)
         candidates.push(...array(part.content).filter(value => object(value).type === 'web_search_result'))
       }
     }
@@ -124,7 +167,7 @@ interface AssistantChatOptions {
   stream?: boolean
 }
 
-export async function chatWithOptionalSearch(options: AssistantChatOptions): Promise<{ content: string; search?: ChatSearchRecord }> {
+export async function chatWithOptionalSearch(options: AssistantChatOptions): Promise<{ content: string; search?: ChatSearchRecord; responseFormat?: 'json' | 'claude-sse' }> {
   const { model, messages, signal } = options
   signal.throwIfAborted()
   if (!options.webSearch) {
@@ -134,11 +177,14 @@ export async function chatWithOptionalSearch(options: AssistantChatOptions): Pro
     // Search is scoped to explicit chat entry points, not writing/outline/review.
     return callAI({ model, messages, signal, stream: options.stream ?? true, onChunk: options.onChunk })
   }
-  const endpoint = new URL(openAiV1BaseUrl(model.baseUrl))
+  let endpoint: URL
+  try { endpoint = new URL(openAiV1BaseUrl(model.baseUrl)) }
+  catch { throw new SearchError('INVALID_URL', 'API 地址无效，请检查模型设置中的 API Base URL。') }
   if (!['https:', 'http:'].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
     throw new Error('API 地址必须是有效的 HTTP(S) 基地址，不能包含凭据、查询参数或片段。')
   }
   if (!model.apiKey.trim()) throw new Error('请先在设置中填写有效 API Key。')
+  if (model.apiKey.startsWith('enc:') || model.apiKey.includes('***')) throw new Error('API Key 是密文或遮蔽文本，请填写当前服务商的有效密钥。')
   const protocol = resolveChatSearchProtocol(model)
   let path = '/chat/completions'
   const headers: Record<string, string> = { 'Content-Type': 'application/json', Authorization: `Bearer ${model.apiKey}` }
@@ -165,7 +211,7 @@ export async function chatWithOptionalSearch(options: AssistantChatOptions): Pro
   const controller = new AbortController()
   const abort = () => controller.abort(signal.reason)
   signal.addEventListener('abort', abort, { once: true })
-  const timer = setTimeout(() => controller.abort(new Error('联网请求超时，请稍后重试。')), 120_000)
+  const timer = setTimeout(() => controller.abort(new SearchError('SEARCH_TIMEOUT', '搜索接口在 120 秒内未完成回复，请检查服务商状态或当前网络。')), 120_000)
   try {
     // Never retry with a different host/protocol or silently fall back to offline.
     // That could leak a key to a different service or charge for duplicate searches.
@@ -173,22 +219,56 @@ export async function chatWithOptionalSearch(options: AssistantChatOptions): Pro
       method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal,
     })
     if (!response.ok) {
-      if ([401, 403].includes(response.status)) throw new Error(`联网请求被拒绝（${response.status}），请检查 API Key、模型权限和搜索额度。`)
-      if ([400, 404, 405, 422].includes(response.status)) throw new Error(`接口不接受 ${protocol} 联网请求（${response.status}）。请在模型设置中选择服务商支持的联网协议，或关闭联网后重试。`)
-      throw new Error(`联网请求失败（${response.status}），请稍后重试；本次未自动降级或重复发送。`)
+      void response.body?.cancel().catch(() => {})
+      throw httpSearchError(response.status, protocol)
     }
-    const payload: unknown = await response.json()
+    const payload = await readSearchPayload(response, protocol, controller.signal)
     controller.signal.throwIfAborted()
-    return parseSearchResponse(payload, protocol)
+    return { ...parseSearchResponse(payload.data, protocol), responseFormat: payload.format }
   } catch (error) {
-    finishAiActivity(activity, error)
-    if (controller.signal.aborted) throw controller.signal.reason
-    if (error instanceof TypeError) throw new Error('无法连接联网接口，请检查地址、网络或服务商的跨域支持。')
-    if (error instanceof SyntaxError) throw new Error('联网接口没有返回合法 JSON，请检查所选联网协议。')
-    throw error
+    if (signal.aborted) {
+      finishAiActivity(activity, signal.reason)
+      throw signal.reason
+    }
+    const cause = controller.signal.aborted ? controller.signal.reason
+      : error instanceof TypeError
+        ? new SearchError('SEARCH_CONNECTION_FAILED', '搜索请求未取得可读取的响应。普通对话正常时，请检查搜索路径、服务商的跨域支持及公司网络策略；仅凭此错误不能认定密钥失效或电脑断网。')
+        : error
+    const { label, path } = protocolInfo[protocol]
+    const detail = cause instanceof Error ? cause.message : '搜索请求未完成。'
+    const failure = new SearchError(cause instanceof SearchError ? cause.code : 'SEARCH_FAILED',
+      `[${cause instanceof SearchError ? cause.code : 'SEARCH_FAILED'}] ${label} ${path}：${detail}`)
+    finishAiActivity(activity, failure)
+    throw failure
   } finally {
     if (activity.status === 'running') finishAiActivity(activity)
     clearTimeout(timer)
     signal.removeEventListener('abort', abort)
+  }
+}
+
+export interface ChatSearchTestResult {
+  status: 'verified' | 'unverified' | 'failed'
+  message: string
+  sourceCount: number
+}
+
+export async function testChatSearch(model: ModelConfig, signal: AbortSignal): Promise<ChatSearchTestResult> {
+  try {
+    const result = await chatWithOptionalSearch({
+      model: { ...model, maxTokens: Math.min(model.maxTokens, 2048) }, signal, webSearch: true,
+      messages: [{ role: 'user', content: '请实际调用网页搜索，查询 Vue 官方网站，返回官网链接和一句概述。不要只根据已有知识回答。' }],
+    })
+    const count = result.search?.sources.length || 0
+    const formatNote = result.responseFormat === 'claude-sse' ? '已兼容读取中转站返回的 Claude 事件流。' : ''
+    if (result.search?.status === 'searched' && count > 0) {
+      return { status: 'verified', sourceCount: count, message: `${formatNote}本次测试收到搜索证据和 ${count} 个来源。` }
+    }
+    return { status: 'unverified', sourceCount: count, message: formatNote + (result.search?.status === 'searched'
+      ? '接口报告搜索已执行，但未返回可引用来源，本次未完整验证。'
+      : '接口有回复，但没有可验证的搜索证据。可能未调用搜索，或服务商忽略了搜索参数，不能据此判定联网成功。') }
+  } catch (error) {
+    signal.throwIfAborted()
+    return { status: 'failed', sourceCount: 0, message: error instanceof Error ? error.message : '搜索测试失败。' }
   }
 }

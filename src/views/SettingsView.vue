@@ -42,7 +42,10 @@
             </div>
             <div class="model-actions">
               <n-button size="tiny" quaternary @click="testModel(model)" :loading="testingId === model.id">
-                {{ testingId === model.id ? '测试中...' : '测试连接' }}
+                {{ testingId === model.id ? '测试中...' : '测试对话' }}
+              </n-button>
+              <n-button size="tiny" quaternary @click="editModel(model)" title="打开模型设置，单独测试搜索能力">
+                <template #icon><n-icon><globe-outline /></n-icon></template>测试联网
               </n-button>
               <n-button size="tiny" quaternary @click="editModel(model)">编辑</n-button>
               <n-button size="tiny" quaternary type="error" @click="handleDeleteModel(model.id)">删除</n-button>
@@ -203,7 +206,7 @@
       v-model:show="showAddModel"
       preset="dialog"
       :title="editingModel ? '编辑模型' : '添加模型'"
-      style="width: 520px;"
+      style="width: min(520px, calc(100vw - 32px));"
       @update:show="handleModelModalVisibility"
     >
       <div class="model-form">
@@ -283,6 +286,7 @@
           <label>对话联网协议</label>
           <n-select v-model:value="modelForm.chatSearchProtocol" :options="chatSearchProtocolOptions" />
           <p class="model-discovery-hint">在灵感对话或右下角对话窗口开启“联网”时使用。API Key 和模型列表不代表搜索权限；中转接口需支持所选协议。</p>
+          <ModelSearchTest v-if="showAddModel" :model="searchTestModel" />
         </div>
         <div class="form-row">
           <div class="form-item">
@@ -352,10 +356,11 @@
 
 <script setup lang="ts">
 import AppUpdatePanel from '@/components/AppUpdatePanel.vue'
+import ModelSearchTest from '@/components/ModelSearchTest.vue'
 import { ref, computed, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NIcon, NInput, NInputNumber, NSelect, NModal, NSwitch, NTag, useMessage, useDialog } from 'naive-ui'
-import { ArrowBackOutline } from '@vicons/ionicons5'
+import { ArrowBackOutline, GlobeOutline } from '@vicons/ionicons5'
 import { useConfigStore, type ModelConfig } from '@/stores/config'
 import { listAvailableModels, openAiV1BaseUrl, testConnection, type AvailableModel } from '@/services/ai'
 import { testEmbeddingConnection } from '@/services/embeddings'
@@ -419,6 +424,11 @@ const modelForm = reactive({
   maxTokens: 4096,
   chatSearchProtocol: 'auto' as ChatSearchProtocol,
 })
+const searchTestModel = computed<ModelConfig>(() => ({
+  ...modelForm,
+  id: editingModel.value || 'search-test',
+  apiKey: modelForm.apiKey.trim() || configStore.models.find(model => model.id === editingModel.value)?.apiKey || '',
+}))
 
 // 模型选项
 const modelOptions = computed(() => {
@@ -848,6 +858,7 @@ function handleDeleteSkill(id: string) {
   background: var(--bg-color);
   border: 1px solid var(--border-color-light);
   transition: border-color var(--transition-fast);
+  gap: 12px;
 }
 
 .model-card:hover {
@@ -983,6 +994,8 @@ function handleDeleteSkill(id: string) {
 }
 
 @media (max-width: 680px) {
+  .model-card { flex-direction: column; align-items: stretch; }
+  .model-actions { flex-wrap: wrap; }
   .embedding-grid, .form-row, .assignment-grid { grid-template-columns: 1fr; }
   .span-2 { grid-column: auto; }
   .skill-row { grid-template-columns: auto minmax(0, 1fr); padding: 10px 0; }

@@ -5,6 +5,7 @@ import { flushPromises, shallowMount } from '@vue/test-utils'
 import SettingsView from './SettingsView.vue'
 import { useConfigStore } from '@/stores/config'
 import { listAvailableModels } from '@/services/ai'
+import ModelSearchTest from '@/components/ModelSearchTest.vue'
 import { version as appVersion } from '../../package.json'
 
 vi.mock('@/services/ai', async importOriginal => ({
@@ -50,6 +51,19 @@ afterEach(async () => {
 })
 
 describe('模型原始名称与配置备注', () => {
+  it('separates conversation and search tests and keeps the saved key when the edit field is blank', async () => {
+    const model = addLegacyModel()
+    const wrapper = mountSettings()
+    expect(wrapper.findAll('button').some(button => button.text() === '测试对话')).toBe(true)
+    await wrapper.findAll('button').find(button => button.text() === '测试联网')!.trigger('click')
+    const input = wrapper.get('input[placeholder="留空则保留当前 API Key"]')
+    await input.setValue('')
+    expect(wrapper.findComponent(ModelSearchTest).props('model')).toMatchObject({
+      id: model.id, apiKey: 'synthetic-test-key', modelName: model.modelName,
+    })
+    expect(useConfigStore().models[0].apiKey).toBe('synthetic-test-key')
+  })
+
   it('shows the package version in the about section', () => {
     expect(mountSettings().find('.about-section').text()).toContain(`v${appVersion}`)
   })
