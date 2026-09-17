@@ -9,6 +9,7 @@ import { canonicalJson, emptySyncState, hashPayload, type CloudRecord } from '@/
 const memory = vi.hoisted(() => ({
   state: null as any, conflicts: [] as any[], records: new Map<string, any>(), userId: 'owner',
   onPull: null as null | (() => void | Promise<void>), onPush: null as null | (() => Promise<void>), failSave: false, expired: false,
+  requests: [] as { endpoint: string; path: string }[],
 }))
 vi.mock('@/services/db/cloudSync', () => ({
   readCloudState: async () => structuredClone(memory.state),
@@ -37,6 +38,7 @@ vi.mock('@/services/database', async importOriginal => ({
 vi.mock('@/services/cloudSyncApi', async importOriginal => {
   const original = await importOriginal<any>()
   return { ...original, cloudRequest: async (_endpoint: string, path: string, options: any = {}) => {
+    memory.requests.push({ endpoint: _endpoint, path })
     if (path === 'auth/login') return { token: 'test-token-not-a-secret', expiresAt: Date.now() + 86400000,
       user: { id: memory.userId, username: memory.userId, role: 'user', quotaBytes: 100000000, usedBytes: 0 } }
     if (path === 'auth/logout') return { ok: true }
@@ -77,6 +79,7 @@ beforeEach(async () => {
   memory.onPush = null
   memory.failSave = false
   memory.expired = false
+  memory.requests = []
   setActivePinia(createPinia())
   await useNovelStore().initStore()
   await useKnowledgeStore().initStore()
@@ -245,5 +248,20 @@ describe('云同步状态机', () => {
     expect(sync.state.binding?.userId).toBe('owner')
     expect(useNovelStore().getNovel(novel.id)).toBeDefined()
     expect(sessionStorage.getItem('novel-cloud-session')).toBeNull()
+  })
+  it('restores the bound server without a token and rejects changed destinations before sending credentials', async () => {
+    sync.dispose()
+    memory.state = { ...emptySyncState(), binding: { endpoint: 'https://sync.example.test', userId: 'owner', username: 'owner' } }
+    setActivePinia(createPinia())
+    sync = useCloudSyncStore()
+    await sync.initialize()
+    expect(sync.endpoint).toBe('https://sync.example.test')
+    sync.endpoint = 'https://different.example.test'
+    await expect(sync.authenticate('login', 'owner', 'private-password')).rejects.toThrow('原服务器地址')
+    await expect(sync.recover('owner', 'private-recovery', 'new-password')).rejects.toThrow('原服务器地址')
+    expect(memory.requests).toHaveLength(0)
+    sync.endpoint = 'https://sync.example.test'
+    await expect(sync.authenticate('register', 'new-account', 'private-password', 'invite')).rejects.toThrow('已绑定账号')
+    expect(memory.requests).toHaveLength(0)
   })
 })

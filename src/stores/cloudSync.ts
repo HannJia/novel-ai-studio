@@ -77,6 +77,7 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
     if (initialized.value) return
     try {
       state.value = await readCloudState()
+      endpoint.value = state.value.binding ? normalizeSyncEndpoint(state.value.binding.endpoint) : DEFAULT_SYNC_ENDPOINT
       conflicts.value = await readCloudConflicts()
       const saved = window.electronAPI?.cloudSessionRead
         ? await window.electronAPI.cloudSessionRead()
@@ -113,9 +114,21 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
     try { return await task }
     finally { operation = null; busy.value = false }
   }
+  function accountTarget(username: string) {
+    if (!initialized.value) throw new Error('正在读取本机同步配置，请稍后再试。')
+    const target = normalizeSyncEndpoint(endpoint.value)
+    const binding = state.value.binding
+    if (binding && target !== binding.endpoint) {
+      throw new Error('本机书架已绑定其他同步服务器，请恢复原服务器地址后登录。')
+    }
+    if (binding && username.trim().toLowerCase() !== binding.username) {
+      throw new Error(`当前本地书架已绑定账号 ${binding.username}，请登录原账号。`)
+    }
+    return target
+  }
   async function authenticate(mode: 'login' | 'register', username: string, password: string, invite = '') {
     const recovery = await exclusively(async () => {
-      const target = normalizeSyncEndpoint(endpoint.value)
+      const target = accountTarget(username)
       const response = await cloudRequest<{ token: string; expiresAt: number; user: CloudUser; recoveryCode?: string }>(
         target, `auth/${mode}`, { body: { username, password, invite } })
       const clean: CloudSession = { endpoint: target, token: response.token, expiresAt: response.expiresAt, user: response.user }
@@ -359,7 +372,7 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
     })
   }
   async function recover(username: string, recoveryCode: string, password: string) {
-    return cloudRequest<{ recoveryCode: string }>(endpoint.value, 'auth/recover', { body: { username, recoveryCode, password } })
+    return cloudRequest<{ recoveryCode: string }>(accountTarget(username), 'auth/recover', { body: { username, recoveryCode, password } })
   }
   async function flushBeforeClose() {
     await operation
