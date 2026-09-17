@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import JSZip from 'jszip'
 import { KNOWLEDGE_IMPORT_LIMITS, readKnowledgeFile, validateKnowledgeZip } from './knowledgeImport'
+vi.mock('./knowledgePdfCache', () => ({ loadPdfPages: vi.fn(async () => new Map()), savePdfPage: vi.fn() }))
 // Vitest resolves Mammoth's Node entry; production Vite uses its browser map.
 vi.mock('mammoth', async original => {
   const module = await original<typeof import('mammoth')>()
@@ -29,7 +30,7 @@ describe('bounded knowledge imports', () => {
     await expect(readKnowledgeFile(new File([await zip.generateAsync({ type: 'arraybuffer' })], 'invalid.epub'))).rejects.toThrow('路径越界')
   })
   it('checks compressed file size, declared expansion, and malformed ZIP64 before extraction', async () => {
-    await expect(readKnowledgeFile({ name: 'large.docx', size: KNOWLEDGE_IMPORT_LIMITS.fileBytes + 1 } as File)).rejects.toThrow('25 MB')
+    await expect(readKnowledgeFile({ name: 'large.docx', size: KNOWLEDGE_IMPORT_LIMITS.fileBytes + 1 } as File)).rejects.toThrow('100 MB')
     const buffer = await epub().generateAsync({ type: 'arraybuffer' })
     const view = new DataView(buffer)
     const central = view.getUint32(buffer.byteLength - 6, true)
@@ -37,6 +38,15 @@ describe('bounded knowledge imports', () => {
     expect(() => validateKnowledgeZip(buffer)).toThrow('解压内容超过')
     view.setUint32(central + 24, 0xffffffff, true)
     expect(() => validateKnowledgeZip(buffer)).toThrow('ZIP64')
+  })
+  it('accepts files above the old limit through exactly 100 MB, without reading oversized files', async () => {
+    expect(KNOWLEDGE_IMPORT_LIMITS.fileBytes).toBe(100 * 1024 * 1024)
+    const text = vi.fn().mockResolvedValue('已提取的资料文字')
+    for (const size of [26 * 1024 * 1024, 100 * 1024 * 1024]) {
+      expect(await readKnowledgeFile({ name: '资料.txt', size, text } as unknown as File)).toBe('已提取的资料文字')
+    }
+    await expect(readKnowledgeFile({ name: '资料.txt', size: 100 * 1024 * 1024 + 1, text } as unknown as File)).rejects.toThrow('100 MB')
+    expect(text).toHaveBeenCalledTimes(2)
   })
   it('continues to read Word text after the XML dependency security update', async () => {
     const zip = new JSZip()

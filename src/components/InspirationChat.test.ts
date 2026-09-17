@@ -7,6 +7,8 @@ import { NSelect } from 'naive-ui'
 import { chatInspiration, extractInspirationSettings } from '@/services/inspiration'
 import { useConfigStore } from '@/stores/config'
 import { useNovelStore } from '@/stores/novel'
+import { useKnowledgeStore } from '@/stores/knowledge'
+import SaveChatKnowledge from './SaveChatKnowledge.vue'
 import type { CreateWizardForm } from '@/types/novel'
 
 vi.mock('@/services/inspiration', () => ({ chatInspiration: vi.fn(), extractInspirationSettings: vi.fn() }))
@@ -30,6 +32,27 @@ function button(wrapper: Wrapper, text: string) {
 }
 
 describe('inspiration search controls', () => {
+  it('defaults to available knowledge, remembers a cleared selection and opens a draft without writing', async () => {
+    const knowledge = useKnowledgeStore()
+    const kb = knowledge.createKB('地方志')
+    const wrapper = mountChat()
+    vi.mocked(chatInspiration).mockResolvedValue({ content: '## 县学资料\n这是一份待确认草稿。' })
+    await wrapper.get('textarea').setValue('帮我整理县学资料')
+    await button(wrapper, '发送').trigger('click')
+    await flushPromises()
+    expect(vi.mocked(chatInspiration).mock.calls[0][5]).toEqual([kb.id])
+    await button(wrapper, '存入知识库').trigger('click')
+    expect(wrapper.findComponent(SaveChatKnowledge).props('content')).toContain('待确认草稿')
+    expect(kb.entries).toHaveLength(0)
+    wrapper.findComponent(SaveChatKnowledge).vm.$emit('update:show', false)
+    wrapper.findAllComponents(NSelect).find(select => select.attributes('aria-label') === '灵感参考知识库')!.vm.$emit('update:value', [])
+    await wrapper.get('textarea').setValue('这轮不使用资料')
+    await button(wrapper, '发送').trigger('click')
+    await flushPromises()
+    expect(vi.mocked(chatInspiration).mock.calls[1][5]).toEqual([])
+    expect(JSON.parse(localStorage.getItem('novel-writer-inspiration-sessions')!)[0].knowledgeIds).toEqual([])
+    wrapper.unmount()
+  })
   it('keeps only the latest author prompt pinned outside the scrolling transcript', async () => {
     const wrapper = mountChat()
     expect(wrapper.find('.inspiration-sticky-prompt').exists()).toBe(false)
@@ -149,7 +172,7 @@ describe('inspiration search controls', () => {
     await flushPromises()
     expect(newline.defaultPrevented).toBe(false)
     expect(chatInspiration).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Enter 发送 · Shift+Enter 换行')
+    expect(wrapper.text()).toContain('回车发送 · 上档键＋回车换行')
     wrapper.unmount()
   })
 

@@ -7,6 +7,7 @@ import {
 import type { ModelConfig, EmbeddingConfig } from '@/stores/config'
 import type { Chapter, Novel } from '@/types/novel'
 import { parseAiJsonObject } from '@/utils/aiJson'
+import { buildSoftwareAssistantContext } from './softwareAssistantContext'
 
 export type WritingAdviceMode = 'paragraph' | 'scene' | 'chapter'
 export type WritingAdviceKind = 'conflict' | 'investigation' | 'relationship' | 'revelation' | 'scene' | 'pacing'
@@ -145,7 +146,8 @@ export function buildWritingAdvicePrompt(
   return [
     {
       role: 'system',
-      content: `你是小说连续性编辑和创作顾问，服务于人工主笔。你可以帮助作者规划故事、提供多个后续方向和下一章计划，但绝不能代写正文、改写正文或输出可直接替代正文的大段文字。只根据给出的资料提出建议，资料不足时明确说资料不足。每条建议都必须引用提供的资料证据；不要编造不存在的人物、事件、规则或数值。必须输出严格 JSON。`,
+      content: `${buildSoftwareAssistantContext('advisor')}
+你是小说连续性编辑和创作顾问，服务于人工主笔。你可以帮助作者规划故事、提供多个后续方向和下一章计划，但绝不能代写正文、改写正文或输出可直接替代正文的大段文字。只根据给出的资料提出建议，资料不足时明确说资料不足。每条建议都必须引用提供的资料证据；不要编造不存在的人物、事件、规则或数值。当前是结构化写作建议任务，必须输出严格 JSON，不把软件帮助说明写进小说正文。`,
     },
     {
       role: 'user',

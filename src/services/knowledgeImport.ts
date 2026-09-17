@@ -1,9 +1,9 @@
 import type JSZip from 'jszip'
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url'
+import { readKnowledgePdf, type PdfReadOptions } from './knowledgePdf'
 
 export const KNOWLEDGE_IMPORT_LIMITS = {
-  fileBytes: 25 * 1024 * 1024, archiveEntries: 2000, entryBytes: 16 * 1024 * 1024,
-  expandedBytes: 64 * 1024 * 1024, textCharacters: 5_000_000, pdfPages: 1000,
+  fileBytes: 100 * 1024 * 1024, archiveEntries: 2000, entryBytes: 128 * 1024 * 1024,
+  expandedBytes: 256 * 1024 * 1024, textCharacters: 5_000_000, pdfPages: 1000,
 }
 
 // Inspect the central directory before asking a ZIP library to allocate entry
@@ -34,7 +34,7 @@ export function validateKnowledgeZip(buffer: ArrayBuffer): void {
     if (flags & 1) throw new Error('不支持加密压缩包')
     if (localOffset >= view.byteLength || compressed > view.byteLength) throw new Error('ZIP 数据越界')
     total += expanded
-    if (expanded > KNOWLEDGE_IMPORT_LIMITS.entryBytes || total > KNOWLEDGE_IMPORT_LIMITS.expandedBytes) throw new Error('解压内容超过安全上限（单文件 16 MB / 总计 64 MB）')
+    if (expanded > KNOWLEDGE_IMPORT_LIMITS.entryBytes || total > KNOWLEDGE_IMPORT_LIMITS.expandedBytes) throw new Error('解压内容超过安全上限（单文件 128 MB / 总计 256 MB）')
     offset += 46 + view.getUint16(offset + 28, true) + view.getUint16(offset + 30, true) + view.getUint16(offset + 32, true)
     if (offset > directoryEnd) throw new Error('ZIP 条目越界')
   }
@@ -147,33 +147,13 @@ async function readArchive(buffer: ArrayBuffer, extension: string): Promise<stri
   return chapters.join('\n\n---\n\n')
 }
 
-export async function readKnowledgeFile(file: File): Promise<string> {
-  if (file.size > KNOWLEDGE_IMPORT_LIMITS.fileBytes) throw new Error('导入文件超过 25 MB，请拆分后导入')
+export async function readKnowledgeFile(file: File, options?: PdfReadOptions): Promise<string> {
+  if (file.size > KNOWLEDGE_IMPORT_LIMITS.fileBytes) throw new Error('导入文件超过 100 MB，请拆分后导入')
   const extension = file.name.split('.').pop()?.toLowerCase()
   let result: string
   if (extension === 'docx' || extension === 'epub') result = await readArchive(await file.arrayBuffer(), extension)
-  else if (extension === 'pdf') {
-    const pdfjs = await import('pdfjs-dist')
-    pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
-    const task = pdfjs.getDocument({ data: await file.arrayBuffer() })
-    try {
-      const pdf = await task.promise
-      if (pdf.numPages > KNOWLEDGE_IMPORT_LIMITS.pdfPages) throw new Error('PDF 超过 1000 页，请拆分后导入')
-      const pages: string[] = []
-      let length = 0
-      for (let index = 1; index <= pdf.numPages; index++) {
-        const page = await pdf.getPage(index)
-        try {
-          const content = await page.getTextContent()
-          const text = content.items.map(item => 'str' in item ? item.str : '').join(' ').trim()
-          length += text.length
-          if (length > KNOWLEDGE_IMPORT_LIMITS.textCharacters) throw new Error('提取文本超过 500 万字符')
-          if (text) pages.push(`## 第 ${index} 页\n${text}`)
-        } finally { page.cleanup() }
-      }
-      result = pages.join('\n\n---\n\n')
-    } finally { await task.destroy() }
-  } else if (extension === 'txt' || extension === 'md' || extension === 'markdown') result = await file.text()
+  else if (extension === 'pdf') result = await readKnowledgePdf(file, options)
+  else if (extension === 'txt' || extension === 'md' || extension === 'markdown') result = await file.text()
   else throw new Error('只支持 TXT、Markdown、DOCX、EPUB 和 PDF')
   if (result.length > KNOWLEDGE_IMPORT_LIMITS.textCharacters) throw new Error('提取文本超过 500 万字符')
   return result

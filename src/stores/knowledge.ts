@@ -151,10 +151,10 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     let count = 0
     for (const section of sections) {
       const lines = section.trim().split('\n')
-      let title = lines[0].replace(/^#+\s*/, '').trim()
+      let title = lines[0].replace(/^#+\s*/, '').trim().slice(0, 180)
       if (!title) title = `导入条目 ${kb.entries.length + count + 1}`
-      const content = lines.slice(1).join('\n').trim()
-      if (content.length > 10) {
+      const content = (/^#+\s/.test(lines[0]) ? lines.slice(1).join('\n') : section).trim()
+      if (content) {
         addEntry(kbId, { title, content, category, tags: [], summary: '' })
         count++
       }

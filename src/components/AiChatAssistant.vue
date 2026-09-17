@@ -59,6 +59,9 @@
                 <button class="action-btn" @click="copyContent(formatChatReply(msg.content, msg.search))" title="复制内容">
                   📋 复制
                 </button>
+                <n-button size="tiny" quaternary :disabled="thinking" @click="openKnowledgeDraft(msg.content, msg.search)">
+                  <template #icon><n-icon><save-outline /></n-icon></template>存入知识库
+                </n-button>
               </div>
             </div>
           </div>
@@ -97,28 +100,50 @@
         </div>
       </div>
     </transition>
+    <SaveChatKnowledge :key="novelId" v-model:show="showKnowledgeDraft" :content="knowledgeDraft"
+      :preferred-ids="novel?.knowledgeBaseIds || []" @saved="knowledgeSaved" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, nextTick, watch } from 'vue'
-import { NButton, NInput, useDialog } from 'naive-ui'
+import { NButton, NIcon, NInput, useDialog } from 'naive-ui'
+import { SaveOutline } from '@vicons/ionicons5'
 import { useAssistantChat } from '@/composables/useAssistantChat'
+import { useNovelStore } from '@/stores/novel'
+import SaveChatKnowledge from '@/components/SaveChatKnowledge.vue'
+import { knowledgeDraftWithSources } from '@/services/softwareAssistantContext'
+import type { ChatSearchRecord } from '@/types/chat'
 import ChatSearchEvidence from '@/components/ChatSearchEvidence.vue'
 import { renderMd } from '@/utils/markdown'
 import { formatChatReply } from '@/utils/chatPresentation'
 
 const props = defineProps<{
   novelId: string
+  chapterId?: string
 }>()
 
 const dialog = useDialog()
-const { novel, messages, webSearch, inputText, thinking, streamText, error, sendMessage, stop, toggleSearch, clear, quickAsk } = useAssistantChat(() => props.novelId)
+const store = useNovelStore()
+const { novel, messages, webSearch, inputText, thinking, streamText, error, sendMessage, stop, toggleSearch, clear, quickAsk } = useAssistantChat(() => props.novelId, () => props.chapterId || '')
 
 const showChat = ref(false)
 const expanded = ref(false)
 const unread = ref(false)
 const messagesRef = ref<HTMLDivElement | null>(null)
+const showKnowledgeDraft = ref(false)
+const knowledgeDraft = ref('')
+
+function openKnowledgeDraft(content: string, search?: ChatSearchRecord) {
+  knowledgeDraft.value = knowledgeDraftWithSources(content, search)
+  showKnowledgeDraft.value = true
+}
+
+function knowledgeSaved(result: { kbName: string; title: string }) {
+  store.addChatMessage(props.novelId, { id: crypto.randomUUID(), role: 'assistant',
+    content: `【软件保存回执】已保存到知识库“${result.kbName}”，条目“${result.title}”。本书的挂载范围未改变。`,
+    timestamp: new Date().toISOString() })
+}
 
 function toggleChat() {
   showChat.value = !showChat.value
@@ -151,7 +176,7 @@ watch(() => [messages.value.length, streamText.value, thinking.value], scrollToB
 watch(() => messages.value[messages.value.length - 1]?.id, () => {
   if (!showChat.value && messages.value[messages.value.length - 1]?.role === 'assistant') unread.value = true
 })
-watch(() => props.novelId, () => { unread.value = false })
+watch(() => props.novelId, () => { unread.value = false; showKnowledgeDraft.value = false })
 
 // 跨章节分析
 function crossChapterAnalysis() {
@@ -416,6 +441,7 @@ function wholeBookAnalysis() {
 .msg-actions {
   display: flex;
   gap: 4px;
+  flex-wrap: wrap;
   margin-top: 6px;
 }
 

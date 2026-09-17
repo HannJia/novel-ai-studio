@@ -8,10 +8,10 @@ import { readSearchPayload, SearchResponseError as SearchError } from './searchR
 // response does not prove that a relay actually forwards the corresponding tool.
 export const chatSearchProtocolOptions: Array<{ label: string; value: ChatSearchProtocol }> = [
   { label: '自动匹配协议（不代表接口已支持）', value: 'auto' },
-  { label: 'Responses · web_search', value: 'responses' },
-  { label: 'Claude Messages · web_search', value: 'anthropic' },
-  { label: 'OpenRouter · web 插件', value: 'openrouter' },
-  { label: 'Chat Completions · 搜索专用模型', value: 'chat-completions' },
+  { label: '响应接口网页搜索（Responses）', value: 'responses' },
+  { label: 'Claude 消息接口网页搜索（Messages）', value: 'anthropic' },
+  { label: 'OpenRouter 网页插件', value: 'openrouter' },
+  { label: '聊天补全搜索专用模型（Chat Completions）', value: 'chat-completions' },
 ]
 
 type Json = Record<string, unknown>
@@ -183,8 +183,8 @@ export async function chatWithOptionalSearch(options: AssistantChatOptions): Pro
   if (!['https:', 'http:'].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
     throw new Error('API 地址必须是有效的 HTTP(S) 基地址，不能包含凭据、查询参数或片段。')
   }
-  if (!model.apiKey.trim()) throw new Error('请先在设置中填写有效 API Key。')
-  if (model.apiKey.startsWith('enc:') || model.apiKey.includes('***')) throw new Error('API Key 是密文或遮蔽文本，请填写当前服务商的有效密钥。')
+  if (!model.apiKey.trim()) throw new Error('请先在设置中填写有效接口密钥。')
+  if (model.apiKey.startsWith('enc:') || model.apiKey.includes('***')) throw new Error('接口密钥是密文或遮蔽文本，请填写当前服务商的有效密钥。')
   const protocol = resolveChatSearchProtocol(model)
   let path = '/chat/completions'
   const headers: Record<string, string> = { 'Content-Type': 'application/json', Authorization: `Bearer ${model.apiKey}` }

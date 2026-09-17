@@ -68,7 +68,7 @@
     <!-- 未配置提示 -->
     <div class="no-config-hint" v-if="!configStore.isConfigured && !streamContent && !hasError">
       <n-alert type="warning" title="未配置 AI 模型">
-        请先在设置页面配置 API Key 才能使用 AI 功能。<br><br>
+        请先在设置页面配置接口密钥才能使用 AI 功能。<br><br>
         <n-button size="small" @click="$router.push('/settings')">前往设置</n-button>
       </n-alert>
     </div>

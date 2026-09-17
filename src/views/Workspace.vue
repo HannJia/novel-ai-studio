@@ -166,7 +166,7 @@
     </main>
 
     <!-- AI 对话助手 -->
-    <AiChatAssistant :novelId="novelId" />
+    <AiChatAssistant :novelId="novelId" :chapter-id="typeof route.params.chapterId === 'string' ? route.params.chapterId : ''" />
 
     <n-modal v-model:show="showRenameModal" preset="card" title="修改书名" style="width: 420px;">
       <n-input v-model:value="renameTitle" placeholder="输入新的书名" @keydown="handleRenameKeydown" />

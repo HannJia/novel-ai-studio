@@ -7,6 +7,21 @@ import { finishAiActivity, startAiActivity } from '@/services/aiActivity'
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
+  imageDataUrls?: string[]
+}
+
+export function serializeChatMessages(messages: ChatMessage[]) {
+  return messages.map(({ role, content, imageDataUrls }) => {
+    if (!imageDataUrls?.length) return { role, content }
+    if (role !== 'user' || imageDataUrls.length > 4
+      || imageDataUrls.some(url => !/^data:image\/(?:jpeg|png);base64,[A-Za-z0-9+/]+=*$/.test(url) || url.length > 12 * 1024 * 1024)) {
+      throw new Error('图片消息格式无效或超过大小上限')
+    }
+    return { role, content: [
+      { type: 'text', text: content },
+      ...imageDataUrls.map(url => ({ type: 'image_url', image_url: { url, detail: 'high' } })),
+    ] }
+  })
 }
 
 export interface ChatCompletionOptions {
@@ -19,6 +34,7 @@ export interface ChatCompletionOptions {
   maxTokens?: number // 覆盖模型默认 maxTokens
   skillTask?: Exclude<WritingSkillTask, 'all'>
   activityParentId?: string
+  redactErrors?: boolean
   shouldStop?: () => boolean
 }
 
@@ -35,6 +51,7 @@ export function applySkillInstructions(messages: ChatMessage[], instructions: st
 
 export interface ChatCompletionResult {
   content: string
+  finishReason?: string
   usage?: {
     prompt_tokens: number
     completion_tokens: number
@@ -123,7 +140,7 @@ async function chatCompletion(options: ChatCompletionOptions): Promise<ChatCompl
         },
         body: JSON.stringify({
           model: model.modelName,
-          messages,
+          messages: serializeChatMessages(messages),
           max_tokens: maxTokens || model.maxTokens,
           temperature: model.temperature,
           top_p: model.topP,
@@ -145,6 +162,7 @@ async function chatCompletion(options: ChatCompletionOptions): Promise<ChatCompl
       const data = await response.json()
       return {
         content: data.choices?.[0]?.message?.content || '',
+        finishReason: data.choices?.[0]?.finish_reason,
         usage: data.usage,
       }
     } catch (err) {
@@ -171,7 +189,7 @@ async function chatCompletionStream(options: ChatCompletionOptions): Promise<Cha
     },
     body: JSON.stringify({
       model: model.modelName,
-      messages,
+      messages: serializeChatMessages(messages),
       max_tokens: maxTokens || model.maxTokens,
       temperature: model.temperature,
       top_p: model.topP,
@@ -300,8 +318,10 @@ export async function callAI(options: ChatCompletionOptions): Promise<ChatComple
     }
     return await chatCompletion(enrichedOptions)
   } catch (error) {
-    finishAiActivity(activity, error)
-    throw error
+    const visibleError = options.redactErrors && !options.signal?.aborted
+      ? new Error('图片识别接口请求失败，请检查模型、额度和连接。') : error
+    finishAiActivity(activity, visibleError)
+    throw visibleError
   } finally {
     if (activity.status === 'running') finishAiActivity(activity)
   }

@@ -56,7 +56,7 @@ describe('模型原始名称与配置备注', () => {
     const wrapper = mountSettings()
     expect(wrapper.findAll('button').some(button => button.text() === '测试对话')).toBe(true)
     await wrapper.findAll('button').find(button => button.text() === '测试联网')!.trigger('click')
-    const input = wrapper.get('input[placeholder="留空则保留当前 API Key"]')
+    const input = wrapper.get('input[placeholder="留空则保留当前接口密钥"]')
     await input.setValue('')
     expect(wrapper.findComponent(ModelSearchTest).props('model')).toMatchObject({
       id: model.id, apiKey: 'synthetic-test-key', modelName: model.modelName,
@@ -155,7 +155,7 @@ describe('模型原始名称与配置备注', () => {
     const wrapper = mountSettings()
     await wrapper.get('#add-model-btn').trigger('click')
     await wrapper.get('input[placeholder="如：https://api.deepseek.com"]').setValue('https://example.test')
-    await wrapper.get('input[placeholder="sk-..."]').setValue('synthetic-test-key')
+    await wrapper.get('input[placeholder="填写服务商提供的接口密钥"]').setValue('synthetic-test-key')
     await wrapper.findAll('button').find(button => button.text() === '获取模型')!.trigger('click')
     await flushPromises()
     await wrapper.findAll('button').find(button => button.text() === '全选')!.trigger('click')

@@ -145,35 +145,7 @@
       </template>
     </n-modal>
 
-    <!-- 导入弹窗 -->
-    <n-modal v-model:show="showImportModal" preset="card" title="导入内容" style="max-width:550px;">
-      <div class="form-group">
-        <label>分类</label>
-        <n-select v-model:value="importCategory" :options="categoryOptions" size="small" />
-
-        <label>上传文件（支持 .txt / .md / .docx / .epub / .pdf）</label>
-        <div class="file-upload-area">
-          <input
-            ref="fileInputRef"
-            type="file"
-            accept=".txt,.md,.markdown,.docx,.epub,.pdf"
-            @change="handleFileUpload"
-            style="display:none;"
-          />
-          <n-button size="small" @click="($refs.fileInputRef as HTMLInputElement)?.click()">
-            📁 选择文件
-          </n-button>
-          <span v-if="uploadFileName" class="file-name">{{ uploadFileName }}</span>
-        </div>
-
-        <label>文本内容（按 ## 标题 或 --- 分割为条目）</label>
-        <n-input v-model:value="importText" type="textarea" :rows="10" size="small" placeholder="粘贴内容或上传文件..." />
-      </div>
-      <template #action>
-        <n-button @click="showImportModal = false">取消</n-button>
-        <n-button type="primary" :disabled="!importText.trim()" @click="doImport">导入</n-button>
-      </template>
-    </n-modal>
+    <KnowledgeImportDialog v-model:show="showImportModal" :kb-id="selectedKBId" @imported="afterImport" />
   </div>
 </template>
 
@@ -185,7 +157,7 @@ import { useKnowledgeStore, kbCategories, type KBEntry, type KnowledgeBase } fro
 import { useNovelStore } from '@/stores/novel'
 import { useConfigStore } from '@/stores/config'
 import { callAI } from '@/services/ai'
-import { readKnowledgeFile } from '@/services/knowledgeImport'
+import KnowledgeImportDialog from '@/components/KnowledgeImportDialog.vue'
 import { parseAiJsonObject } from '@/utils/aiJson'
 
 const route = useRoute()
@@ -214,9 +186,6 @@ const categoryOptions = kbCategories.map(c => ({ label: c.label, value: c.value 
 
 const createForm = ref({ name: '', description: '' })
 const entryForm = ref({ title: '', category: '其他', content: '', tagsText: '' })
-const importCategory = ref('其他')
-const importText = ref('')
-const uploadFileName = ref('')
 const summarizingEntryIds = ref(new Set<string>())
 const summarizingKB = ref(false)
 const summaryLevel = ref<NonNullable<KnowledgeBase['summaryLevel']>>('standard')
@@ -323,21 +292,18 @@ function removeEntry(id: string) {
   msg.success('已删除')
 }
 
-function doImport() {
-  const count = kbStore.importFromText(selectedKBId.value, importText.value, importCategory.value)
-  importText.value = ''
-  uploadFileName.value = ''
-  showImportModal.value = false
-  msg.success(`已导入 ${count} 个条目，AI 正在自动总结...`)
-  // 为所有没有 summary 的条目自动生成总结
-  const kb = kbStore.getKB(selectedKBId.value)
-  if (kb) {
-    for (const entry of kb.entries) {
-      if (!entry.summary && entry.content) {
-        autoSummarizeEntry(selectedKBId.value, entry.id, entry.content)
-      }
+async function afterImport(result: { kbId: string; entryIds: string[]; summarize: boolean }) {
+  msg.success(`已导入 ${result.entryIds.length} 个条目`)
+  if (!result.summarize) return
+  const pending = [...result.entryIds]
+  // Limit requests when a scanned document imports hundreds of pages.
+  await Promise.all([0, 1].map(async () => {
+    while (pending.length) {
+      const id = pending.shift()!
+      const entry = kbStore.getKB(result.kbId)?.entries.find(item => item.id === id)
+      if (entry && !entry.summary) await autoSummarizeEntry(result.kbId, id, entry.content)
     }
-  }
+  }))
 }
 
 // AI 自动总结知识库条目
@@ -394,7 +360,8 @@ async function autoSummarizeEntry(kbId: string, entryId: string, content: string
     } catch {
       // 分类失败不影响摘要保存
     }
-    kbStore.updateEntry(kbId, entryId, { summary: summary.slice(0, 12000), ...(category ? { category } : {}) })
+    const current = kbStore.getKB(kbId)?.entries.find(entry => entry.id === entryId)
+    if (current?.content === content) kbStore.updateEntry(kbId, entryId, { summary: summary.slice(0, 12000), ...(category ? { category } : {}) })
   } catch {
     // 总结失败时静默处理，用户可手动重新触发
   } finally {
@@ -441,21 +408,6 @@ async function summarizeSelectedKB() {
   } finally {
     summarizingKB.value = false
   }
-}
-
-// 文件上传处理
-async function handleFileUpload(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-  uploadFileName.value = file.name
-  try {
-    importText.value = await readKnowledgeFile(file)
-    if (importText.value.trim()) msg.success(`已读取文件：${file.name}`)
-    else msg.warning('未提取到文本，扫描版 PDF 暂不支持 OCR')
-  } catch (err: any) {
-    msg.error(`文件解析失败: ${err.message}`)
-  } finally { input.value = '' }
 }
 
 // 知识库绑定

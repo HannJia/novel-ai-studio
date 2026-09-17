@@ -5,6 +5,7 @@ import { effectScope, ref } from 'vue'
 import { useAssistantChat } from './useAssistantChat'
 import { useNovelStore } from '@/stores/novel'
 import { useConfigStore } from '@/stores/config'
+import { useKnowledgeStore } from '@/stores/knowledge'
 import { chatWithOptionalSearch } from '@/services/chatSearch'
 
 vi.mock('@/services/chatSearch', () => ({ chatWithOptionalSearch: vi.fn() }))
@@ -24,6 +25,54 @@ function setup() {
 }
 
 describe('chat lifecycle and book isolation', () => {
+  it('knows software operations and reads only mounted book knowledge with updates visible next turn', async () => {
+    const { chat, first, scope, store } = setup()
+    const knowledge = useKnowledgeStore()
+    const mounted = knowledge.createKB('本书历史资料')
+    const other = knowledge.createKB('其他项目资料')
+    knowledge.addEntry(mounted.id, { title: '县学', category: '事件', content: '县学于此年重建。', summary: '', tags: [] })
+    knowledge.addEntry(other.id, { title: '无关秘密', category: '其他', content: '另一部小说的隐藏结局。', summary: '', tags: [] })
+    store.bindKnowledgeBase(first.id, mounted.id)
+    vi.mocked(chatWithOptionalSearch).mockResolvedValue({ content: '已读取本书资料。' })
+    chat.inputText.value = '这个软件如何使用知识库？县学是什么情况？'
+    await chat.sendMessage()
+    const prompt = vi.mocked(chatWithOptionalSearch).mock.calls[0][0].messages[0].content
+    expect(prompt).toContain('县学于此年重建')
+    expect(prompt).toContain('正文编辑器 / 书内对话助手')
+    expect(prompt).toContain('对话生成本身不写入数据库')
+    expect(prompt).not.toContain('隐藏结局')
+    expect(prompt).not.toContain('其他项目资料')
+    knowledge.addEntry(mounted.id, { title: '县学补充', category: '事件', content: '县学后来扩建了藏书楼。', summary: '', tags: [] })
+    chat.inputText.value = '县学后来如何？'
+    await chat.sendMessage()
+    expect(vi.mocked(chatWithOptionalSearch).mock.calls[1][0].messages[0].content).toContain('扩建了藏书楼')
+    scope.stop()
+  })
+  it('reads the current chapter only, refreshes on chapter change, and bounds long manuscripts', async () => {
+    const { first, store, scope } = setup()
+    const firstChapter = store.addChapter(first.id, { title: '第一幕', content: `开场${'甲'.repeat(7000)}结尾` })!
+    const secondChapter = store.addChapter(first.id, { title: '第二幕', content: '下一幕的未公开正文' })!
+    const currentChapterId = ref(firstChapter.id)
+    const chapterScope = effectScope()
+    const chat = chapterScope.run(() => useAssistantChat(() => first.id, () => currentChapterId.value))!
+    vi.mocked(chatWithOptionalSearch).mockResolvedValue({ content: '本章建议' })
+    chat.inputText.value = '帮我看当前正文'
+    await chat.sendMessage()
+    const firstPrompt = vi.mocked(chatWithOptionalSearch).mock.calls[0][0].messages[0].content
+    expect(firstPrompt).toContain('开场')
+    expect(firstPrompt).toContain('结尾')
+    expect(firstPrompt).toContain('中段省略')
+    expect(firstPrompt).not.toContain('下一幕的未公开正文')
+    expect(firstPrompt).not.toContain('甲'.repeat(6000))
+    currentChapterId.value = secondChapter.id
+    chat.inputText.value = '现在这一章呢？'
+    await chat.sendMessage()
+    const secondPrompt = vi.mocked(chatWithOptionalSearch).mock.calls[1][0].messages[0].content
+    expect(secondPrompt).toContain('下一幕的未公开正文')
+    expect(secondPrompt).not.toContain('第一幕')
+    chapterScope.stop()
+    scope.stop()
+  })
   it('does not show or resend raw inspiration but still uses confirmed settings', async () => {
     const { chat, first, store, scope } = setup()
     store.setInspirationHistory(first.id, [{
@@ -133,7 +182,7 @@ describe('chat lifecycle and book isolation', () => {
     config.models[0].apiKey = ''
     chat.inputText.value = '保留这个问题'
     await chat.sendMessage()
-    expect(chat.error.value).toContain('API Key')
+    expect(chat.error.value).toContain('接口密钥')
     expect(chat.inputText.value).toBe('保留这个问题')
     expect(chatWithOptionalSearch).not.toHaveBeenCalled()
     scope.stop()

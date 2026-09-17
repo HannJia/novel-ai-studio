@@ -113,13 +113,13 @@
       <section class="settings-section paper-panel security-section" :class="`security-${configStore.securityStatus.storage}`">
         <h3>密钥存储</h3>
         <p v-if="configStore.securityStatus.storage === 'encrypted'" class="section-desc">
-          API Key 已由操作系统安全存储加密后写入本机配置文件。
+          接口密钥已由操作系统安全存储加密后写入本机配置文件。
         </p>
         <p v-else-if="configStore.securityStatus.storage === 'local-development'" class="section-desc">
-          当前是本机开发环境，API Key 会保存在本机浏览器配置中，方便调试使用。不要在共享电脑或公开地址中使用此模式。
+          当前是本机开发环境，接口密钥会保存在本机浏览器配置中，方便调试使用。不要在共享电脑或公开地址中使用此模式。
         </p>
         <p v-else class="section-desc">
-          当前环境不提供系统加密。API Key 只在本次应用会话中保留，关闭应用或浏览器标签后需要重新填写，持久化配置不会写入明文密钥。
+          当前环境不提供系统加密。接口密钥只在本次应用会话中保留，关闭应用或浏览器标签后需要重新填写，持久化配置不会写入明文密钥。
         </p>
       </section>
 
@@ -128,14 +128,14 @@
         <div class="section-header">
           <div>
             <h3>向量记忆</h3>
-            <p class="section-desc section-desc-inline">连接 BGE-M3 等 OpenAI 兼容 Embedding 服务</p>
+            <p class="section-desc section-desc-inline">连接 BGE-M3 等兼容接口的文本向量服务</p>
           </div>
           <n-switch :value="embeddingForm.enabled" @update:value="handleEmbeddingEnabledChange" />
         </div>
         <div v-if="embeddingForm.enabled" class="embedding-form">
           <div class="embedding-grid">
             <div class="form-item span-2">
-              <label>Embedding API Base URL</label>
+              <label>向量服务接口地址</label>
               <n-input v-model:value="embeddingForm.baseUrl" placeholder="http://127.0.0.1:11434" />
             </div>
             <div class="form-item">
@@ -147,7 +147,7 @@
               <n-input-number v-model:value="embeddingForm.batchSize" :min="1" :max="64" />
             </div>
             <div class="form-item span-2">
-              <label>API Key（本地服务可留空）</label>
+              <label>接口密钥（本地服务可留空）</label>
               <n-input v-model:value="embeddingForm.apiKey" type="password" show-password-on="click" placeholder="可选" />
             </div>
           </div>
@@ -164,10 +164,10 @@
       <section class="settings-section paper-panel">
         <div class="section-header">
           <div>
-            <h3>写作 Skill</h3>
+            <h3>写作技能</h3>
             <p class="section-desc section-desc-inline">按任务自动注入的可复用写作规则</p>
           </div>
-          <n-button type="primary" size="small" @click="openSkillModal()">添加 Skill</n-button>
+          <n-button type="primary" size="small" @click="openSkillModal()">添加技能</n-button>
         </div>
         <div class="skill-list">
           <div v-for="skill in configStore.skills" :key="skill.id" class="skill-row">
@@ -216,7 +216,7 @@
           <p class="model-discovery-hint">仅用于区分配置，不改变实际模型。批量添加按各模型原始 ID 命名，不继承此备注。</p>
         </div>
         <div class="form-item">
-          <label>API Base URL</label>
+          <label>接口地址</label>
           <n-input
             v-model:value="modelForm.baseUrl"
             placeholder="如：https://api.deepseek.com"
@@ -224,15 +224,15 @@
           />
         </div>
         <div class="form-item">
-          <label>API Key</label>
+          <label>接口密钥</label>
           <n-input
             v-model:value="modelForm.apiKey"
             type="password"
             show-password-on="click"
-            :placeholder="editingModel ? '留空则保留当前 API Key' : 'sk-...'"
+            :placeholder="editingModel ? '留空则保留当前接口密钥' : '填写服务商提供的接口密钥'"
             @update:value="handleModelSourceChange"
           />
-          <p v-if="editingModel" class="model-discovery-hint">编辑模型时留空不会清除当前 API Key；只有输入新 Key 才会替换。</p>
+          <p v-if="editingModel" class="model-discovery-hint">编辑模型时留空不会清除当前接口密钥；只有输入新密钥才会替换。</p>
         </div>
         <div class="form-item">
           <label>模型名称（原始 ID）</label>
@@ -285,20 +285,20 @@
         <div class="form-item">
           <label>对话联网协议</label>
           <n-select v-model:value="modelForm.chatSearchProtocol" :options="chatSearchProtocolOptions" />
-          <p class="model-discovery-hint">在灵感对话或右下角对话窗口开启“联网”时使用。API Key 和模型列表不代表搜索权限；中转接口需支持所选协议。</p>
+          <p class="model-discovery-hint">在灵感对话或右下角对话窗口开启“联网”时使用。接口密钥和模型列表不代表搜索权限；中转接口需支持所选协议。</p>
           <ModelSearchTest v-if="showAddModel" :model="searchTestModel" />
         </div>
         <div class="form-row">
           <div class="form-item">
-            <label>Temperature</label>
+            <label>随机程度</label>
             <n-input-number v-model:value="modelForm.temperature" :min="0" :max="2" :step="0.1" />
           </div>
           <div class="form-item">
-            <label>Top P</label>
+            <label>采样范围</label>
             <n-input-number v-model:value="modelForm.topP" :min="0" :max="1" :step="0.1" />
           </div>
           <div class="form-item">
-            <label>Max Tokens</label>
+            <label>最大输出词元数</label>
             <n-input-number v-model:value="modelForm.maxTokens" :min="256" :max="128000" :step="256" />
           </div>
         </div>
@@ -325,7 +325,7 @@
       </template>
     </n-modal>
 
-    <n-modal v-model:show="showSkillModal" preset="card" :title="editingSkill ? '编辑 Skill' : '添加 Skill'" style="width: min(620px, calc(100vw - 32px));">
+    <n-modal v-model:show="showSkillModal" preset="card" :title="editingSkill ? '编辑技能' : '添加技能'" style="width: min(620px, calc(100vw - 32px));">
       <div class="model-form">
         <div class="form-item">
           <label>名称</label>
@@ -337,7 +337,7 @@
         </div>
         <div class="form-item">
           <label>简要说明</label>
-          <n-input v-model:value="skillForm.description" placeholder="说明这个 Skill 解决什么问题" />
+          <n-input v-model:value="skillForm.description" placeholder="说明这个技能解决什么问题" />
         </div>
         <div class="form-item">
           <label>执行规则</label>
@@ -527,7 +527,7 @@ async function fetchAvailableModels() {
     message.success(`已获取 ${models.length} 个可用模型，请选择模型名称`)
   } catch (error: unknown) {
     if (controller.signal.aborted) return
-    modelDiscoveryError.value = error instanceof Error ? error.message : '获取模型失败，请检查接口地址和 API Key'
+    modelDiscoveryError.value = error instanceof Error ? error.message : '获取模型失败，请检查接口地址和接口密钥'
   } finally {
     if (modelDiscoveryController === controller) {
       modelDiscoveryController = null
@@ -706,7 +706,7 @@ async function handleTestEmbedding() {
     const result = await testEmbeddingConnection({ ...embeddingForm, enabled: true })
     message.success(`连接成功：${result.dimensions} 维，${result.latency} ms`)
   } catch (error) {
-    message.error(error instanceof Error ? error.message : 'Embedding 连接失败')
+    message.error(error instanceof Error ? error.message : '向量服务连接失败')
   } finally {
     testingEmbedding.value = false
   }
@@ -737,18 +737,18 @@ function saveSkill() {
   if (editingSkill.value) configStore.updateSkill(editingSkill.value, data)
   else configStore.addSkill(data)
   showSkillModal.value = false
-  message.success('Skill 已保存')
+  message.success('技能已保存')
 }
 
 function handleDeleteSkill(id: string) {
   dialog.warning({
-    title: '删除 Skill',
-    content: '确定删除这个自定义 Skill？',
+    title: '删除技能',
+    content: '确定删除这个自定义技能？',
     positiveText: '删除',
     negativeText: '取消',
     onPositiveClick: () => {
       configStore.deleteSkill(id)
-      message.success('Skill 已删除')
+      message.success('技能已删除')
     },
   })
 }

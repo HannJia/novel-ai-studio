@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useNovelStore } from '@/stores/novel'
+import { useKnowledgeStore } from '@/stores/knowledge'
 import { callAI } from './ai'
 import { chatInspiration, extractInspirationSettings, parseInspirationSettings } from './inspiration'
 import type { ModelConfig } from '@/stores/config'
@@ -18,6 +19,26 @@ beforeEach(() => { setActivePinia(createPinia()); vi.clearAllMocks() })
 afterEach(() => vi.unstubAllGlobals())
 
 describe('inspiration settings', () => {
+  it('reads current software knowledge without web search, respects selection, and sees new entries next turn', async () => {
+    const store = useKnowledgeStore()
+    const kb = store.createKB('舞阳县志')
+    const entry = store.addEntry(kb.id, { title: '地方事件', content: '舞阳县在该年举行集市。', category: '事件', summary: '', tags: [] })!
+    vi.mocked(callAI).mockResolvedValue({ content: '已参考资料。' })
+    const ask = (ids?: string[]) => chatInspiration(model, [{ role: 'user', content: '你可以看舞阳县的知识库吗？' }], new AbortController().signal, () => {}, false, ids)
+    await ask()
+    let prompt = vi.mocked(callAI).mock.calls.slice(-1)[0][0].messages[0].content
+    expect(prompt).toContain('舞阳县在该年举行集市')
+    expect(prompt).toContain('创建新书的灵感对话')
+    store.updateEntry(kb.id, entry.id, { content: '舞阳县在该年恢复县学。' })
+    await ask([kb.id])
+    prompt = vi.mocked(callAI).mock.calls.slice(-1)[0][0].messages[0].content
+    expect(prompt).toContain('恢复县学')
+    expect(prompt).not.toContain('举行集市')
+    await ask([])
+    prompt = vi.mocked(callAI).mock.calls.slice(-1)[0][0].messages[0].content
+    expect(prompt).toContain('没有读取任何知识库正文')
+    expect(prompt).not.toContain('恢复县学')
+  })
   it('normalizes labels, retains known fields and never mutates the confirmation form', () => {
     const form = base()
     const result = parseInspirationSettings(JSON.stringify({

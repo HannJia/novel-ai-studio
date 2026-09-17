@@ -11,8 +11,18 @@
         clearable
         placeholder="历史会话（最近 5 条）"
         aria-label="历史灵感会话"
+        :disabled="busy"
         @update:value="loadSession"
       />
+    </div>
+    <div class="inspiration-knowledge-toolbar">
+      <label for="inspiration-knowledge">参考知识库</label>
+      <n-select id="inspiration-knowledge" v-model:value="knowledgeIds" multiple clearable
+        :options="knowledgeOptions" :max-tag-count="1" :disabled="busy" placeholder="不读取知识库"
+        aria-label="灵感参考知识库" />
+      <n-button size="small" :disabled="busy" @click="openKnowledgeDraft('')">
+        <template #icon><n-icon><add-outline /></n-icon></template>新建知识条目
+      </n-button>
     </div>
     <aside v-if="latestPrompt" class="inspiration-sticky-prompt" aria-label="本轮问题">
       <div class="inspiration-sticky-header">
@@ -31,6 +41,10 @@
         <strong>{{ item.role === 'user' ? '我' : 'AI' }}</strong>
         <div v-html="renderMd(item.role === 'assistant' ? formatChatReply(item.content, item.search) : item.content)"></div>
         <ChatSearchEvidence :record="item.search" />
+        <n-button v-if="item.role === 'assistant'" size="tiny" quaternary :disabled="busy"
+          @click="openKnowledgeDraft(item.content, item.search)">
+          <template #icon><n-icon><save-outline /></n-icon></template>存入知识库
+        </n-button>
       </article>
       <article v-if="streamText" data-streaming-assistant class="inspiration-message assistant">
         <strong>AI</strong><div v-html="renderMd(streamText)"></div>
@@ -44,7 +58,7 @@
         placeholder="我想写一个怎样的故事？" aria-label="小说灵感"
         @keydown="handleInputKeydown" @compositionstart="composing = true"
         @compositionend="composing = false" @blur="composing = false" />
-      <p class="inspiration-input-hint">Enter 发送 · Shift+Enter 换行</p>
+      <p class="inspiration-input-hint">回车发送 · 上档键＋回车换行</p>
       <div v-if="error" role="alert" class="inspiration-error">{{ error }}</div>
       <div class="inspiration-actions">
         <n-button v-if="busy" @click="stop"><template #icon><n-icon><stop-outline /></n-icon></template>停止</n-button>
@@ -57,19 +71,25 @@
         </n-button>
       </div>
     </div>
+    <SaveChatKnowledge :key="selectedSessionId || 'new'" v-model:show="showKnowledgeDraft" :content="knowledgeDraft" :preferred-ids="knowledgeIds"
+      @saved="knowledgeSaved" />
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { NButton, NIcon, NInput, NSelect } from 'naive-ui'
-import { CheckmarkOutline, SendOutline, StopOutline } from '@vicons/ionicons5'
+import { AddOutline, CheckmarkOutline, SaveOutline, SendOutline, StopOutline } from '@vicons/ionicons5'
 import { useConfigStore } from '@/stores/config'
+import { useKnowledgeStore } from '@/stores/knowledge'
 import { chatInspiration, extractInspirationSettings, type InspirationMessage } from '@/services/inspiration'
 import type { CreateWizardForm } from '@/types/novel'
 import { renderMd } from '@/utils/markdown'
 import { formatChatReply } from '@/utils/chatPresentation'
 import ChatSearchEvidence from '@/components/ChatSearchEvidence.vue'
+import SaveChatKnowledge from '@/components/SaveChatKnowledge.vue'
+import { knowledgeDraftWithSources } from '@/services/softwareAssistantContext'
+import type { ChatSearchRecord } from '@/types/chat'
 
 const props = defineProps<{ form: CreateWizardForm; active: boolean }>()
 const emit = defineEmits<{
@@ -77,17 +97,30 @@ const emit = defineEmits<{
   'history-change': [history: InspirationMessage[]]
 }>()
 const config = useConfigStore()
+const knowledge = useKnowledgeStore()
 const history = ref<InspirationMessage[]>([])
 type InspirationSession = {
   id: string
   title: string
   updatedAt: string
   messages: InspirationMessage[]
+  knowledgeIds?: string[] | null
 }
 const savedSessions = ref<InspirationSession[]>([])
 const selectedSessionId = ref<string | null>(null)
 const historyElement = ref<HTMLElement | null>(null)
 const input = ref('')
+const selectedKnowledgeIds = ref<string[] | null>(null)
+const knowledgeIds = computed<string[]>({
+  get: () => selectedKnowledgeIds.value === null ? knowledge.knowledgeBases.map(base => base.id)
+    : selectedKnowledgeIds.value.filter(id => knowledge.getKB(id)),
+  set: ids => { selectedKnowledgeIds.value = ids || []; persistCurrentHistory() },
+})
+const knowledgeOptions = computed(() => knowledge.knowledgeBases.map(base => ({
+  label: `${base.name}（${base.entries.length} 条）`, value: base.id,
+})))
+const showKnowledgeDraft = ref(false)
+const knowledgeDraft = ref('')
 const composing = ref(false)
 const streamText = ref('')
 const error = ref('')
@@ -156,6 +189,8 @@ savedSessions.value = readSavedSessions()
 if (savedSessions.value[0]) {
   selectedSessionId.value = savedSessions.value[0].id
   history.value = cloneHistory(savedSessions.value[0].messages)
+  selectedKnowledgeIds.value = Array.isArray(savedSessions.value[0].knowledgeIds)
+    ? savedSessions.value[0].knowledgeIds!.filter(id => typeof id === 'string') : null
 }
 
 function persistCurrentHistory() {
@@ -167,6 +202,7 @@ function persistCurrentHistory() {
     title: sessionTitle(history.value),
     updatedAt: new Date().toISOString(),
     messages: cloneHistory(history.value),
+    knowledgeIds: selectedKnowledgeIds.value === null ? null : [...selectedKnowledgeIds.value],
   }
   savedSessions.value = [next, ...savedSessions.value.filter(session => session.id !== id)]
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
@@ -175,22 +211,39 @@ function persistCurrentHistory() {
 }
 
 function loadSession(id: string | null) {
+  stop()
+  showKnowledgeDraft.value = false
   if (!id) {
     selectedSessionId.value = null
     history.value = []
     input.value = ''
     error.value = ''
+    selectedKnowledgeIds.value = null
     return
   }
   const session = savedSessions.value.find(item => item.id === id)
   if (!session) return
   selectedSessionId.value = session.id
   history.value = cloneHistory(session.messages)
+  selectedKnowledgeIds.value = Array.isArray(session.knowledgeIds) ? session.knowledgeIds.filter(id => typeof id === 'string') : null
   input.value = ''
   error.value = ''
   void nextTick(() => {
     if (historyElement.value) historyElement.value.scrollTop = historyElement.value.scrollHeight
   })
+}
+
+function openKnowledgeDraft(content: string, search?: ChatSearchRecord) {
+  knowledgeDraft.value = knowledgeDraftWithSources(content, search)
+  showKnowledgeDraft.value = true
+}
+
+function knowledgeSaved(result: { kbId: string; kbName: string; title: string }) {
+  if (selectedKnowledgeIds.value && !selectedKnowledgeIds.value.includes(result.kbId)) {
+    selectedKnowledgeIds.value = [...selectedKnowledgeIds.value, result.kbId]
+  }
+  history.value.push({ role: 'assistant', content: `【软件保存回执】已保存到知识库“${result.kbName}”，条目“${result.title}”。` })
+  persistCurrentHistory()
 }
 
 function scrollMessageToStart(target: HTMLElement | null) {
@@ -242,7 +295,7 @@ function send() {
 async function respond() {
   if (busy.value) return
   const model = config.getModelForTask('chat')
-  if (!model?.apiKey.trim()) { error.value = '请先在设置中配置对话 / 联网模型（默认跟随大纲模型）及有效 API Key，再重试回复'; return }
+  if (!model?.apiKey.trim()) { error.value = '请先在设置中配置对话 / 联网模型（默认跟随大纲模型）及有效接口密钥，再重试回复'; return }
   const request = new AbortController()
   controller = request
   busy.value = true
@@ -262,7 +315,7 @@ async function respond() {
           void scrollToReplyStart(request, replyIndex)
         }
       }
-    }, requestWebSearch.value)
+    }, requestWebSearch.value, [...knowledgeIds.value])
     if (controller === request && !request.signal.aborted && props.active) {
       history.value.push({ role: 'assistant', ...result })
       persistCurrentHistory()
@@ -294,7 +347,7 @@ async function extract() {
     if (controller === request) stop()
   }
 }
-watch(() => props.active, active => { if (!active) stop() })
+watch(() => props.active, active => { if (!active) { stop(); showKnowledgeDraft.value = false } })
 watch(history, value => emit('history-change', cloneHistory(value)), { deep: true, immediate: true })
 onBeforeUnmount(stop)
 </script>
@@ -303,6 +356,9 @@ onBeforeUnmount(stop)
 .inspiration-chat { display: flex; flex-direction: column; flex: 1; min-height: 0; max-width: 960px; width: 100%; margin: 0 auto; }
 .inspiration-search-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 0; flex-shrink: 0; color: var(--text-color-tertiary); font-size: 12px; }
 .inspiration-session-select { margin-left: auto; width: min(300px, 100%); }
+.inspiration-knowledge-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-bottom: 8px; flex-shrink: 0; }
+.inspiration-knowledge-toolbar label { font-size: 12px; color: var(--text-color-secondary); }
+.inspiration-knowledge-toolbar :deep(.n-select) { flex: 1 1 220px; min-width: 0; }
 .inspiration-search-toggle { cursor: pointer; flex-shrink: 0; border: 1px solid var(--border-color); border-radius: 12px; padding: 4px 10px; background: var(--bg-color); color: var(--text-color-secondary); }
 .inspiration-search-toggle.enabled { color: var(--color-primary); border-color: var(--color-primary); background: var(--color-primary-light); }
 .inspiration-progress { color: var(--text-color-tertiary); font-size: 12px; line-height: 1.6; }

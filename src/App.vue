@@ -1,5 +1,5 @@
 <template>
-  <n-config-provider class="app-provider" :theme="isDark ? darkTheme : undefined" :theme-overrides="themeStore.themeOverrides">
+  <n-config-provider class="app-provider" :locale="zhCN" :date-locale="dateZhCN" :theme="isDark ? darkTheme : undefined" :theme-overrides="themeStore.themeOverrides">
     <n-message-provider>
       <n-dialog-provider>
         <div class="app-shell" :inert="projectTransferBusy || appUpdateInstalling">
@@ -25,7 +25,7 @@
 
 <script setup lang="ts">
 import { onMounted } from 'vue'
-import { NConfigProvider, NMessageProvider, NDialogProvider, darkTheme } from 'naive-ui'
+import { NConfigProvider, NMessageProvider, NDialogProvider, darkTheme, zhCN, dateZhCN } from 'naive-ui'
 import AppHeader from '@/components/AppHeader.vue'
 import SaveStatusBar from '@/components/SaveStatusBar.vue'
 import AppUpdateNotice from '@/components/AppUpdateNotice.vue'
