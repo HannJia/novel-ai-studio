@@ -1,5 +1,5 @@
 import { createAiTaskRecord, markInterruptedTasksFailed, updateAiTaskRecord } from '@/services/db/aiTasks'
-import { appUpdateInstalling } from './appLifecycle'
+import { appUpdateInstalling, cloudApplyBusy } from './appLifecycle'
 
 type AiTaskStatus = 'idle' | 'pending' | 'running' | 'completed' | 'failed'
 
@@ -21,6 +21,7 @@ export class AiTaskQueue {
   constructor(private readonly concurrency = 1) {}
 
   enqueue(name: string, task: QueueTask, groupName = ''): void {
+    if (cloudApplyBusy.value) throw new Error('正在合并云端内容，请稍后重试。')
     if (appUpdateInstalling.value) throw new Error('正在准备安装更新，暂时不能启动后台任务。')
     const taskRecord = createAiTaskRecord(name, groupName).catch(err => {
       console.warn('AI task record create failed', err)

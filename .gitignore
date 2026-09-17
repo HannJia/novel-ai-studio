@@ -16,6 +16,11 @@ release/
 *.db.bak
 *.sqlite
 *.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
 *.pfx
 *.p12
 novel-writer-config.json
+novel-writer-cloud-session
+__pycache__/
+.pytest_cache/

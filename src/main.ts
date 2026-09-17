@@ -7,8 +7,9 @@ import { useConfigStore } from './stores/config'
 import { useKnowledgeStore } from './stores/knowledge'
 import { initializeAiTaskHistory } from './services/aiTaskQueue'
 import { showRecoveryScreen } from './services/recoveryScreen'
-import { flushEditorDrafts } from './services/appLifecycle'
+import { cloudApplyBusy, flushEditorDrafts } from './services/appLifecycle'
 import { prepareUpdateInstall } from './services/updateSafety'
+import { useCloudSyncStore } from './stores/cloudSync'
 
 // 全局样式
 import './styles/variables.css'
@@ -22,6 +23,7 @@ async function bootstrap() {
   }
 
   const pinia = createPinia()
+  router.beforeEach(() => !cloudApplyBusy.value)
   app.use(pinia)
   app.use(router)
 
@@ -43,6 +45,7 @@ async function bootstrap() {
         knowledgeStore.flushPendingSaves(),
         configStore.saveConfig(),
       ])
+      await useCloudSyncStore().flushBeforeClose()
     })
     window.electronAPI?.onBeforeUpdate?.(prepareUpdateInstall)
   } catch (err) {
@@ -55,6 +58,8 @@ async function bootstrap() {
   }
 
   app.mount('#app')
+  void useCloudSyncStore().initialize()
+  router.afterEach(() => useCloudSyncStore().schedule())
 }
 
 bootstrap()

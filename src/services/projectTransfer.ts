@@ -5,11 +5,12 @@ import { chapterBackgroundQueue } from './aiTaskQueue'
 import { replaceProjectInDb } from './db/project'
 import { createProjectBackup, parseProjectBackup, type ProjectBackup } from './projectBackup'
 import { loadProjectChapterRevisions } from './db/chapterRevisions'
-import { appUpdateInstalling } from './appLifecycle'
+import { appUpdateInstalling, cloudApplyBusy } from './appLifecycle'
 
 export const projectTransferBusy = ref(false)
 
 export async function importProject(backup: ProjectBackup): Promise<void> {
+  if (cloudApplyBusy.value) throw new Error('正在合并云端内容，请稍后重试。')
   if (appUpdateInstalling.value) throw new Error('正在准备安装更新，暂时不能导入项目。')
   if (projectTransferBusy.value) throw new Error('项目导入正在进行')
   if (chapterBackgroundQueue.pendingCount) throw new Error('请等待章节后台任务结束后再导入项目')

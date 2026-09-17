@@ -1,0 +1,31 @@
+[Unit]
+Description=AI Novel Writer private sync
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/srv/novel-data
+ConditionPathIsMountPoint=/srv/novel-data
+
+[Service]
+Type=simple
+User=novel-sync
+Group=novel-sync
+WorkingDirectory=/opt/novel-sync/app
+Environment=SYNC_DATA_DIR=/srv/novel-data/cloud
+Environment=SYNC_GLOBAL_QUOTA=4294967296
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/novel-sync/venv/bin/uvicorn server.app:create_app --factory --host 127.0.0.1 --port 8787 --workers 1 --limit-concurrency 8 --timeout-keep-alive 5 --no-proxy-headers --no-access-log
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/novel-data/cloud
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+MemoryMax=2G
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

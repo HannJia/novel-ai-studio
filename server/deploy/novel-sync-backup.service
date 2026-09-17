@@ -1,0 +1,13 @@
+[Unit]
+Description=Consistent compressed novel sync backup
+RequiresMountsFor=/srv/novel-data
+ConditionPathIsMountPoint=/srv/novel-data
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/novel-sync/app
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/novel-sync/venv/bin/python -m server.manage --data-dir /srv/novel-data/cloud backup --directory /var/backups/novel-sync
+UMask=0077
+Nice=10
+IOSchedulingClass=idle

@@ -1,5 +1,5 @@
 import { computed, reactive, ref } from 'vue'
-import { appUpdateInstalling } from './appLifecycle'
+import { appUpdateInstalling, cloudApplyBusy } from './appLifecycle'
 
 export type AiActivityStatus = 'running' | 'completed' | 'failed'
 
@@ -34,6 +34,7 @@ function trimActivities() {
 }
 
 export function startAiActivity(name: string, parentId?: string): AiActivity {
+  if (cloudApplyBusy.value) throw new Error('正在合并云端内容，请稍后重试。')
   if (appUpdateInstalling.value) throw new Error('正在保存并准备安装更新，暂时不能启动 AI 任务。')
   const activity: AiActivity = {
     id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,

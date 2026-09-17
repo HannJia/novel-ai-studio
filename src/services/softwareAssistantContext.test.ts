@@ -20,6 +20,10 @@ describe('software-aware knowledge context', () => {
       expect(context).toContain('对话生成本身不写入数据库')
       expect(context).toContain('关闭联网仍可读取已提供资料')
       expect(context).toContain('不是脱离软件的通用聊天窗口')
+      expect(context).toContain('设置 → 云同步')
+      expect(context).toContain('模型 API Key 不同步')
+      expect(context).toContain('不得声称已经上传或同步成功')
+      expect(context).not.toContain('尚未接入 Exa 搜索或云端同步')
     }
   })
 

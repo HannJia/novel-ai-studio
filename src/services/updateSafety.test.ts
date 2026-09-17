@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { prepareUpdateInstall } from './updateSafety'
-import { appUpdateInstalling, registerDraftSaver } from './appLifecycle'
+import { appUpdateInstalling, cloudApplyBusy, registerDraftSaver } from './appLifecycle'
 import { activeAiCount, acknowledgeAiActivity, startAiActivity, finishAiActivity } from './aiActivity'
 import { projectTransferBusy } from './projectTransfer'
 
@@ -18,8 +18,9 @@ beforeEach(() => {
   mocks.config.mockResolvedValue(undefined)
   appUpdateInstalling.value = false
   projectTransferBusy.value = false
+  cloudApplyBusy.value = false
 })
-afterEach(() => { appUpdateInstalling.value = false })
+afterEach(() => { appUpdateInstalling.value = false; cloudApplyBusy.value = false })
 
 describe('saving safely before updating', () => {
   it('saves live editor drafts before flushing stores and prevents new AI work during installation', async () => {
@@ -45,12 +46,16 @@ describe('saving safely before updating', () => {
     } finally { finishAiActivity(task) }
     expect(activeAiCount.value).toBe(0)
   })
-  it('blocks background queues and project imports', async () => {
+  it('blocks background queues, project imports and cloud application', async () => {
     mocks.queue.pendingCount = 1
     await expect(prepareUpdateInstall()).rejects.toThrow('AI 任务')
     mocks.queue.pendingCount = 0
     projectTransferBusy.value = true
     await expect(prepareUpdateInstall()).rejects.toThrow('导入')
+    projectTransferBusy.value = false
+    cloudApplyBusy.value = true
+    await expect(prepareUpdateInstall()).rejects.toThrow('云端内容正在合并')
+    expect(() => startAiActivity('writing during cloud application')).toThrow('合并云端')
   })
   it('unfreezes the app on an editor save failure without flushing stale store data', async () => {
     const unregister = registerDraftSaver(async () => { throw new Error('未保存正文') })

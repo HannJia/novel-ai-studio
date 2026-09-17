@@ -9,6 +9,7 @@
     </div>
 
     <div class="settings-content">
+      <CloudSyncPanel />
       <!-- 模型配置 -->
       <section class="settings-section paper-panel">
         <div class="section-header">
@@ -355,6 +356,7 @@
 </template>
 
 <script setup lang="ts">
+import CloudSyncPanel from '@/components/CloudSyncPanel.vue'
 import AppUpdatePanel from '@/components/AppUpdatePanel.vue'
 import ModelSearchTest from '@/components/ModelSearchTest.vue'
 import { ref, computed, reactive } from 'vue'

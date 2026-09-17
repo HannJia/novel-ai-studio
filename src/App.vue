@@ -2,7 +2,7 @@
   <n-config-provider class="app-provider" :locale="zhCN" :date-locale="dateZhCN" :theme="isDark ? darkTheme : undefined" :theme-overrides="themeStore.themeOverrides">
     <n-message-provider>
       <n-dialog-provider>
-        <div class="app-shell" :inert="projectTransferBusy || appUpdateInstalling">
+        <div class="app-shell" :inert="projectTransferBusy || appUpdateInstalling || cloudApplyBusy">
           <AppHeader />
           <SaveStatusBar />
           <AppUpdateNotice />
@@ -18,6 +18,7 @@
         </div>
         <div v-if="projectTransferBusy" class="project-transfer-overlay" role="status">正在安全导入项目，请勿关闭软件…</div>
         <div v-if="appUpdateInstalling" class="project-transfer-overlay" role="status">正在保存并准备安装更新，请勿关闭软件…</div>
+        <div v-if="cloudApplyBusy" class="project-transfer-overlay" role="status">正在安全合并云端内容，请勿关闭软件…</div>
       </n-dialog-provider>
     </n-message-provider>
   </n-config-provider>
@@ -29,7 +30,7 @@ import { NConfigProvider, NMessageProvider, NDialogProvider, darkTheme, zhCN, da
 import AppHeader from '@/components/AppHeader.vue'
 import SaveStatusBar from '@/components/SaveStatusBar.vue'
 import AppUpdateNotice from '@/components/AppUpdateNotice.vue'
-import { appUpdateInstalling } from '@/services/appLifecycle'
+import { appUpdateInstalling, cloudApplyBusy } from '@/services/appLifecycle'
 import { projectTransferBusy } from '@/services/projectTransfer'
 import { useThemeStore } from '@/stores/theme'
 

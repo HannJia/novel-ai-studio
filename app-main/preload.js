@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   configEncrypt: (value) => ipcRenderer.invoke('config:encrypt', value),
   configDecrypt: (value) => ipcRenderer.invoke('config:decrypt', value),
   configSecurityStatus: () => ipcRenderer.invoke('config:security-status'),
+  cloudSessionRead: () => ipcRenderer.invoke('cloud-session:read'),
+  cloudSessionWrite: (value) => ipcRenderer.invoke('cloud-session:write', value),
   updateGetState: () => ipcRenderer.invoke('update:state'),
   updateCheck: () => ipcRenderer.invoke('update:check'),
   updateDownload: () => ipcRenderer.invoke('update:download'),

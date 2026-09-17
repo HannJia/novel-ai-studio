@@ -1,0 +1,8 @@
+[Unit]
+Description=Renew the short-lived novel sync IP certificate
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/novel-certbot/bin/certbot renew --quiet --deploy-hook "systemctl reload nginx"

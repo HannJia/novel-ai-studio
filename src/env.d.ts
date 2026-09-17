@@ -7,6 +7,8 @@ declare module '*.vue' {
 }
 
 interface ElectronAPI {
+  cloudSessionRead: () => Promise<import('./services/cloudSyncModel').CloudSession | null>
+  cloudSessionWrite: (value: import('./services/cloudSyncModel').CloudSession | null) => Promise<void>
   getVersion: () => string
   dbRead: () => Promise<ArrayBuffer | null>
   dbReadBackup: () => Promise<ArrayBuffer | null>

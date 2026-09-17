@@ -6,6 +6,7 @@ const { fileURLToPath } = require('url')
 const { writeAtomicFile, preserveRecoveryFiles } = require('./durableFiles.cjs')
 const { createUpdateController, LATEST_API } = require('./updater.cjs')
 const { createUpdateHandshake } = require('./updateHandshake.cjs')
+const { createCloudSessionStorage } = require('./cloudSession.cjs')
 
 // 开发模式下的 Vite 服务器地址
 const VITE_DEV_SERVER_URL = 'http://localhost:5173'
@@ -167,7 +168,7 @@ function createWindow() {
         ok: false,
         error: '保存响应超时。',
       })
-    }, 10_000)
+    }, 30_000)
   })
   mainWindow.webContents.on('did-finish-load', () => getUpdates().start())
 
@@ -183,12 +184,24 @@ function createWindow() {
       try {
         const result = await mainWindow.webContents.executeJavaScript(`(async () => {
           await new Promise(resolve => setTimeout(resolve, 300));
+          const cloudEmpty = await window.electronAPI.cloudSessionRead();
+          const testSession = { endpoint: 'https://154.94.227.164', token: 'smoke-session-token-not-a-real-account-1234567890',
+            expiresAt: Date.now() + 60000, user: { id: 'smoke', username: 'smoke', role: 'user', quotaBytes: 1, usedBytes: 0 } };
+          await window.electronAPI.cloudSessionWrite(testSession);
+          const cloudRestored = await window.electronAPI.cloudSessionRead();
+          await window.electronAPI.cloudSessionWrite(null);
+          const cloudHealth = ${process.env.AI_NOVEL_WRITER_SMOKE_CLOUD === '1'
+            ? "(await (await fetch('https://154.94.227.164/v1/health', { headers: { Authorization: 'Bearer smoke-no-account' }, signal: AbortSignal.timeout(15000) })).json()).protocol === 1"
+            : 'null'};
           return {
             rendered: Boolean(document.querySelector('#app')?.children.length),
             bridgeAvailable: typeof window.electronAPI?.configSecurityStatus === 'function',
             nodeIsolated: typeof window.require === 'undefined' && typeof window.process === 'undefined',
             security: await window.electronAPI?.configSecurityStatus?.(),
             update: await window.electronAPI?.updateGetState?.(),
+            cloudSession: cloudEmpty === null && cloudRestored?.token === testSession.token
+              && await window.electronAPI.cloudSessionRead() === null,
+            cloudHealth,
           };
         })()`)
         result.appVersion = app.getVersion()
@@ -371,6 +384,15 @@ ipcMain.handle('config:security-status', async (event) => {
   assertMainWindowSender(event)
   return { encryptionAvailable: safeStorage.isEncryptionAvailable() }
 })
+
+for (const method of ['read', 'write']) {
+  ipcMain.handle(`cloud-session:${method}`, (event, value) => {
+    assertUpdateSender(event)
+    ensureUserDataDir()
+    const storage = createCloudSessionStorage(path.join(app.getPath('userData'), 'novel-writer-cloud-session'), safeStorage)
+    return method === 'read' ? storage.read() : storage.write(value)
+  })
+}
 
 if (hasInstanceLock) app.whenReady().then(createWindow)
 

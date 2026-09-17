@@ -13,6 +13,11 @@
       </nav>
     </div>
     <div class="header-right">
+      <button class="header-icon-btn cloud-header-btn" :title="cloud.statusText" :aria-label="cloud.statusText" @click="openCloud">
+        <n-icon :size="20"><cloud-outline /></n-icon>
+        <span class="cloud-header-label">{{ cloud.session ? cloud.statusText : '云同步' }}</span>
+        <span v-if="cloud.pendingConflicts.length || cloud.error" class="cloud-header-dot" />
+      </button>
       <!-- 主题切换 -->
       <div class="theme-switcher" id="theme-switcher">
         <button
@@ -37,11 +42,16 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
 import { NIcon } from 'naive-ui'
-import { SettingsOutline } from '@vicons/ionicons5'
+import { SettingsOutline, CloudOutline } from '@vicons/ionicons5'
+import { useCloudSyncStore } from '@/stores/cloudSync'
 import { useThemeStore, themeOptions } from '@/stores/theme'
 
 const router = useRouter()
 const themeStore = useThemeStore()
+const cloud = useCloudSyncStore()
+function openCloud() {
+  router.push({ path: '/settings', query: { returnTo: router.currentRoute.value.path === '/settings' ? '/' : router.currentRoute.value.fullPath } })
+}
 
 function goHome() {
   router.push('/')
@@ -56,6 +66,10 @@ function goSettings() {
 </script>
 
 <style scoped>
+.header-icon-btn.cloud-header-btn { position:relative; display:flex; align-items:center; gap:6px; width:144px; min-width:32px; padding:0 8px; }
+.cloud-header-label { font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.cloud-header-dot { position:absolute; right:3px; top:3px; width:6px; height:6px; border-radius:50%; background:var(--color-error); }
+@media (max-width:850px) { .cloud-header-label { display:none; } .header-icon-btn.cloud-header-btn { width:32px; } }
 .app-header {
   display: flex;
   align-items: center;
@@ -108,7 +122,8 @@ function goSettings() {
   font-size: 16px;
   font-weight: 700;
   color: var(--color-primary);
-  letter-spacing: 0.5px;
+  letter-spacing: 0;
+  white-space: nowrap;
 }
 
 .header-nav {
@@ -198,5 +213,12 @@ function goSettings() {
 .header-icon-btn:hover {
   color: var(--text-color-primary);
   background: var(--bg-color-hover);
+}
+@media (max-width:600px) {
+  .app-header { padding:0 10px; }
+  .header-nav { display:none; }
+  .header-left,.header-right { gap:6px; }
+  .app-logo { padding:4px; }
+  .header-icon-btn { flex-shrink:0; }
 }
 </style>

@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 
 export const appUpdateInstalling = ref(false)
+export const cloudApplyBusy = ref(false)
 const draftSavers = new Set<() => Promise<void>>()
 
 export function registerDraftSaver(save: () => Promise<void>): () => void {

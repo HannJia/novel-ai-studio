@@ -72,7 +72,7 @@ async function main() {
     const match = output.match(/ELECTRON_SMOKE_RESULT (\{[^\n]+\})/)
     if (exitCode !== 0 || !match) throw new Error(`Electron 冒烟测试失败（退出码 ${exitCode}）\n${output}`)
     const result = JSON.parse(match[1])
-    if (!result.rendered || !result.bridgeAvailable || !result.nodeIsolated) {
+    if (!result.rendered || !result.bridgeAvailable || !result.nodeIsolated || !result.cloudSession) {
       throw new Error(`Electron 安全检查未通过：${JSON.stringify(result)}`)
     }
     if (result.appVersion !== expectedVersion) {
@@ -80,6 +80,9 @@ async function main() {
     }
     if (result.update?.currentVersion !== expectedVersion || result.update?.supported !== false) {
       throw new Error('更新桥接或冒烟测试的安装隔离未通过')
+    }
+    if (process.env.AI_NOVEL_WRITER_SMOKE_CLOUD === '1' && result.cloudHealth !== true) {
+      throw new Error('安装版 HTTPS 云同步连接检查未通过')
     }
     console.log(`Electron smoke passed: ${JSON.stringify(result)}`)
   } finally {

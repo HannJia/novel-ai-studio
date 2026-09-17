@@ -171,6 +171,13 @@ export async function retainProjectRestorePoint(serialized: string): Promise<voi
 function initializeSchema(database: Database) {
   const versionBefore = database.exec('PRAGMA schema_version')[0]?.values[0][0]
   const schema = `
+    CREATE TABLE IF NOT EXISTS cloud_sync_state (
+      id TEXT PRIMARY KEY, value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS cloud_sync_conflicts (
+      id TEXT PRIMARY KEY, value TEXT NOT NULL, created_at TEXT NOT NULL
+    );
+
     -- 小说主表
     CREATE TABLE IF NOT EXISTS novels (
       id TEXT PRIMARY KEY,
