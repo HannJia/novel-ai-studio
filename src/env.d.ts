@@ -7,6 +7,7 @@ declare module '*.vue' {
 }
 
 interface ElectronAPI {
+  updateWake?: () => Promise<import('./types/update').AppUpdateState>
   cloudSessionRead: () => Promise<import('./services/cloudSyncModel').CloudSession | null>
   cloudSessionWrite: (value: import('./services/cloudSyncModel').CloudSession | null) => Promise<void>
   getVersion: () => string

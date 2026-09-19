@@ -34,6 +34,25 @@ beforeEach(() => {
 })
 
 describe('模型密钥存储', () => {
+  it('defaults PDF vision to off for new and legacy configurations and persists explicit choices', async () => {
+    const store = useConfigStore()
+    expect(store.pdfVisionEnabled).toBe(false)
+    local.setItem('novel-writer-config', JSON.stringify({ models: [], assignments: {} }))
+    await store.loadConfig()
+    expect(store.pdfVisionEnabled).toBe(false)
+    store.setPdfVisionEnabled(true)
+    await store.saveConfig()
+    setActivePinia(createPinia())
+    const restored = useConfigStore()
+    await restored.loadConfig()
+    expect(restored.pdfVisionEnabled).toBe(true)
+    restored.setPdfVisionEnabled(false)
+    await restored.saveConfig()
+    setActivePinia(createPinia())
+    const disabled = useConfigStore()
+    await disabled.loadConfig()
+    expect(disabled.pdfVisionEnabled).toBe(false)
+  })
   it('浏览器模式持久化脱敏配置并把密钥留在会话中', async () => {
     const store = useConfigStore()
     store.addModel({

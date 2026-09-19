@@ -1,6 +1,7 @@
 import type { Novel, ChapterRevision } from '@/types/novel'
 import type { KnowledgeBase } from '@/stores/knowledge'
 import { createProjectBackup, parseProjectBackup, type ProjectBackup } from './projectBackup'
+import { latestInspirationSessions, parseInspirationSession, type InspirationSession } from './inspirationSessions'
 
 export const DEFAULT_SYNC_ENDPOINT = 'https://154.94.227.164'
 export const MAX_SYNC_DOCUMENT_BYTES = 50 * 1024 * 1024
@@ -17,6 +18,7 @@ export interface SyncConflict {
 export type SyncDocument =
   | { kind: 'novel'; novel: Novel; chapterRevisions: ChapterRevision[] }
   | { kind: 'knowledge'; knowledge: KnowledgeBase }
+  | { kind: 'inspiration'; inspiration: InspirationSession }
 export const emptySyncState = (): SyncState => ({ binding: null, enabled: false, bases: {}, lastSync: '' })
 
 export function normalizeSyncEndpoint(raw: string): string {
@@ -56,6 +58,7 @@ export function projectDocuments(project: ProjectBackup): Map<string, string> {
     }))
   }
   for (const knowledge of project.knowledgeBases) result.set(`knowledge:${knowledge.id}`, canonicalJson({ kind: 'knowledge', knowledge }))
+  for (const inspiration of project.inspirationSessions || []) result.set(`inspiration:${inspiration.id}`, canonicalJson({ kind: 'inspiration', inspiration }))
   return result
 }
 
@@ -63,6 +66,9 @@ export function parseCloudDocument(key: string, payload: string): SyncDocument {
   if (new TextEncoder().encode(payload).byteLength > MAX_SYNC_DOCUMENT_BYTES) throw new Error('云端文档超过同步上限。')
   const value = JSON.parse(payload) as SyncDocument
   const now = new Date().toISOString()
+  if (value?.kind === 'inspiration' && key === `inspiration:${value.inspiration?.id}`) {
+    return { kind: 'inspiration', inspiration: parseInspirationSession(value.inspiration) }
+  }
   if (value?.kind === 'knowledge' && key === `knowledge:${value.knowledge?.id}`) {
     parseProjectBackup(JSON.stringify(createProjectBackup([], [value.knowledge])))
     return value
@@ -79,9 +85,10 @@ export function parseCloudDocument(key: string, payload: string): SyncDocument {
 }
 
 export function documentTitle(key: string, payload: string | null): string {
-  if (payload === null) return key.startsWith('novel:') ? '已删除的小说' : '已删除的知识库'
+  if (payload === null) return key.startsWith('novel:') ? '已删除的小说' : key.startsWith('inspiration:') ? '已删除的灵感会话' : '已删除的知识库'
   const doc = parseCloudDocument(key, payload)
-  return doc.kind === 'novel' ? doc.novel.title || '未命名小说' : doc.knowledge.name || '未命名知识库'
+  return doc.kind === 'novel' ? doc.novel.title || '未命名小说'
+    : doc.kind === 'inspiration' ? doc.inspiration.title || '未命名灵感会话' : doc.knowledge.name || '未命名知识库'
 }
 
 export type SyncDecision = 'same' | 'push' | 'pull' | 'conflict'
@@ -99,6 +106,7 @@ export function mergeCloudDocuments(project: ProjectBackup, updates: Map<string,
   let novels = [...project.novels]
   let libraries = [...project.knowledgeBases]
   let revisions = [...(project.chapterRevisions || [])]
+  let sessions = project.inspirationSessions ? [...project.inspirationSessions] : undefined
   for (const [key, payload] of updates) {
     const id = key.slice(key.indexOf(':') + 1)
     if (key.startsWith('novel:')) {
@@ -117,10 +125,18 @@ export function mergeCloudDocuments(project: ProjectBackup, updates: Map<string,
         if (doc.kind !== 'knowledge') throw new Error('知识库类型错误。')
         libraries.push(doc.knowledge)
       }
+    } else if (key.startsWith('inspiration:')) {
+      sessions = (sessions || []).filter(session => session.id !== id)
+      if (payload !== null) {
+        const doc = parseCloudDocument(key, payload)
+        if (doc.kind !== 'inspiration') throw new Error('灵感会话类型错误。')
+        sessions.push(doc.inspiration)
+      }
     } else throw new Error('不支持的同步数据类型。')
   }
   // A deleted library leaves no dangling link, but never deletes book content.
   const available = new Set(libraries.map(kb => kb.id))
   novels = novels.map(novel => ({ ...novel, knowledgeBaseIds: novel.knowledgeBaseIds.filter(id => available.has(id)) }))
-  return parseProjectBackup(JSON.stringify(createProjectBackup(novels, libraries, revisions)))
+  return parseProjectBackup(JSON.stringify(createProjectBackup(novels, libraries, revisions,
+    sessions ? latestInspirationSessions(sessions) : undefined)))
 }

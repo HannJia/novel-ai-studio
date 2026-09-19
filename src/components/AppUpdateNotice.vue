@@ -1,8 +1,8 @@
 <template>
   <div v-if="store.showNotice" class="update-notice" role="status">
-    <span>{{ store.state.phase === 'downloaded' ? '新版已下载' : '发现新版本' }} · {{ store.state.release?.version }}</span>
+    <span>{{ store.state.phase === 'error' ? '更新检查或下载未完成' : store.state.phase === 'downloaded' ? '新版已下载' : '发现新版本' }}{{ store.state.release ? ` · ${store.state.release.version}` : '' }}</span>
     <div class="notice-actions">
-      <n-button size="small" @click="store.detailsOpen = true">查看更新</n-button>
+      <n-button size="small" @click="store.detailsOpen = true">{{ store.state.phase === 'error' ? '查看详情' : '查看更新' }}</n-button>
       <n-button quaternary circle size="small" title="稍后处理" aria-label="稍后处理" @click="store.dismissNotice">
         <template #icon><n-icon><close-outline /></n-icon></template>
       </n-button>

@@ -109,6 +109,13 @@
           :options="workflowModeOptions"
           @update:value="configStore.setAiWorkflowMode"
         />
+        <div class="setting-inline-toggle">
+          <div>
+            <strong>PDF 视觉识别</strong>
+            <p class="section-desc">默认关闭。开启后，PDF 没有文字层的页面可以调用视觉模型，可能消耗额度；关闭时请使用本地 OCR。</p>
+          </div>
+          <n-switch :value="configStore.pdfVisionEnabled" aria-label="允许 PDF 视觉识别" @update:value="configStore.setPdfVisionEnabled" />
+        </div>
       </section>
 
       <section class="settings-section paper-panel security-section" :class="`security-${configStore.securityStatus.storage}`">
@@ -128,10 +135,9 @@
       <section class="settings-section paper-panel">
         <div class="section-header">
           <div>
-            <h3>向量记忆</h3>
-            <p class="section-desc section-desc-inline">连接 BGE-M3 等兼容接口的文本向量服务</p>
+            <h3>语义检索增强（可选）</h3>
           </div>
-          <n-switch :value="embeddingForm.enabled" @update:value="handleEmbeddingEnabledChange" />
+          <n-switch :value="embeddingForm.enabled" aria-label="启用语义检索增强" @update:value="handleEmbeddingEnabledChange" />
         </div>
         <div v-if="embeddingForm.enabled" class="embedding-form">
           <div class="embedding-grid">
@@ -158,7 +164,7 @@
             <n-button type="primary" :disabled="!embeddingForm.baseUrl.trim() || !embeddingForm.modelName.trim()" @click="saveEmbedding">保存向量配置</n-button>
           </div>
         </div>
-        <div v-else class="disabled-hint">未启用时继续使用本地混合检索，不影响现有写作功能。</div>
+        <div v-else class="disabled-hint">当前检索：本地混合检索。结构化记忆、故事时钟与数值计算正常启用。</div>
       </section>
 
       <!-- 写作 Skill -->
@@ -181,9 +187,11 @@
               </div>
               <p>{{ skill.description }}</p>
             </div>
-            <div v-if="!skill.builtIn" class="model-actions">
-              <n-button size="tiny" quaternary @click="openSkillModal(skill)">编辑</n-button>
-              <n-button size="tiny" quaternary type="error" @click="handleDeleteSkill(skill.id)">删除</n-button>
+            <div class="model-actions">
+              <n-button size="small" quaternary circle :title="`查看和编辑${skill.name}`" :aria-label="`查看和编辑${skill.name}`" @click="openSkillModal(skill)">
+                <template #icon><n-icon><create-outline /></n-icon></template>
+              </n-button>
+              <n-button v-if="!skill.builtIn" size="tiny" quaternary type="error" @click="handleDeleteSkill(skill.id)">删除</n-button>
             </div>
           </div>
         </div>
@@ -330,7 +338,7 @@
       <div class="model-form">
         <div class="form-item">
           <label>名称</label>
-          <n-input v-model:value="skillForm.name" placeholder="例如：悬疑线索控制" />
+          <n-input v-model:value="skillForm.name" aria-label="技能名称" :maxlength="80" placeholder="例如：悬疑线索控制" />
         </div>
         <div class="form-item">
           <label>适用任务</label>
@@ -342,11 +350,12 @@
         </div>
         <div class="form-item">
           <label>执行规则</label>
-          <n-input v-model:value="skillForm.instructions" type="textarea" :rows="8" placeholder="写给 AI 的明确规则；只写约束和方法，不要加入具体小说内容。" />
+          <n-input v-model:value="skillForm.instructions" aria-label="技能执行规则" type="textarea" :rows="8" :maxlength="1500" show-count />
         </div>
       </div>
       <template #footer>
         <div class="section-actions">
+          <n-button v-if="configStore.skills.find(item => item.id === editingSkill)?.builtIn" @click="restoreSkill">恢复内置规则</n-button>
           <n-button @click="showSkillModal = false">取消</n-button>
           <n-button type="primary" :disabled="!skillForm.name.trim() || !skillForm.instructions.trim()" @click="saveSkill">保存</n-button>
         </div>
@@ -362,7 +371,8 @@ import ModelSearchTest from '@/components/ModelSearchTest.vue'
 import { ref, computed, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NIcon, NInput, NInputNumber, NSelect, NModal, NSwitch, NTag, useMessage, useDialog } from 'naive-ui'
-import { ArrowBackOutline, GlobeOutline } from '@vicons/ionicons5'
+import { ArrowBackOutline, GlobeOutline, CreateOutline } from '@vicons/ionicons5'
+import { createBuiltInSkills } from '@/data/skills'
 import { useConfigStore, type ModelConfig } from '@/stores/config'
 import { listAvailableModels, openAiV1BaseUrl, testConnection, type AvailableModel } from '@/services/ai'
 import { testEmbeddingConnection } from '@/services/embeddings'
@@ -729,7 +739,7 @@ function openSkillModal(skill?: WritingSkill) {
   showSkillModal.value = true
 }
 
-function saveSkill() {
+async function saveSkill() {
   const data = {
     name: skillForm.name.trim(),
     description: skillForm.description.trim(),
@@ -738,8 +748,17 @@ function saveSkill() {
   }
   if (editingSkill.value) configStore.updateSkill(editingSkill.value, data)
   else configStore.addSkill(data)
-  showSkillModal.value = false
-  message.success('技能已保存')
+  try {
+    await configStore.saveConfig()
+    showSkillModal.value = false
+    message.success('技能已保存')
+  } catch { message.error('技能保存失败，请重试保存。') }
+}
+function restoreSkill() {
+  const original = createBuiltInSkills().find(item => item.id === editingSkill.value)
+  if (!original) return
+  dialog.warning({ title: '恢复内置规则？', content: '替换当前编辑框中的规则，点击保存后生效。', positiveText: '恢复', negativeText: '取消',
+    onPositiveClick: () => Object.assign(skillForm, { name: original.name, description: original.description, task: original.task, instructions: original.instructions }) })
 }
 
 function handleDeleteSkill(id: string) {
@@ -826,6 +845,10 @@ function handleDeleteSkill(id: string) {
 .span-2 { grid-column: span 2; }
 .privacy-note, .disabled-hint { color: var(--text-color-tertiary); font-size: 12px; line-height: 1.6; }
 .section-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.setting-inline-toggle { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-top:16px; padding-top:16px; border-top:1px solid var(--border-color-light); }
+.setting-inline-toggle strong { font-size:13px; }
+.setting-inline-toggle .section-desc { margin:4px 0 0; }
+@media (max-width:600px) { .setting-inline-toggle { align-items:flex-start; } }
 .skill-list { display: flex; flex-direction: column; }
 .skill-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 66px; border-top: 1px solid var(--border-color-light); }
 .skill-info { min-width: 0; }

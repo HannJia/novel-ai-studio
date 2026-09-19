@@ -54,13 +54,15 @@ describe('desktop file and instance safety', () => {
     const Window = vi.fn(function () { return { on: vi.fn(), loadURL: vi.fn(), isDestroyed: () => false, isMinimized: () => true,
       restore, show: vi.fn(), focus, webContents: { openDevTools: vi.fn(), setWindowOpenHandler: vi.fn(), on: vi.fn() } } })
     Object.assign(Window, { getAllWindows: () => [] })
+    const powerMonitor = { on: vi.fn() }
     vm.runInNewContext(fs.readFileSync(mainPath, 'utf8'), {
-      require: (name: string) => name === 'electron' ? { app, BrowserWindow: Window, ipcMain: { handle: vi.fn(), on: vi.fn() } } : requireLocal(name),
+      require: (name: string) => name === 'electron' ? { app, BrowserWindow: Window, powerMonitor, ipcMain: { handle: vi.fn(), on: vi.fn() } } : requireLocal(name),
       process: { env: {}, platform: 'win32' }, __dirname: path.dirname(mainPath), console, setTimeout, clearTimeout, URL,
     })
     await ready
     expect(Window).toHaveBeenCalledTimes(locked ? 1 : 0)
     if (locked) {
+      expect(powerMonitor.on).toHaveBeenCalledWith('resume', expect.any(Function))
       events.get('second-instance')?.()
       expect(restore).toHaveBeenCalledOnce()
       expect(focus).toHaveBeenCalledOnce()

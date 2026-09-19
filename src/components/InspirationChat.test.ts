@@ -10,9 +10,15 @@ import { useNovelStore } from '@/stores/novel'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import SaveChatKnowledge from './SaveChatKnowledge.vue'
 import type { CreateWizardForm } from '@/types/novel'
+import { useInspirationSessionsStore } from '@/stores/inspirationSessions'
+import { parseInspirationSession } from '@/services/inspirationSessions'
 
 vi.mock('@/services/inspiration', () => ({ chatInspiration: vi.fn(), extractInspirationSettings: vi.fn() }))
-beforeEach(() => { setActivePinia(createPinia()); vi.resetAllMocks(); localStorage.clear() })
+vi.mock('@/services/db/inspirationSessions', () => ({
+  loadInspirationSessions: async () => JSON.parse(localStorage.getItem('novel-writer-inspiration-sessions') || '[]').map(parseInspirationSession),
+  saveInspirationSessions: async () => {},
+}))
+beforeEach(async () => { setActivePinia(createPinia()); vi.resetAllMocks(); localStorage.clear(); await useInspirationSessionsStore().initialize() })
 afterEach(() => vi.restoreAllMocks())
 
 function mountChat() {
@@ -32,6 +38,24 @@ function button(wrapper: Wrapper, text: string) {
 }
 
 describe('inspiration search controls', () => {
+  it('restores a synced unfinished draft and web setting, then continues the same conversation', async () => {
+    const store = useInspirationSessionsStore()
+    store.adopt([parseInspirationSession({ id: 'cloud-session', title: '公司的想法', updatedAt: new Date().toISOString(),
+      messages: [{ role: 'user', content: '开头' }, { role: 'assistant', content: '已有回复' }],
+      draft: '未发送的问题', webSearch: true, knowledgeIds: [], context: { content: '已有设定', messageCount: 2 } })])
+    const wrapper = mountChat()
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('未发送的问题')
+    expect(wrapper.get('.inspiration-search-toggle').attributes('aria-pressed')).toBe('true')
+    vi.mocked(chatInspiration).mockResolvedValue({ content: '新回复' })
+    await button(wrapper, '发送').trigger('click')
+    await flushPromises()
+    expect(store.sessions).toHaveLength(1)
+    expect(store.sessions[0].id).toBe('cloud-session')
+    expect(store.sessions[0].messages).toHaveLength(4)
+    expect(store.sessions[0].draft).toBe('')
+    expect(vi.mocked(chatInspiration).mock.calls[0][6]).toEqual({ content: '已有设定', messageCount: 2 })
+    wrapper.unmount()
+  })
   it('defaults to available knowledge, remembers a cleared selection and opens a draft without writing', async () => {
     const knowledge = useKnowledgeStore()
     const kb = knowledge.createKB('地方志')
@@ -50,7 +74,7 @@ describe('inspiration search controls', () => {
     await button(wrapper, '发送').trigger('click')
     await flushPromises()
     expect(vi.mocked(chatInspiration).mock.calls[1][5]).toEqual([])
-    expect(JSON.parse(localStorage.getItem('novel-writer-inspiration-sessions')!)[0].knowledgeIds).toEqual([])
+    expect(useInspirationSessionsStore().sessions[0].knowledgeIds).toEqual([])
     wrapper.unmount()
   })
   it('keeps only the latest author prompt pinned outside the scrolling transcript', async () => {
@@ -336,13 +360,13 @@ describe('inspiration search controls', () => {
       wrapper.unmount()
     }
 
-    const sessions = JSON.parse(localStorage.getItem('novel-writer-inspiration-sessions') || '[]') as Array<{ messages: Array<{ content: string }> }>
+    const sessions = useInspirationSessionsStore().sessions
     expect(sessions).toHaveLength(5)
     expect(sessions[0].messages[0].content).toBe('第 6 个灵感会话')
   })
 
   it('restores the latest complete conversation after refresh and continues the same session', async () => {
-    localStorage.setItem('novel-writer-inspiration-sessions', JSON.stringify([{
+    useInspirationSessionsStore().adopt([parseInspirationSession({
       id: 'saved-session',
       title: '已有想法',
       updatedAt: '2026-09-06T10:00:00.000Z',
@@ -350,7 +374,7 @@ describe('inspiration search controls', () => {
         { role: 'user', content: '已有第一句' },
         { role: 'assistant', content: '已有第一句的回复' },
       ],
-    }]))
+    })])
     vi.mocked(chatInspiration).mockResolvedValue({ content: '继续回复' })
     const wrapper = mountChat()
 
@@ -360,7 +384,7 @@ describe('inspiration search controls', () => {
     await button(wrapper, '发送').trigger('click')
     await flushPromises()
 
-    const sessions = JSON.parse(localStorage.getItem('novel-writer-inspiration-sessions') || '[]') as Array<{ id: string; messages: Array<{ content: string }> }>
+    const sessions = useInspirationSessionsStore().sessions
     expect(sessions).toHaveLength(1)
     expect(sessions[0].id).toBe('saved-session')
     expect(sessions[0].messages.map(message => message.content)).toEqual([

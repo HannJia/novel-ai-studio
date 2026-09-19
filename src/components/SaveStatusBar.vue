@@ -10,13 +10,15 @@ import { computed, ref } from 'vue'
 import { NButton } from 'naive-ui'
 import { useNovelStore } from '@/stores/novel'
 import { useKnowledgeStore } from '@/stores/knowledge'
+import { useInspirationSessionsStore } from '@/stores/inspirationSessions'
 const novels = useNovelStore()
 const knowledge = useKnowledgeStore()
+const inspiration = useInspirationSessionsStore()
 const retrying = ref(false)
-const error = computed(() => [novels.saveError, knowledge.saveError].filter(Boolean).join('；'))
+const error = computed(() => [novels.saveError, knowledge.saveError, inspiration.saveError].filter(Boolean).join('；'))
 async function retry() {
   retrying.value = true
-  try { await Promise.all([novels.flushPendingSaves(), knowledge.flushPendingSaves()]) }
+  try { await Promise.all([novels.flushPendingSaves(), knowledge.flushPendingSaves(), inspiration.flushPendingSaves()]) }
   catch { /* Store errors remain visible until a successful write. */ }
   finally { retrying.value = false }
 }

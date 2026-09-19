@@ -19,6 +19,27 @@ beforeEach(() => { setActivePinia(createPinia()); vi.clearAllMocks() })
 afterEach(() => vi.unstubAllGlobals())
 
 describe('inspiration settings', () => {
+  it('extracts long conversations in bounded chronological batches rather than blocking its own recovery action', async () => {
+    const messages: InspirationMessage[] = [{ role: 'user', content: '甲'.repeat(65000) }, { role: 'user', content: '最终决定：主角叫小林' }]
+    vi.mocked(callAI).mockResolvedValue({ content: JSON.stringify({ genre: 'urban', subGenre: 'business',
+      settings: { protagonist: { name: '小林' }, otherSettings: '不要重生' } }) })
+    const progress = vi.fn()
+    const form = await extractInspirationSettings(model, messages, base(), new AbortController().signal, progress)
+    expect(form.settings.protagonist.name).toBe('小林')
+    expect(callAI).toHaveBeenCalledTimes(3)
+    expect(vi.mocked(callAI).mock.calls.slice(-1)[0][0].messages.map(item => item.content).join('')).toContain('最终决定')
+    expect(progress).toHaveBeenLastCalledWith(3, 3)
+    expect(messages[0].content.length).toBe(65000)
+  })
+  it('uses organized context to continue chatting while retaining full history in storage', async () => {
+    vi.mocked(callAI).mockResolvedValue({ content: '继续聊' })
+    await chatInspiration(model, [{ role: 'user', content: '旧'.repeat(65000) }, { role: 'user', content: '新的选择' }],
+      new AbortController().signal, () => {}, false, [], { content: '主角小林，不写重生', messageCount: 1 })
+    const prompt = JSON.stringify(vi.mocked(callAI).mock.calls[0][0].messages)
+    expect(prompt).toContain('主角小林')
+    expect(prompt).toContain('新的选择')
+    expect(prompt).not.toContain('旧旧旧')
+  })
   it('reads current software knowledge without web search, respects selection, and sees new entries next turn', async () => {
     const store = useKnowledgeStore()
     const kb = store.createKB('舞阳县志')

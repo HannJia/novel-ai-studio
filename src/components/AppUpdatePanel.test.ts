@@ -49,6 +49,16 @@ afterEach(() => {
   appUpdateInstalling.value = false
 })
 describe('update settings and notifications', () => {
+  it('surfaces automatic check failures without pretending no newer version exists', async () => {
+    mockBridge({ ...base, phase: 'error', release: null, error: '无法连接更新服务' })
+    const wrapper = mount()
+    await flushPromises()
+    expect(useAppUpdateStore().showNotice).toBe(true)
+    expect(wrapper.text()).toContain('无法连接更新服务')
+    expect(wrapper.text()).not.toContain('已是最新')
+    useAppUpdateStore().dismissNotice()
+    expect(useAppUpdateStore().showNotice).toBe(false)
+  })
   it('explains the browser limitation without displaying a fake successful check', async () => {
     const wrapper = mount()
     await flushPromises()

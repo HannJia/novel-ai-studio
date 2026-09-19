@@ -170,3 +170,49 @@ def test_durable_reopen_and_backup(env, tmp_path):
         source.backup(backup)
         assert backup.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert backup.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
+
+
+def test_six_character_password_registration_and_recovery(env):
+    repo, client = env
+    invitation = repo.invite()
+    body = {"username": "sixdigits", "password": "12345", "invite": invitation}
+    assert client.post("/v1/auth/register", json=body).status_code == 400
+    body["password"] = "123456"
+    account = client.post("/v1/auth/register", json=body)
+    assert account.status_code == 200
+    recovery = {"username": body["username"], "recoveryCode": account.json()["recoveryCode"], "password": "65432"}
+    assert client.post("/v1/auth/recover", json=recovery).status_code == 400
+    recovery["password"] = "654321"
+    assert client.post("/v1/auth/recover", json=recovery).status_code == 200
+    assert client.post("/v1/auth/login", json={"username": body["username"], "password": "654321"}).status_code == 200
+
+
+def test_password_change_requires_current_password_and_revokes_all_sessions(env):
+    _, client = env
+    account = register(env)
+    another = client.post("/v1/auth/login", json={"username": "author", "password": "test-password-123"}).json()
+    change = lambda old, new: client.post("/v1/auth/password", headers=headers(account),
+                                          json={"currentPassword": old, "password": new})
+    assert client.post("/v1/auth/password", json={}).status_code == 401
+    assert change("wrong-password", "654321").status_code == 403
+    assert change("test-password-123", "12345").status_code == 400
+    assert change("test-password-123", "test-password-123").status_code == 400
+    assert change("test-password-123", "654321").status_code == 200
+    for device in (account, another):
+        assert client.get("/v1/auth/me", headers=headers(device)).status_code == 401
+    assert client.post("/v1/auth/login", json={"username": "author", "password": "test-password-123"}).status_code == 401
+    assert client.post("/v1/auth/login", json={"username": "author", "password": "654321"}).status_code == 200
+    assert client.post("/v1/auth/recover", json={"username": "author", "password": "newpass",
+                       "recoveryCode": account["recoveryCode"]}).status_code == 200
+
+
+def test_inspiration_sync_is_account_scoped_and_hidden_from_older_clients(env):
+    _, client = env
+    a, b = register(env, "author_a"), register(env, "author_b")
+    text = json.dumps({"kind": "inspiration", "inspiration": {"id": "idea", "messages": [], "draft": "Next idea"}})
+    assert push(client, a, text, key="inspiration:idea").status_code == 200
+    assert client.get("/v1/sync/manifest", headers=headers(a)).json()["records"] == []
+    listing = client.get("/v1/sync/manifest?include=inspiration", headers=headers(a)).json()
+    assert "inspiration" in listing["features"]
+    assert listing["records"][0]["key"] == "inspiration:idea"
+    assert client.post("/v1/sync/pull", headers=headers(b), json={"keys": ["inspiration:idea"]}).json()["records"] == []

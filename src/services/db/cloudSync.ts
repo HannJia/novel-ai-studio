@@ -4,6 +4,7 @@ import type { ProjectBackup } from '../projectBackup'
 import { clearNovelRows, writeNovelRows } from './novels'
 import { clearKnowledgeRows, writeKnowledgeBaseRows } from './knowledge'
 import { writeChapterRevisionRow } from './chapterRevisions'
+import { writeInspirationSessions } from './inspirationSessions'
 
 async function ready() { await initDb() }
 export async function readCloudState(): Promise<SyncState> {
@@ -25,6 +26,7 @@ export async function persistCloudState(state: SyncState, conflicts: SyncConflic
       for (const kb of project.knowledgeBases) writeKnowledgeBaseRows(kb)
       for (const novel of project.novels) writeNovelRows(novel)
       for (const revision of project.chapterRevisions || []) writeChapterRevisionRow(revision)
+      if (project.inspirationSessions) writeInspirationSessions(project.inspirationSessions)
       execute('DELETE FROM semantic_index')
     }
     execute("INSERT INTO cloud_sync_state(id,value) VALUES('main',?) ON CONFLICT(id) DO UPDATE SET value=excluded.value",

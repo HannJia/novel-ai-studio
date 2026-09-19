@@ -51,6 +51,10 @@ function createUpdateController(options) {
   let cancelled = false
   let startupTimer = null
   let intervalTimer = null
+  let retryTimer = null
+  let retryCount = 0
+  let lastAttempt = 0
+  let disposed = false
   let revision = 0
   let state = {
     supported, currentVersion, phase: supported ? 'idle' : 'unsupported',
@@ -106,6 +110,9 @@ function createUpdateController(options) {
   async function check() {
     if (!supported || state.phase === 'downloaded' || state.phase === 'installing') return snapshot()
     return exclusive(async () => {
+      clearTimeout(retryTimer)
+      retryTimer = null
+      lastAttempt = Date.now()
       set({ phase: 'checking', error: '' })
       ready = false
       release = null
@@ -124,9 +131,13 @@ function createUpdateController(options) {
           phase: release ? 'available' : 'current', release: publicRelease(release),
           checkedAt: new Date().toISOString(), percent: 0,
         })
+        retryCount = 0
+        if (release && !ready) scheduleRetry()
       } catch (error) {
-        set({ release: publicRelease(release) })
-        fail(error)
+        set({ release: publicRelease(release ? { ...release, canDownload: false } : null),
+          checkedAt: new Date().toISOString() })
+        fail(error, release ? 'available' : 'error')
+        scheduleRetry()
       }
       return snapshot()
     })
@@ -177,14 +188,30 @@ function createUpdateController(options) {
   function stopTimers() {
     clearTimeout(startupTimer)
     clearInterval(intervalTimer)
-    startupTimer = intervalTimer = null
+    clearTimeout(retryTimer)
+    startupTimer = intervalTimer = retryTimer = null
+  }
+  function scheduleRetry() {
+    if (disposed || !supported || !state.autoCheck) return
+    const minutes = [1, 5, 15, 30, 60][Math.min(retryCount++, 4)]
+    retryTimer = setTimeout(() => { retryTimer = null; void check() }, minutes * 60000)
+    retryTimer.unref?.()
+  }
+  function wake() {
+    if (disposed || !supported || !state.autoCheck || !lastAttempt || operation) return snapshot()
+    const retryable = state.phase === 'error' || (state.phase === 'available' && !ready)
+    const stale = ['idle', 'current'].includes(state.phase)
+    if ((retryable || stale) && Date.now() - lastAttempt >= (retryable ? 60000 : 6 * 60 * 60 * 1000)) return check()
+    return snapshot()
   }
   function start() {
     stopTimers()
+    disposed = false
+    retryCount = 0
     if (!supported || !state.autoCheck) return
     startupTimer = setTimeout(() => { void check() }, 12000)
     intervalTimer = setInterval(() => {
-      if (state.phase === 'idle' || state.phase === 'current' || state.phase === 'error') void check()
+      if (['idle', 'current', 'error'].includes(state.phase) || (state.phase === 'available' && !ready)) void check()
     }, 6 * 60 * 60 * 1000)
     startupTimer.unref?.()
     intervalTimer.unref?.()
@@ -197,7 +224,8 @@ function createUpdateController(options) {
     return snapshot()
   }
   return {
-    snapshot, check, download, cancel, install, start, dispose: stopTimers, setAutoCheck,
+    snapshot, check, download, cancel, install, start, wake,
+    dispose: () => { disposed = true; stopTimers() }, setAutoCheck,
     openRelease: () => openExternal(release?.url || RELEASES_URL),
   }
 }

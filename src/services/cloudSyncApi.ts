@@ -5,6 +5,11 @@ export class CloudApiError extends Error {
 }
 
 const errors: Record<string, string> = {
+  'Invalid password': '密码需要 6～256 个字符。',
+  'Invalid currentPassword': '请输入当前密码。',
+  'Current password is incorrect': '当前密码不正确。',
+  'New password must be different': '新密码不能与当前密码相同。',
+  'Please sign in again': '登录状态已变化，请重新登录。',
   'Incorrect username or password': '账号或密码不正确。',
   'Invalid or expired invitation': '邀请码无效、已用完或已过期。',
   'Username already exists': '这个账号已被注册。',

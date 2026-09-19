@@ -15,11 +15,12 @@ from argon2.exceptions import VerificationError
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-VERSION = "1.0.4"
+VERSION = "1.0.5"
 MAX_BODY = 64 * 1024 * 1024
 MAX_DOCUMENT = 50 * 1024 * 1024
 DEFAULT_QUOTA = 100 * 1024 * 1024
 SESSION_SECONDS = 30 * 86400
+MIN_PASSWORD_LENGTH = 6
 PASSWORDS = PasswordHasher(time_cost=2, memory_cost=32768, parallelism=1)
 DUMMY_PASSWORD = PASSWORDS.hash(secrets.token_urlsafe(32))
 
@@ -162,7 +163,7 @@ def remote_ip(request):
 
 
 def checked_key(key):
-    if not isinstance(key, str) or not re.fullmatch(r"(novel|knowledge):[^\x00-\x1f\x7f]{1,200}", key):
+    if not isinstance(key, str) or not re.fullmatch(r"(novel|knowledge|inspiration):[^\x00-\x1f\x7f]{1,200}", key):
         fail(400, "Invalid document key")
     return key
 
@@ -191,7 +192,7 @@ def create_app(data_dir=None):
 
     @app.get("/v1/health")
     def health():
-        return {"ok": True, "version": VERSION, "protocol": 1}
+        return {"ok": True, "version": VERSION, "protocol": 1, "features": ["inspiration", "change-password"]}
 
     @app.post("/v1/auth/register")
     async def register(request: Request):
@@ -200,7 +201,7 @@ def create_app(data_dir=None):
         username = checked_text(body, "username", 3, 32).lower()
         if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{2,31}", username):
             fail(400, "Username must use 3-32 letters, numbers, underscores or hyphens")
-        password = checked_text(body, "password", 12, 256)
+        password = checked_text(body, "password", MIN_PASSWORD_LENGTH, 256)
         invitation = checked_text(body, "invite", 10, 100)
         with repo.connection() as db:
             invite = db.execute("SELECT * FROM invites WHERE hash=? AND remaining>0 AND expires>?",
@@ -266,7 +267,7 @@ def create_app(data_dir=None):
         body = await body_json(request)
         username = checked_text(body, "username", 3, 32).lower()
         code = checked_text(body, "recoveryCode", 10, 100)
-        password = checked_text(body, "password", 12, 256)
+        password = checked_text(body, "password", MIN_PASSWORD_LENGTH, 256)
         hashed = PASSWORDS.hash(password)
         next_code = secrets.token_urlsafe(32)
         with repo.connection(True) as db:
@@ -290,13 +291,39 @@ def create_app(data_dir=None):
             fail(400, "Invalid invitation uses")
         return {"code": repo.invite(uses=uses, creator=user["id"]), "uses": uses, "expiresInDays": 7}
 
+    @app.post("/v1/auth/password")
+    async def change_password(request: Request):
+        user, token_hash = repo.authenticate(request)
+        repo.rate("password:" + user["id"], 10, 900)
+        body = await body_json(request)
+        current_password = checked_text(body, "currentPassword", 1, 256)
+        new_password = checked_text(body, "password", MIN_PASSWORD_LENGTH, 256)
+        try:
+            PASSWORDS.verify(user["password_hash"], current_password)
+        except VerificationError:
+            fail(403, "Current password is incorrect")
+        if new_password == current_password:
+            fail(400, "New password must be different")
+        hashed = PASSWORDS.hash(new_password)
+        with repo.connection(True) as db:
+            current = db.execute("SELECT password_hash FROM users WHERE id=?", (user["id"],)).fetchone()
+            valid_session = db.execute("SELECT 1 FROM sessions WHERE hash=? AND expires>?",
+                                       (token_hash, time.time())).fetchone()
+            if not current or current["password_hash"] != user["password_hash"] or not valid_session:
+                fail(401, "Please sign in again")
+            db.execute("UPDATE users SET password_hash=? WHERE id=?", (hashed, user["id"]))
+            db.execute("DELETE FROM sessions WHERE user_id=?", (user["id"],))
+        return {"ok": True}
+
     @app.get("/v1/sync/manifest")
     def manifest(request: Request):
         user, _ = repo.authenticate(request)
         with repo.connection() as db:
             rows = db.execute("SELECT key,version,hash,bytes,updated FROM documents WHERE user_id=? ORDER BY key",
                               (user["id"],)).fetchall()
-        return {"protocol": 1, "records": [record(row, False) for row in rows]}
+        include_inspiration = request.query_params.get("include") == "inspiration"
+        return {"protocol": 1, "features": ["inspiration", "change-password"],
+                "records": [record(row, False) for row in rows if include_inspiration or not row["key"].startswith("inspiration:")]}
 
     @app.post("/v1/sync/pull")
     async def pull(request: Request):

@@ -2,11 +2,13 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { pdfjsAssets } from './scripts/pdfjs-assets.mts'
+import { ocrAssets } from './scripts/ocr-assets.mts'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), pdfjsAssets(path.join(rootDir, 'node_modules/pdfjs-dist')), ocrAssets(rootDir)],
   base: './',
   resolve: {
     alias: {

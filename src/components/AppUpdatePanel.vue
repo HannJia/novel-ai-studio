@@ -61,7 +61,7 @@ const statusText = computed(() => {
     case 'checking': return '正在检查 GitHub 正式版本…'
     case 'current': return '当前已是最新版本。'
     case 'available': return state.value.release?.canDownload
-      ? '发现新版本，等待下载。' : '发现新版本，但发布文件不完整，请到发布页查看。'
+      ? '发现新版本，等待下载。' : '已发现新版本，下载信息尚未就绪，可重试检查或打开发布页。'
     case 'downloading': return '正在下载安装包…'
     case 'downloaded': return '安装包已下载并校验，等待安装。'
     case 'installing': return '正在保存并准备安装，请稍候…'

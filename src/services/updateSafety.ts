@@ -1,6 +1,7 @@
 import { useNovelStore } from '@/stores/novel'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { useConfigStore } from '@/stores/config'
+import { useInspirationSessionsStore } from '@/stores/inspirationSessions'
 import { activeAiCount } from './aiActivity'
 import { chapterBackgroundQueue } from './aiTaskQueue'
 import { projectTransferBusy } from './projectTransfer'
@@ -22,6 +23,7 @@ export async function prepareUpdateInstall(): Promise<void> {
       useNovelStore().flushPendingSaves(),
       useKnowledgeStore().flushPendingSaves(),
       useConfigStore().saveConfig(),
+      useInspirationSessionsStore().flushPendingSaves(),
     ])
     assertIdle()
   } catch (error) {

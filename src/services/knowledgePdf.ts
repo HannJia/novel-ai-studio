@@ -1,14 +1,18 @@
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url'
-import type { PDFPageProxy } from 'pdfjs-dist'
+import type { DocumentInitParameters, PDFPageProxy } from 'pdfjs-dist/types/src/display/api'
 import type { ModelConfig } from '@/stores/config'
 import { callAI } from './ai'
 import { loadPdfPages, savePdfPage, type PdfPageText } from './knowledgePdfCache'
 import { parseAiJsonObject } from '@/utils/aiJson'
 
-export type PdfReadMode = 'auto' | 'vision'
+export type PdfReadMode = 'auto' | 'vision' | 'local-ocr'
 export type PdfReadProgress = {
   page: number; total: number; completed: number; cached: number
-  phase: 'opening' | 'reading' | 'recognizing' | 'complete'
+  phase: 'opening' | 'reading' | 'recognizing' | 'local-ocr' | 'complete'
+  textPages: number; blankPages: number; missingPages: number; characters: number
+  staleBlankPages: number
+  documentPages?: number
+  pagePercent?: number
 }
 export type PdfReadOptions = {
   model?: ModelConfig
@@ -16,6 +20,54 @@ export type PdfReadOptions = {
   signal?: AbortSignal
   onProgress?: (progress: PdfReadProgress) => void
   activityParentId?: string
+  allowVision?: boolean
+  cacheOnly?: boolean
+  onPage?: (page: PdfPageText) => void
+  pageStart?: number
+  pageEnd?: number
+}
+
+const PDF_DECODER_VERSION = 2
+
+export function pdfDocumentOptions(data: ArrayBuffer): DocumentInitParameters {
+  const base = new URL(import.meta.env.BASE_URL, document.baseURI)
+  return {
+    data,
+    cMapUrl: new URL('pdfjs-assets/cmaps/', base).href,
+    cMapPacked: true,
+    standardFontDataUrl: new URL('pdfjs-assets/standard_fonts/', base).href,
+    wasmUrl: new URL('pdfjs-assets/wasm/', base).href,
+    stopAtErrors: true,
+  }
+}
+
+export async function assertPdfImagesDecoded(page: PDFPageProxy, signal?: AbortSignal): Promise<void> {
+  const { OPS } = await import('pdfjs-dist')
+  const operators = await page.getOperatorList()
+  for (let index = 0; index < operators.fnArray.length; index++) {
+    if (![OPS.paintImageXObject, OPS.paintImageXObjectRepeat].includes(operators.fnArray[index])) continue
+    const id = operators.argsArray[index]?.[0]
+    if (typeof id !== 'string') continue
+    const objects = id.startsWith('g_') ? page.commonObjs : page.objs
+    signal?.throwIfAborted()
+    const image = objects.has(id) ? objects.get(id) : await new Promise<unknown>((resolve, reject) => {
+      const cancel = () => { clearTimeout(timeout); reject(signal?.reason || new Error('已停止读取')) }
+      const timeout = setTimeout(() => {
+        signal?.removeEventListener('abort', cancel)
+        reject(new Error(`第 ${page.pageNumber} 页图像解码超时，未发送给 AI，请重试。`))
+      }, 30000)
+      signal?.addEventListener('abort', cancel, { once: true })
+      objects.get(id, (value: unknown) => {
+        clearTimeout(timeout)
+        signal?.removeEventListener('abort', cancel)
+        resolve(value)
+      })
+    })
+    // PDF.js may resolve a failed image to null and still fulfill render.promise.
+    if (!image) {
+      throw new Error(`第 ${page.pageNumber} 页图像解码失败，已停止，未将空白图片发送给 AI。请检查 PDF 解码资源后重试。`)
+    }
+  }
 }
 
 export async function recognizePdfPage(imageDataUrl: string, page: number, model: ModelConfig, signal: AbortSignal, activityParentId?: string): Promise<string> {
@@ -44,10 +96,10 @@ export async function recognizePdfPage(imageDataUrl: string, page: number, model
   return parsed.text.trim()
 }
 
-export async function renderPdfPage(page: PDFPageProxy, signal: AbortSignal): Promise<string> {
+export async function renderPdfPage(page: PDFPageProxy, signal: AbortSignal, localOcr = false): Promise<string> {
   signal.throwIfAborted()
   const original = page.getViewport({ scale: 1 })
-  const scale = Math.min(3, 2600 / Math.max(original.width, original.height))
+  const scale = Math.min(localOcr ? 5 : 3, (localOcr ? 3200 : 2600) / Math.max(original.width, original.height))
   const viewport = page.getViewport({ scale })
   const canvas = document.createElement('canvas')
   canvas.width = Math.ceil(viewport.width)
@@ -60,7 +112,9 @@ export async function renderPdfPage(page: PDFPageProxy, signal: AbortSignal): Pr
   try {
     await task.promise
     signal.throwIfAborted()
-    return canvas.toDataURL('image/jpeg', 0.92)
+    await assertPdfImagesDecoded(page, signal)
+    signal.throwIfAborted()
+    return localOcr ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.92)
   } finally {
     signal.removeEventListener('abort', cancel)
     canvas.width = canvas.height = 0
@@ -70,9 +124,13 @@ export async function renderPdfPage(page: PDFPageProxy, signal: AbortSignal): Pr
 export async function readKnowledgePdf(
   file: File, options: PdfReadOptions = {}, limits = { pages: 1000, characters: 5_000_000 },
 ): Promise<string> {
+  if (options.mode === 'local-ocr') {
+    return (await import('./localOcrPdf')).readLocalOcrPdf(file, options, limits)
+  }
   const signal = options.signal || new AbortController().signal
   signal.throwIfAborted()
-  const progress: PdfReadProgress = { page: 0, total: 0, completed: 0, cached: 0, phase: 'opening' }
+  const progress: PdfReadProgress = { page: 0, total: 0, completed: 0, cached: 0, phase: 'opening',
+    textPages: 0, blankPages: 0, missingPages: 0, characters: 0, staleBlankPages: 0 }
   const report = () => options.onProgress?.({ ...progress })
   report()
   const bytes = await file.arrayBuffer()
@@ -83,7 +141,7 @@ export async function readKnowledgePdf(
   signal.throwIfAborted()
   const pdfjs = await import('pdfjs-dist')
   pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
-  const task = pdfjs.getDocument({ data: bytes })
+  const task = pdfjs.getDocument(pdfDocumentOptions(bytes))
   const cancel = () => { void task.destroy().catch(() => {}) }
   signal.addEventListener('abort', cancel, { once: true })
   try {
@@ -102,6 +160,15 @@ export async function readKnowledgePdf(
       progress.phase = 'reading'
       report()
       let result: PdfPageText | undefined = cache.get(index)
+      if (result && !result.text.trim() && result.method === 'vision' && result.decoderVersion !== PDF_DECODER_VERSION) {
+        progress.staleBlankPages++
+        if (!options.cacheOnly) {
+          result = undefined
+          progress.cached--
+          progress.completed--
+        }
+      }
+      if (!result && options.cacheOnly) { progress.missingPages++; report(); continue }
       if (!result) {
         const page = await pdf.getPage(index)
         try {
@@ -110,13 +177,15 @@ export async function readKnowledgePdf(
             const content = await page.getTextContent()
             text = content.items.map(item => 'str' in item ? `${item.str}${item.hasEOL ? '\n' : ' '}` : '').join('').trim()
           }
-          result = { page: index, text, method: 'text' }
+          result = { page: index, text, method: 'text', decoderVersion: PDF_DECODER_VERSION }
           if (!text) {
+            if (options.allowVision !== true) throw new Error(`第 ${index} 页没有可提取的文字，视觉识别开关已关闭。可切换“本地 OCR”或在设置 / 导入页开启视觉识别后继续。`)
             if (!options.model?.apiKey.trim()) throw new Error(`第 ${index} 页没有可提取的文字，请选择已配置密钥的视觉模型后继续。`)
             progress.phase = 'recognizing'
             report()
             const image = await renderPdfPage(page, signal)
-            result = { page: index, text: await recognizePdfPage(image, index, options.model, signal, options.activityParentId), method: 'vision' }
+            result = { page: index, text: await recognizePdfPage(image, index, options.model, signal, options.activityParentId),
+              method: 'vision', decoderVersion: PDF_DECODER_VERSION }
           }
           signal.throwIfAborted()
           if (length + result.text.length > limits.characters) throw new Error('提取文本超过 500 万字符，请拆分后导入')
@@ -125,6 +194,11 @@ export async function readKnowledgePdf(
         } finally { page.cleanup() }
       }
       signal.throwIfAborted()
+      if (!result || result.page !== index || typeof result.text !== 'string') throw new Error(`第 ${index} 页缓存无效，已停止读取，请保留文件并联系维护者。`)
+      if (result.text.trim()) progress.textPages++
+      else progress.blankPages++
+      progress.characters += result.text.length
+      options.onPage?.(result)
       const section = result.text ? `## 第 ${index} 页\n${result.text}` : ''
       length += section.length + 7
       if (length > limits.characters) throw new Error('提取文本超过 500 万字符，请拆分后导入')

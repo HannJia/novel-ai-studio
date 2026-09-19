@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   cloudSessionWrite: (value) => ipcRenderer.invoke('cloud-session:write', value),
   updateGetState: () => ipcRenderer.invoke('update:state'),
   updateCheck: () => ipcRenderer.invoke('update:check'),
+  updateWake: () => ipcRenderer.invoke('update:wake'),
   updateDownload: () => ipcRenderer.invoke('update:download'),
   updateCancel: () => ipcRenderer.invoke('update:cancel'),
   updateInstall: () => ipcRenderer.invoke('update:install'),

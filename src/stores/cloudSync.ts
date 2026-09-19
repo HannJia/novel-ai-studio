@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { useNovelStore } from './novel'
 import { useKnowledgeStore } from './knowledge'
+import { useInspirationSessionsStore } from './inspirationSessions'
 import { cloudRequest, CloudApiError } from '@/services/cloudSyncApi'
 import {
   DEFAULT_SYNC_ENDPOINT, normalizeSyncEndpoint, emptySyncState, projectDocuments, hashPayload,
@@ -56,11 +57,11 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
   }
   async function capture() {
     const revisions = await loadProjectChapterRevisions()
-    return createProjectBackup(useNovelStore().novels, useKnowledgeStore().knowledgeBases, revisions)
+    return createProjectBackup(useNovelStore().novels, useKnowledgeStore().knowledgeBases, revisions, useInspirationSessionsStore().sessions)
   }
   async function flush() {
     await flushEditorDrafts()
-    await Promise.all([useNovelStore().flushPendingSaves(), useKnowledgeStore().flushPendingSaves()])
+    await Promise.all([useNovelStore().flushPendingSaves(), useKnowledgeStore().flushPendingSaves(), useInspirationSessionsStore().flushPendingSaves()])
   }
   async function writeSession(value: CloudSession | null) {
     if (window.electronAPI?.cloudSessionWrite) await window.electronAPI.cloudSessionWrite(value)
@@ -183,7 +184,7 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
     if (enabled) await syncNow()
   }
   function checkedRecord(raw: CloudRecord, payload = false): CloudRecord {
-    if (!raw || typeof raw.key !== 'string' || !/^(novel|knowledge):[^\x00-\x1f\x7f]{1,200}$/.test(raw.key)
+    if (!raw || typeof raw.key !== 'string' || !/^(novel|knowledge|inspiration):[^\x00-\x1f\x7f]{1,200}$/.test(raw.key)
       || !Number.isSafeInteger(raw.version) || raw.version < 1
       || (raw.hash !== null && !/^[a-f0-9]{64}$/.test(raw.hash))
       || !Number.isFinite(raw.bytes) || !Number.isFinite(raw.updatedAt)
@@ -211,8 +212,9 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
       const hashes = new Map<string, string | null>()
       for (const [key, payload] of local) hashes.set(key, await hashPayload(payload))
       const next = JSON.parse(JSON.stringify(state.value)) as SyncState
-      const manifest = await cloudRequest<{ protocol: number; records: CloudRecord[] }>(auth.endpoint, 'sync/manifest', { token: auth.token, signal })
+      const manifest = await cloudRequest<{ protocol: number; records: CloudRecord[]; features?: string[] }>(auth.endpoint, 'sync/manifest?include=inspiration', { token: auth.token, signal })
       if (manifest.protocol !== 1 || !Array.isArray(manifest.records) || manifest.records.length > 2000) throw new Error('云端同步协议不兼容。')
+      if (!manifest.features?.includes('inspiration')) throw new Error('同步服务器尚不支持灵感会话，请先更新服务端。本机内容已保留。')
       const remote = new Map(manifest.records.map(raw => {
         const item = checkedRecord(raw)
         return [item.key, item] as const
@@ -293,6 +295,7 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
         if (project) {
           useNovelStore().adoptImportedNovels(project.novels)
           useKnowledgeStore().adoptImportedKnowledgeBases(project.knowledgeBases)
+          if (project.inspirationSessions) useInspirationSessionsStore().adopt(project.inspirationSessions)
         }
         state.value = next
         if (session.value?.user.id === auth.user.id) session.value.user.usedBytes = [...remote.values()].reduce((total, item) => total + item.bytes, 0)
@@ -350,6 +353,7 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
       if (project) {
         useNovelStore().adoptImportedNovels(project.novels)
         useKnowledgeStore().adoptImportedKnowledgeBases(project.knowledgeBases)
+        if (project.inspirationSessions) useInspirationSessionsStore().adopt(project.inspirationSessions)
       }
       state.value = next
       conflicts.value = await readCloudConflicts()
@@ -374,6 +378,20 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
   async function recover(username: string, recoveryCode: string, password: string) {
     return cloudRequest<{ recoveryCode: string }>(accountTarget(username), 'auth/recover', { body: { username, recoveryCode, password } })
   }
+  async function changePassword(currentPassword: string, password: string) {
+    await exclusively(async () => {
+      if (!session.value) throw new Error('请先登录。')
+      if (password.length < 6 || password.length > 256) throw new Error('新密码需要 6～256 个字符。')
+      const auth = session.value
+      await cloudRequest(auth.endpoint, 'auth/password', { token: auth.token, body: { currentPassword, password } })
+      await stop()
+      session.value = null
+      phase.value = 'signed-out'
+      error.value = ''
+      try { await writeSession(null) }
+      catch { error.value = '密码已修改，旧登录已失效；本机凭据清理失败，请重新登录。' }
+    })
+  }
   async function flushBeforeClose() {
     await operation
     if (!session.value || !state.value.enabled) return
@@ -394,6 +412,6 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
   return {
     state, session, conflicts, initialized, busy, error, pendingDownloads, phase, endpoint,
     pendingConflicts, statusText, initialize, authenticate, logout, setEnabled, syncNow,
-    schedule, resolveConflict, exportConflict, createInvite, recover, flushBeforeClose, dispose,
+    schedule, resolveConflict, exportConflict, createInvite, recover, changePassword, flushBeforeClose, dispose,
   }
 })

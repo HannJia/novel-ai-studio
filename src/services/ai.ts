@@ -35,6 +35,7 @@ export interface ChatCompletionOptions {
   skillTask?: Exclude<WritingSkillTask, 'all'>
   activityParentId?: string
   redactErrors?: boolean
+  noAutomaticRetry?: boolean
   shouldStop?: () => boolean
 }
 
@@ -122,7 +123,8 @@ async function chatCompletion(options: ChatCompletionOptions): Promise<ChatCompl
   const url = `${openAiV1BaseUrl(model.baseUrl)}/chat/completions`
 
   let lastError: unknown
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+  const attempts = options.noAutomaticRetry ? 1 : MAX_RETRIES
+  for (let attempt = 0; attempt < attempts; attempt++) {
     if (attempt > 0) {
       const delay = RETRY_BASE_DELAY * Math.pow(2, attempt - 1)
       console.warn(`API 重试 ${attempt}/${MAX_RETRIES}，等待 ${delay}ms...`)

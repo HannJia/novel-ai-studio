@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { useNovelStore } from '@/stores/novel'
 import { useKnowledgeStore } from '@/stores/knowledge'
+import { useInspirationSessionsStore } from '@/stores/inspirationSessions'
 import { chapterBackgroundQueue } from './aiTaskQueue'
 import { replaceProjectInDb } from './db/project'
 import { createProjectBackup, parseProjectBackup, type ProjectBackup } from './projectBackup'
@@ -17,17 +18,19 @@ export async function importProject(backup: ProjectBackup): Promise<void> {
   const checked = parseProjectBackup(JSON.stringify(backup))
   const novels = useNovelStore()
   const knowledge = useKnowledgeStore()
+  const inspiration = useInspirationSessionsStore()
   projectTransferBusy.value = true
   try {
-    await Promise.all([novels.flushPendingSaves(), knowledge.flushPendingSaves()])
+    await Promise.all([novels.flushPendingSaves(), knowledge.flushPendingSaves(), inspiration.flushPendingSaves()])
     // Keep a separate, validated restore point. The database transaction also
     // preserves its previous on-disk image; this reference documents the exact
     // project state that was present before import.
-    const before = createProjectBackup(novels.novels, knowledge.knowledgeBases, await loadProjectChapterRevisions())
+    const before = createProjectBackup(novels.novels, knowledge.knowledgeBases, await loadProjectChapterRevisions(), inspiration.sessions)
     const { retainProjectRestorePoint } = await import('./database')
     await retainProjectRestorePoint(JSON.stringify(before))
     await replaceProjectInDb(checked)
     novels.adoptImportedNovels(checked.novels)
     knowledge.adoptImportedKnowledgeBases(checked.knowledgeBases)
+    if (checked.inspirationSessions) inspiration.adopt(checked.inspirationSessions)
   } finally { projectTransferBusy.value = false }
 }

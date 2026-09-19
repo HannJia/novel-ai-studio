@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { loadAllKnowledgeBasesFromDb, saveKnowledgeBaseToDb, deleteKnowledgeBaseFromDb } from '@/services/db/knowledge'
 import { createRevisionPersistence } from './revisionPersistence'
+import { splitKnowledgeText } from '@/services/knowledgeText'
 
 // 知识库条目
 export interface KBEntry {
@@ -147,17 +148,11 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     const kb = getKB(kbId)
     if (!kb) return 0
     // 按 ## 或 --- 分割为条目
-    const sections = text.split(/^(?=##\s)|^---$/gm).filter(s => s.trim())
+    const sections = splitKnowledgeText(text)
     let count = 0
-    for (const section of sections) {
-      const lines = section.trim().split('\n')
-      let title = lines[0].replace(/^#+\s*/, '').trim().slice(0, 180)
-      if (!title) title = `导入条目 ${kb.entries.length + count + 1}`
-      const content = (/^#+\s/.test(lines[0]) ? lines.slice(1).join('\n') : section).trim()
-      if (content) {
+    for (const { title, content } of sections) {
         addEntry(kbId, { title, content, category, tags: [], summary: '' })
         count++
-      }
     }
     return count
   }

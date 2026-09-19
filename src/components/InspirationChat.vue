@@ -50,7 +50,7 @@
         <strong>AI</strong><div v-html="renderMd(streamText)"></div>
       </article>
       <p v-else-if="busy" class="inspiration-progress" role="status">{{ extracting
-        ? '正在根据已有对话整理待确认设定，不重复搜索…'
+        ? extractionProgress
         : requestWebSearch ? '正在请求联网回复，完成后显示回答和来源；开关修改下条生效…' : 'AI 正在回复…' }}</p>
     </div>
     <div class="inspiration-composer">
@@ -66,7 +66,7 @@
           <template #icon><n-icon><send-outline /></n-icon></template>发送
         </n-button>
         <n-button v-if="retryAvailable && !busy" @click="respond">重试回复</n-button>
-        <n-button :disabled="busy || !history.some(item => item.role === 'user')" @click="extract">
+        <n-button :loading="extracting" :disabled="busy || !history.some(item => item.role === 'user')" @click="extract">
           <template #icon><n-icon><checkmark-outline /></n-icon></template>{{ extracting ? '整理中' : '整理设定并检查' }}
         </n-button>
       </div>
@@ -90,6 +90,8 @@ import ChatSearchEvidence from '@/components/ChatSearchEvidence.vue'
 import SaveChatKnowledge from '@/components/SaveChatKnowledge.vue'
 import { knowledgeDraftWithSources } from '@/services/softwareAssistantContext'
 import type { ChatSearchRecord } from '@/types/chat'
+import { useInspirationSessionsStore } from '@/stores/inspirationSessions'
+import type { InspirationSession } from '@/services/inspirationSessions'
 
 const props = defineProps<{ form: CreateWizardForm; active: boolean }>()
 const emit = defineEmits<{
@@ -98,15 +100,9 @@ const emit = defineEmits<{
 }>()
 const config = useConfigStore()
 const knowledge = useKnowledgeStore()
+const sessionsStore = useInspirationSessionsStore()
 const history = ref<InspirationMessage[]>([])
-type InspirationSession = {
-  id: string
-  title: string
-  updatedAt: string
-  messages: InspirationMessage[]
-  knowledgeIds?: string[] | null
-}
-const savedSessions = ref<InspirationSession[]>([])
+const savedSessions = computed(() => sessionsStore.sessions)
 const selectedSessionId = ref<string | null>(null)
 const historyElement = ref<HTMLElement | null>(null)
 const input = ref('')
@@ -126,6 +122,8 @@ const streamText = ref('')
 const error = ref('')
 const busy = ref(false)
 const extracting = ref(false)
+const extractionProgress = ref('正在整理设定…')
+const conversationContext = ref<InspirationSession['context']>()
 const webSearch = ref(false)
 const requestWebSearch = ref(false)
 const retryAvailable = computed(() => history.value[history.value.length - 1]?.role === 'user')
@@ -139,34 +137,10 @@ const latestPromptIndex = computed(() => {
 const latestPrompt = computed(() => history.value[latestPromptIndex.value]?.content || '')
 let controller: AbortController | null = null
 
-const INSPIRATION_SESSIONS_KEY = 'novel-writer-inspiration-sessions'
-const MAX_SAVED_SESSIONS = 5
+let restoring = false
 
 function cloneHistory(messages: InspirationMessage[]): InspirationMessage[] {
   return JSON.parse(JSON.stringify(messages)) as InspirationMessage[]
-}
-
-function readSavedSessions(): InspirationSession[] {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(INSPIRATION_SESSIONS_KEY) || '[]') as unknown
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .filter(item => item && typeof item === 'object' && Array.isArray((item as InspirationSession).messages))
-      .map(item => item as InspirationSession)
-      .filter(item => item.messages.every(message =>
-        (message.role === 'user' || message.role === 'assistant') && typeof message.content === 'string'))
-      .slice(0, MAX_SAVED_SESSIONS)
-  } catch {
-    return []
-  }
-}
-
-function writeSavedSessions() {
-  try {
-    localStorage.setItem(INSPIRATION_SESSIONS_KEY, JSON.stringify(savedSessions.value.slice(0, MAX_SAVED_SESSIONS)))
-  } catch {
-    // Storage failure should not interrupt the conversation.
-  }
 }
 
 function sessionTitle(messages: InspirationMessage[]): string {
@@ -185,32 +159,39 @@ const sessionOptions = computed(() => savedSessions.value.map(session => ({
   value: session.id,
 })))
 
-savedSessions.value = readSavedSessions()
 if (savedSessions.value[0]) {
   selectedSessionId.value = savedSessions.value[0].id
   history.value = cloneHistory(savedSessions.value[0].messages)
   selectedKnowledgeIds.value = Array.isArray(savedSessions.value[0].knowledgeIds)
     ? savedSessions.value[0].knowledgeIds!.filter(id => typeof id === 'string') : null
+  input.value = savedSessions.value[0].draft
+  webSearch.value = savedSessions.value[0].webSearch
+  conversationContext.value = savedSessions.value[0].context
 }
 
 function persistCurrentHistory() {
-  if (!history.value.some(message => message.role === 'user')) return
+  if (restoring || !sessionsStore.initialized || (!history.value.some(message => message.role === 'user') && !input.value.trim())) return
   const id = selectedSessionId.value || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
   selectedSessionId.value = id
   const next: InspirationSession = {
     id,
-    title: sessionTitle(history.value),
+    title: history.value.length ? sessionTitle(history.value) : input.value.trim().slice(0, 42),
     updatedAt: new Date().toISOString(),
     messages: cloneHistory(history.value),
     knowledgeIds: selectedKnowledgeIds.value === null ? null : [...selectedKnowledgeIds.value],
+    draft: input.value,
+    webSearch: webSearch.value,
+    context: conversationContext.value,
   }
-  savedSessions.value = [next, ...savedSessions.value.filter(session => session.id !== id)]
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-    .slice(0, MAX_SAVED_SESSIONS)
-  writeSavedSessions()
+  const previous = savedSessions.value.find(session => session.id === id)
+  if (previous && JSON.stringify({ ...previous, updatedAt: '' }) === JSON.stringify({ ...next, updatedAt: '' })) return
+  sessionsStore.upsert(next)
 }
 
 function loadSession(id: string | null) {
+  persistCurrentHistory()
+  restoring = true
+  try {
   stop()
   showKnowledgeDraft.value = false
   if (!id) {
@@ -219,6 +200,8 @@ function loadSession(id: string | null) {
     input.value = ''
     error.value = ''
     selectedKnowledgeIds.value = null
+    conversationContext.value = undefined
+    webSearch.value = false
     return
   }
   const session = savedSessions.value.find(item => item.id === id)
@@ -226,11 +209,14 @@ function loadSession(id: string | null) {
   selectedSessionId.value = session.id
   history.value = cloneHistory(session.messages)
   selectedKnowledgeIds.value = Array.isArray(session.knowledgeIds) ? session.knowledgeIds.filter(id => typeof id === 'string') : null
-  input.value = ''
+  input.value = session.draft
+  webSearch.value = session.webSearch
+  conversationContext.value = session.context
   error.value = ''
   void nextTick(() => {
     if (historyElement.value) historyElement.value.scrollTop = historyElement.value.scrollHeight
   })
+  } finally { restoring = false }
 }
 
 function openKnowledgeDraft(content: string, search?: ChatSearchRecord) {
@@ -315,7 +301,7 @@ async function respond() {
           void scrollToReplyStart(request, replyIndex)
         }
       }
-    }, requestWebSearch.value, [...knowledgeIds.value])
+    }, requestWebSearch.value, [...knowledgeIds.value], conversationContext.value)
     if (controller === request && !request.signal.aborted && props.active) {
       history.value.push({ role: 'assistant', ...result })
       persistCurrentHistory()
@@ -331,16 +317,24 @@ async function respond() {
 async function extract() {
   if (busy.value) return
   const model = config.getModelForTask('outline')
-  if (!model) { error.value = '请先在设置中配置 AI 模型'; return }
+  if (!model?.apiKey.trim()) { error.value = '请先在设置中配置大纲模型及有效接口密钥。'; return }
   const request = new AbortController()
   controller = request
   busy.value = extracting.value = true
   error.value = ''
+  extractionProgress.value = '正在整理设定…'
+  void scrollToReplyStart(request, history.value.length)
   try {
     const base = JSON.parse(JSON.stringify(props.form)) as CreateWizardForm
     const snapshot = JSON.parse(JSON.stringify(history.value)) as InspirationMessage[]
-    const form = await extractInspirationSettings(model, snapshot, base, request.signal)
-    if (controller === request && !request.signal.aborted && props.active) emit('apply', form, snapshot)
+    const form = await extractInspirationSettings({ ...model }, snapshot, base, request.signal, (completed, total) => {
+      if (controller === request) extractionProgress.value = `正在整理设定：已完成 ${completed}/${total} 批…`
+    })
+    if (controller === request && !request.signal.aborted && props.active) {
+      conversationContext.value = { content: JSON.stringify(form), messageCount: snapshot.length }
+      persistCurrentHistory()
+      emit('apply', form, snapshot)
+    }
   } catch (err) {
     if (controller === request && !request.signal.aborted) error.value = err instanceof Error ? err.message : '整理失败'
   } finally {
@@ -349,7 +343,8 @@ async function extract() {
 }
 watch(() => props.active, active => { if (!active) { stop(); showKnowledgeDraft.value = false } })
 watch(history, value => emit('history-change', cloneHistory(value)), { deep: true, immediate: true })
-onBeforeUnmount(stop)
+watch([input, webSearch], persistCurrentHistory, { flush: 'sync' })
+onBeforeUnmount(() => { persistCurrentHistory(); stop() })
 </script>
 
 <style scoped>

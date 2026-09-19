@@ -6,6 +6,8 @@ release/
 *.log
 *.err.log
 .local-recovery/
+output/knowledge/
+resources/ocr/*.traineddata
 .compare/
 .claude/settings.local.json
 .codex-public-skills-temp/

@@ -1,6 +1,7 @@
 import type { ChapterRevision, Novel } from '@/types/novel'
 import type { KnowledgeBase } from '@/stores/knowledge'
 import { validateProjectBackup } from './projectBackupValidation'
+import type { InspirationSession } from './inspirationSessions'
 
 export const MAX_PROJECT_BACKUP_BYTES = 256 * 1024 * 1024
 
@@ -11,9 +12,10 @@ export interface ProjectBackup {
   novels: Novel[]
   knowledgeBases: KnowledgeBase[]
   chapterRevisions?: ChapterRevision[] // Backward-compatible extension for pending AI drafts.
+  inspirationSessions?: InspirationSession[]
 }
 
-export function createProjectBackup(novels: Novel[], knowledgeBases: KnowledgeBase[], chapterRevisions: ChapterRevision[] = []): ProjectBackup {
+export function createProjectBackup(novels: Novel[], knowledgeBases: KnowledgeBase[], chapterRevisions: ChapterRevision[] = [], inspirationSessions?: InspirationSession[]): ProjectBackup {
   return {
     format: 'ai-novel-writer-backup',
     version: 1,
@@ -21,6 +23,7 @@ export function createProjectBackup(novels: Novel[], knowledgeBases: KnowledgeBa
     novels: JSON.parse(JSON.stringify(novels)),
     knowledgeBases: JSON.parse(JSON.stringify(knowledgeBases)),
     chapterRevisions: JSON.parse(JSON.stringify(chapterRevisions)),
+    ...(inspirationSessions === undefined ? {} : { inspirationSessions: JSON.parse(JSON.stringify(inspirationSessions)) }),
   }
 }
 

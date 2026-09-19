@@ -41,6 +41,7 @@ interface ConfigData {
   embedding?: Partial<EmbeddingConfig>
   skills?: WritingSkill[]
   aiWorkflowMode?: AiWorkflowMode
+  pdfVisionEnabled?: boolean
 }
 
 interface SessionSecrets {
@@ -180,6 +181,7 @@ export const useConfigStore = defineStore('config', () => {
   const embedding = reactive<EmbeddingConfig>({ ...DEFAULT_EMBEDDING_CONFIG })
   const skills = ref<WritingSkill[]>(createBuiltInSkills())
   const aiWorkflowMode = ref<AiWorkflowMode>('balanced')
+  const pdfVisionEnabled = ref(false)
   const securityStatus = reactive<ConfigSecurityStatus>({
     environment: 'browser',
     storage: isLocalDevelopment() ? 'local-development' : 'session-only',
@@ -204,6 +206,7 @@ export const useConfigStore = defineStore('config', () => {
     Object.assign(embedding, DEFAULT_EMBEDDING_CONFIG, data?.embedding || {})
     skills.value = mergeSkills(data?.skills)
     aiWorkflowMode.value = normalizeAiWorkflowMode(data?.aiWorkflowMode)
+    pdfVisionEnabled.value = data?.pdfVisionEnabled === true
     isConfigured.value = models.value.length > 0
   }
 
@@ -282,6 +285,7 @@ export const useConfigStore = defineStore('config', () => {
       embedding: { ...embedding },
       skills: JSON.parse(JSON.stringify(skills.value)),
       aiWorkflowMode: aiWorkflowMode.value,
+      pdfVisionEnabled: pdfVisionEnabled.value,
     }
     const write = async () => {
       if (hasElectronConfig()) {
@@ -369,6 +373,11 @@ export const useConfigStore = defineStore('config', () => {
     void saveConfig()
   }
 
+  function setPdfVisionEnabled(enabled: boolean) {
+    pdfVisionEnabled.value = enabled
+    void saveConfig().catch(() => undefined)
+  }
+
   function addSkill(data: Pick<WritingSkill, 'name' | 'description' | 'task' | 'instructions'>): WritingSkill {
     const now = new Date().toISOString()
     const skill: WritingSkill = {
@@ -380,20 +389,16 @@ export const useConfigStore = defineStore('config', () => {
       updatedAt: now,
     }
     skills.value.push(skill)
-    void saveConfig()
+    void saveConfig().catch(() => undefined)
     return skill
   }
 
   function updateSkill(id: string, updates: Partial<Pick<WritingSkill, 'name' | 'description' | 'task' | 'instructions' | 'enabled'>>) {
     const skill = skills.value.find(item => item.id === id)
     if (!skill) return
-    if (skill.builtIn) {
-      if (updates.enabled !== undefined) skill.enabled = updates.enabled
-    } else {
-      Object.assign(skill, updates)
-    }
+    Object.assign(skill, updates)
     skill.updatedAt = new Date().toISOString()
-    void saveConfig()
+    void saveConfig().catch(() => undefined)
   }
 
   function deleteSkill(id: string) {
@@ -420,6 +425,7 @@ export const useConfigStore = defineStore('config', () => {
     embedding,
     skills,
     aiWorkflowMode,
+    pdfVisionEnabled,
     securityStatus,
     isConfigured,
     isInitialized,
@@ -432,6 +438,7 @@ export const useConfigStore = defineStore('config', () => {
     setAssignment,
     updateEmbeddingConfig,
     setAiWorkflowMode,
+    setPdfVisionEnabled,
     addSkill,
     updateSkill,
     deleteSkill,

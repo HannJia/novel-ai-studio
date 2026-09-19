@@ -180,6 +180,7 @@ import { createProjectBackup, downloadProjectBackup, parseProjectBackup } from '
 import { MAX_PROJECT_BACKUP_BYTES } from '@/services/projectBackup'
 import { importProject } from '@/services/projectTransfer'
 import { loadProjectChapterRevisions } from '@/services/db/chapterRevisions'
+import { useInspirationSessionsStore } from '@/stores/inspirationSessions'
 
 const novelStore = useNovelStore()
 const knowledgeStore = useKnowledgeStore()
@@ -247,7 +248,7 @@ function confirmPurgeNovel(id: string) {
 
 async function exportProject() {
   try {
-    const backup = createProjectBackup(novelStore.novels, knowledgeStore.knowledgeBases, await loadProjectChapterRevisions())
+    const backup = createProjectBackup(novelStore.novels, knowledgeStore.knowledgeBases, await loadProjectChapterRevisions(), useInspirationSessionsStore().sessions)
     parseProjectBackup(JSON.stringify(backup))
     downloadProjectBackup(backup, `ai-novel-writer-backup-${new Date().toISOString().slice(0, 10)}.json`)
     message.success('项目备份已校验并导出')

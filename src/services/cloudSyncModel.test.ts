@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { useNovelStore } from '@/stores/novel'
 import { createProjectBackup } from './projectBackup'
 import { canonicalJson, decideSync, hashPayload, mergeCloudDocuments, normalizeSyncEndpoint, parseCloudDocument, projectDocuments } from './cloudSyncModel'
+import { parseInspirationSession } from './inspirationSessions'
 
 function book() {
   const store = useNovelStore()
@@ -12,6 +13,18 @@ function book() {
 beforeEach(() => setActivePinia(createPinia()))
 
 describe('云同步文档与冲突判断', () => {
+  it('merges conversations by session ID and caps the visible history at the latest five', () => {
+    const sessions = Array.from({ length: 5 }, (_, index) => parseInspirationSession({ id: `idea-${index}`, title: `${index}`,
+      updatedAt: `2026-09-1${index + 1}T00:00:00Z`, messages: [], draft: 'draft' }))
+    const project = createProjectBackup([], [], [], sessions)
+    const incoming = parseInspirationSession({ id: 'newest', title: '新会话', updatedAt: '2026-09-18T00:00:00Z', messages: [], draft: '继续聊' })
+    const merged = mergeCloudDocuments(project, new Map([['inspiration:newest', canonicalJson({ kind: 'inspiration', inspiration: incoming })]]))
+    expect(merged.inspirationSessions).toHaveLength(5)
+    expect(merged.inspirationSessions![0].id).toBe('newest')
+    expect(merged.inspirationSessions!.some(item => item.id === 'idea-0')).toBe(false)
+    expect(project.inspirationSessions).toHaveLength(5)
+    expect(() => parseCloudDocument('inspiration:newest', canonicalJson({ kind: 'inspiration', inspiration: { ...incoming, messages: 'invalid' } }))).toThrow()
+  })
   it('requires HTTPS and an origin without embedded credentials', () => {
     expect(normalizeSyncEndpoint('https://154.94.227.164/')).toBe('https://154.94.227.164')
     for (const value of ['', '不是地址', 'http://example.org', 'https://user:pass@example.org', 'https://example.org/path', 'https://example.org/?key=secret']) {

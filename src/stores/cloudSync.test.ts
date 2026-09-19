@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useNovelStore } from './novel'
 import { useKnowledgeStore } from './knowledge'
+import { useInspirationSessionsStore } from './inspirationSessions'
+import { parseInspirationSession } from '@/services/inspirationSessions'
 import { useCloudSyncStore } from './cloudSync'
 import { canonicalJson, emptySyncState, hashPayload, type CloudRecord } from '@/services/cloudSyncModel'
 
@@ -29,6 +31,7 @@ vi.mock('@/services/db/novels', () => ({
 vi.mock('@/services/db/knowledge', () => ({
   loadAllKnowledgeBasesFromDb: async () => [], saveKnowledgeBaseToDb: async () => {}, deleteKnowledgeBaseFromDb: async () => {},
 }))
+vi.mock('@/services/db/inspirationSessions', () => ({ loadInspirationSessions: async () => [], saveInspirationSessions: async () => {} }))
 vi.mock('@/services/db/chapterRevisions', async importOriginal => ({
   ...await importOriginal<any>(), loadProjectChapterRevisions: async () => [],
 }))
@@ -41,10 +44,10 @@ vi.mock('@/services/cloudSyncApi', async importOriginal => {
     memory.requests.push({ endpoint: _endpoint, path })
     if (path === 'auth/login') return { token: 'test-token-not-a-secret', expiresAt: Date.now() + 86400000,
       user: { id: memory.userId, username: memory.userId, role: 'user', quotaBytes: 100000000, usedBytes: 0 } }
-    if (path === 'auth/logout') return { ok: true }
-    if (path === 'sync/manifest') {
+    if (path === 'auth/logout' || path === 'auth/password') return { ok: true }
+    if (path === 'sync/manifest?include=inspiration') {
       if (memory.expired) throw new original.CloudApiError(401, '登录已过期，请重新登录。')
-      return { protocol: 1, records: [...memory.records.values()].map(({ payload, ...meta }) => meta) }
+      return { protocol: 1, features: ['inspiration'], records: [...memory.records.values()].map(({ payload, ...meta }) => meta) }
     }
     if (path === 'sync/pull') {
       await memory.onPull?.()
@@ -83,6 +86,7 @@ beforeEach(async () => {
   setActivePinia(createPinia())
   await useNovelStore().initStore()
   await useKnowledgeStore().initStore()
+  await useInspirationSessionsStore().initialize()
   sync = useCloudSyncStore()
   await sync.initialize()
 })
@@ -107,6 +111,33 @@ async function remoteEdit(key: string, title: string | null) {
 }
 
 describe('云同步状态机', () => {
+  it('uploads a whole unfinished conversation and restores remote drafts without any model credentials', async () => {
+    const store = useInspirationSessionsStore()
+    store.upsert(parseInspirationSession({ id: 'idea', title: '未成书', updatedAt: '2026-09-18T00:00:00Z',
+      messages: [{ role: 'user', content: '种田的故事' }], draft: '明天继续', knowledgeIds: [], webSearch: true }))
+    await loginAndEnable()
+    const remote = memory.records.get('inspiration:idea')
+    expect(remote.payload).toContain('明天继续')
+    const doc = JSON.parse(remote.payload)
+    doc.inspiration.messages.push({ role: 'assistant', content: '公司的回复' })
+    doc.inspiration.draft = '家里继续'
+    const payload = canonicalJson(doc)
+    memory.records.set('inspiration:idea', { ...remote, payload, hash: await hashPayload(payload), version: 2 })
+    await sync.syncNow()
+    expect(store.sessions[0].messages).toHaveLength(2)
+    expect(store.sessions[0].draft).toBe('家里继续')
+    expect(store.sessions[0].webSearch).toBe(true)
+    expect(sync.error).toBe('')
+  })
+  it('logs out after password changes while preserving bound novels', async () => {
+    const book = addBook()
+    await loginAndEnable()
+    await sync.changePassword('old-password', '123456')
+    expect(sync.session).toBeNull()
+    expect(sync.state.binding?.userId).toBe('owner')
+    expect(useNovelStore().getNovel(book.id)).toBeDefined()
+    expect(memory.requests.some(item => item.path === 'auth/password')).toBe(true)
+  })
   it('does not upload merely by signing in; enabling binds the local shelf', async () => {
     const novel = addBook()
     await sync.authenticate('login', 'owner', 'not-a-real-password')

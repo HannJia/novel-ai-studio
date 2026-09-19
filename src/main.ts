@@ -10,6 +10,7 @@ import { showRecoveryScreen } from './services/recoveryScreen'
 import { cloudApplyBusy, flushEditorDrafts } from './services/appLifecycle'
 import { prepareUpdateInstall } from './services/updateSafety'
 import { useCloudSyncStore } from './stores/cloudSync'
+import { useInspirationSessionsStore } from './stores/inspirationSessions'
 
 // 全局样式
 import './styles/variables.css'
@@ -36,6 +37,7 @@ async function bootstrap() {
 
     const knowledgeStore = useKnowledgeStore()
     await knowledgeStore.initStore()
+    await useInspirationSessionsStore().initialize()
     void initializeAiTaskHistory().catch(error => console.warn('AI task recovery update failed', error))
 
     window.electronAPI?.onBeforeClose?.(async () => {
@@ -43,6 +45,7 @@ async function bootstrap() {
       await Promise.all([
         novelStore.flushPendingSaves(),
         knowledgeStore.flushPendingSaves(),
+        useInspirationSessionsStore().flushPendingSaves(),
         configStore.saveConfig(),
       ])
       await useCloudSyncStore().flushBeforeClose()

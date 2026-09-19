@@ -1,5 +1,5 @@
 // Electron 主进程 - CommonJS 格式
-const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell, net } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell, net, powerMonitor } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const { fileURLToPath } = require('url')
@@ -171,6 +171,7 @@ function createWindow() {
     }, 30_000)
   })
   mainWindow.webContents.on('did-finish-load', () => getUpdates().start())
+  mainWindow.on('focus', () => { void updates?.wake() })
 
   if (isDev) {
     mainWindow.loadURL(VITE_DEV_SERVER_URL)
@@ -347,6 +348,7 @@ function assertUpdateSender(event) {
 for (const [channel, method] of [
   ['update:state', 'snapshot'], ['update:check', 'check'], ['update:download', 'download'],
   ['update:cancel', 'cancel'], ['update:install', 'install'], ['update:open-release', 'openRelease'],
+  ['update:wake', 'wake'],
 ]) {
   ipcMain.handle(channel, event => {
     assertUpdateSender(event)
@@ -394,7 +396,10 @@ for (const method of ['read', 'write']) {
   })
 }
 
-if (hasInstanceLock) app.whenReady().then(createWindow)
+if (hasInstanceLock) app.whenReady().then(() => {
+  powerMonitor.on('resume', () => { void updates?.wake() })
+  createWindow()
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

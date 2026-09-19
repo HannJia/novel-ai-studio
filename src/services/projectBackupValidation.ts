@@ -1,5 +1,6 @@
 // Version-one backups are untrusted files. Validate the entire public structure
 // before any write; do not coerce malformed values into plausible project data.
+import { parseInspirationSession } from './inspirationSessions'
 type Check = (value: unknown, path: string) => void
 const fail = (path: string): never => { throw new Error(`备份数据不完整或无效：${path}`) }
 const text: Check = (value, path) => { if (typeof value !== 'string' || value.length > 5_000_000) fail(path) }
@@ -136,6 +137,11 @@ export function validateProjectBackup(value: unknown): void {
     }))),
   })(value, '项目')
   const project = value as import('./projectBackup').ProjectBackup
+  if (project.inspirationSessions !== undefined) {
+    if (!Array.isArray(project.inspirationSessions) || project.inspirationSessions.length > 1000) fail('灵感会话')
+    project.inspirationSessions.forEach(parseInspirationSession)
+    if (new Set(project.inspirationSessions.map(item => item.id)).size !== project.inspirationSessions.length) fail('灵感会话编号重复')
+  }
   const globalIds = new Map<string, Set<string>>()
   function unique(table: string, rows: { id: string }[]) {
     const ids = globalIds.get(table) || new Set<string>()

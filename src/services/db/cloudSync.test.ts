@@ -6,6 +6,7 @@ import { emptySyncState, type SyncConflict } from '../cloudSyncModel'
 import { persistCloudState, readCloudConflicts, readCloudState } from './cloudSync'
 import { loadAllNovelsFromDb } from './novels'
 import { execute, queryAll, runTransaction } from '../database'
+import { parseInspirationSession } from '../inspirationSessions'
 
 describe('cloud synchronization database transaction', () => {
   it('commits data, bases and conflict archives together; disk failure rolls all three back', async () => {
@@ -24,6 +25,8 @@ describe('cloud synchronization database transaction', () => {
       await persistCloudState(state, [conflict], before)
       await runTransaction(() => execute("INSERT INTO ai_tasks (id,name,status) VALUES ('task','已有任务','completed')"))
       const after = createProjectBackup([book], [])
+      after.inspirationSessions = [parseInspirationSession({ id: 'idea', title: '未成书的想法', updatedAt: book.updatedAt,
+        messages: [{ role: 'user', content: '还没聊完' }], draft: '下一句话' })]
       after.novels[0].title = '云端的新书名'
       const next = { ...state, bases: { [conflict.key]: { version: 2, hash: null } } }
       writer.mockRejectedValueOnce(new Error('磁盘空间不足'))
@@ -31,11 +34,13 @@ describe('cloud synchronization database transaction', () => {
       expect((await readCloudState()).bases).toEqual({})
       expect((await readCloudConflicts())[0].resolution).toBeUndefined()
       expect((await loadAllNovelsFromDb())[0].title).toBe(book.title)
+      expect(queryAll('SELECT id FROM inspiration_sessions')).toEqual([])
       await persistCloudState(next, [{ ...conflict, resolution: 'remote' }], after)
       expect((await readCloudState()).bases[conflict.key].version).toBe(2)
       expect((await readCloudConflicts())[0].resolution).toBe('remote')
       expect((await loadAllNovelsFromDb())[0].title).toBe('云端的新书名')
       expect(queryAll('SELECT id FROM ai_tasks')).toEqual([{ id: 'task' }])
+      expect(queryAll('SELECT id FROM inspiration_sessions')).toEqual([{ id: 'idea' }])
     } finally { vi.unstubAllGlobals() }
   })
 })

@@ -1,7 +1,11 @@
+import type { LocalOcrResult } from './ocrQuality'
+
 export interface PdfPageText {
   page: number
   text: string
-  method: 'text' | 'vision'
+  method: 'text' | 'vision' | 'local-ocr'
+  decoderVersion?: number
+  ocr?: LocalOcrResult
 }
 
 const DATABASE = 'novel-writer-pdf-recognition'
@@ -34,7 +38,7 @@ export async function loadPdfPages(document: string): Promise<Map<number, PdfPag
     const transaction = db.transaction(STORE, 'readonly')
     const request = transaction.objectStore(STORE).index('document').getAll(document)
     transaction.oncomplete = () => resolve(new Map(request.result.map(row => [row.page, {
-      page: row.page, text: row.text, method: row.method,
+      page: row.page, text: row.text, method: row.method, decoderVersion: row.decoderVersion, ocr: row.ocr,
     }])))
     transaction.onerror = transaction.onabort = () => reject(new Error('读取 PDF 识别进度失败，请重试'))
   })

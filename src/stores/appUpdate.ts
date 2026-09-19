@@ -13,6 +13,7 @@ export const useAppUpdateStore = defineStore('app-update', () => {
   const dismissed = ref('')
   let initialization: Promise<void> | null = null
   let unsubscribe: (() => void) | undefined
+  const wake = () => { if (window.electronAPI?.updateWake) void run(window.electronAPI.updateWake) }
   function apply(next: AppUpdateState) {
     if (next.revision < state.value.revision) return
     state.value = next
@@ -31,12 +32,13 @@ export const useAppUpdateStore = defineStore('app-update', () => {
       const api = window.electronAPI
       if (!api?.updateGetState || !api.onUpdateState) return
       unsubscribe = api.onUpdateState(apply)
+      window.addEventListener('online', wake)
       await run(api.updateGetState)
     })()
     return initialization
   }
   const noticeKey = computed(() => `${state.value.release?.version}:${state.value.phase}`)
-  const showNotice = computed(() => ['available', 'downloaded'].includes(state.value.phase)
+  const showNotice = computed(() => state.value.supported && ['available', 'downloaded', 'error'].includes(state.value.phase)
     && dismissed.value !== noticeKey.value)
   function dismissNotice() { dismissed.value = noticeKey.value }
   async function check() {
@@ -51,6 +53,6 @@ export const useAppUpdateStore = defineStore('app-update', () => {
     try { await window.electronAPI?.updateOpenRelease?.() }
     catch { state.value = { ...state.value, error: '无法打开发布页，请检查默认浏览器设置。' } }
   }
-  onScopeDispose(() => unsubscribe?.())
+  onScopeDispose(() => { unsubscribe?.(); window.removeEventListener('online', wake) })
   return { state, init, detailsOpen, showNotice, dismissNotice, check, download, cancel, install, setAutoCheck, openRelease }
 })

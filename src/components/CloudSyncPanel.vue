@@ -14,25 +14,26 @@
       </n-radio-group>
       <form class="cloud-form" @submit.prevent="submitAuth">
         <label>账号<n-input v-model:value="username" aria-label="云同步账号" autocomplete="username" :maxlength="32" placeholder="3～32 位字母、数字、下划线或短横线" /></label>
-        <label>{{ mode === 'recover' ? '新密码' : '密码' }}<n-input v-model:value="password" aria-label="云同步密码" type="password" show-password-on="click" :maxlength="256" :autocomplete="mode === 'login' ? 'current-password' : 'new-password'" :placeholder="mode === 'login' ? '密码' : '至少 12 个字符'" /></label>
+        <label>{{ mode === 'recover' ? '新密码' : '密码' }}<n-input v-model:value="password" aria-label="云同步密码" type="password" show-password-on="click" :maxlength="256" :autocomplete="mode === 'login' ? 'current-password' : 'new-password'" :placeholder="mode === 'login' ? '密码' : '至少 6 个字符'" /></label>
+        <label v-if="mode !== 'login'">确认密码<n-input v-model:value="confirmPassword" aria-label="确认云同步密码" type="password" show-password-on="click" :maxlength="256" autocomplete="new-password" placeholder="再次输入密码" /></label>
+        <p v-if="mode !== 'login' && confirmPassword && confirmPassword !== password" class="cloud-feedback" role="alert">两次输入的密码不一致。</p>
         <label v-if="mode === 'register'">邀请码<n-input v-model:value="invite" aria-label="注册邀请码" autocomplete="off" /></label>
         <label v-if="mode === 'recover'">恢复码<n-input v-model:value="recoveryInput" aria-label="账号恢复码" type="password" show-password-on="click" autocomplete="off" /></label>
-        <n-button attr-type="submit" type="primary" :loading="working" :disabled="!username.trim() || !password || (mode !== 'login' && password.length < 12)">
+        <n-button attr-type="submit" type="primary" :loading="working" :disabled="!username.trim() || !password || (mode !== 'login' && (password.length < 6 || password !== confirmPassword))">
           {{ mode === 'login' ? '登录' : mode === 'register' ? '注册账号' : '重置密码' }}
         </n-button>
       </form>
-      <details class="cloud-server"><summary>同步服务器</summary>
-        <n-input v-model:value="sync.endpoint" aria-label="同步服务器地址" placeholder="HTTPS 服务器地址" :disabled="working" />
-      </details>
       <p v-if="sync.state.binding" class="cloud-note">本机书架绑定账号：{{ sync.state.binding.username }}</p>
     </template>
     <template v-else>
       <div class="cloud-account">
         <div><strong>{{ sync.session.user.username }}</strong><span class="cloud-role">{{ sync.session.user.role === 'admin' ? '管理员' : '个人账户' }}</span></div>
-        <n-button size="small" :disabled="sync.busy || working" @click="perform(() => sync.logout())">退出登录</n-button>
+        <div class="cloud-controls">
+          <n-button size="small" :disabled="sync.busy || working" @click="passwordDialog = true">修改密码</n-button>
+          <n-button size="small" :disabled="sync.busy || working" @click="perform(() => sync.logout())">退出登录</n-button>
+        </div>
       </div>
       <div class="cloud-details">
-        <span>服务器：{{ sync.session.endpoint }}</span>
         <span>云端空间 {{ size(sync.session.user.usedBytes) }} / {{ size(sync.session.user.quotaBytes) }}</span>
         <span>上次同步：{{ sync.state.lastSync ? new Date(sync.state.lastSync).toLocaleString('zh-CN') : '尚未同步' }}</span>
       </div>
@@ -45,7 +46,7 @@
           <template #icon><n-icon><sync-outline /></n-icon></template>立即同步
         </n-button>
       </div>
-      <p class="cloud-note">同步范围：小说、正文版本、剧情规划、资料记忆、书内对话、知识库正文与摘要。API 密钥、原始上传文件及识别缓存仅保留在本机。</p>
+      <p class="cloud-note">同步范围：小说、正文版本、剧情规划、资料记忆、书内对话、最近 5 个灵感会话及未发送草稿、知识库正文与摘要。API 密钥、原始上传文件及识别缓存仅保留在本机。</p>
       <p class="cloud-note">启用后作品将发送至此服务器。当前不是端到端加密，服务器管理者可访问云端内容。请另外保留项目备份。</p>
       <p v-if="sync.pendingDownloads" class="cloud-note">有 {{ sync.pendingDownloads }} 项云端更新等待合并。</p>
       <div v-if="sync.session.user.role === 'admin'" class="cloud-invites">
@@ -83,6 +84,17 @@
         <n-button size="tiny" @click="perform(() => sync.exportConflict(conflict.id, 'remote'))">导出云端版本</n-button>
       </div>
     </details>
+    <n-modal v-model:show="passwordDialog" preset="card" title="修改云同步密码" class="cloud-recovery-modal" :mask-closable="!working" :closable="!working" :close-on-esc="!working">
+      <form class="cloud-password-form" @submit.prevent="submitPasswordChange">
+        <label>当前密码<n-input v-model:value="currentPassword" aria-label="当前云同步密码" type="password" show-password-on="click" autocomplete="current-password" :maxlength="256" /></label>
+        <label>新密码<n-input v-model:value="newPassword" aria-label="新的云同步密码" type="password" show-password-on="click" autocomplete="new-password" :maxlength="256" placeholder="至少 6 个字符" /></label>
+        <label>确认新密码<n-input v-model:value="newPasswordConfirmation" aria-label="确认新的云同步密码" type="password" show-password-on="click" autocomplete="new-password" :maxlength="256" /></label>
+        <p v-if="newPasswordConfirmation && newPassword !== newPasswordConfirmation" role="alert" class="cloud-feedback">两次输入的密码不一致。</p>
+        <p v-if="passwordError" role="alert" class="cloud-feedback">{{ passwordError }}</p>
+        <p class="cloud-note">修改后所有设备需重新登录，小说和知识库不受影响，原账号恢复码仍有效。</p>
+        <n-button attr-type="submit" type="primary" :loading="working" :disabled="!currentPassword || newPassword.length < 6 || newPassword !== newPasswordConfirmation">确认修改密码</n-button>
+      </form>
+    </n-modal>
     <n-modal :show="!!recoveryCode" :mask-closable="false" :close-on-esc="false" preset="card" title="账号恢复码" class="cloud-recovery-modal">
       <p>恢复码只显示这一次。忘记密码时可凭它恢复账号，请单独妥善保存，不要发送给他人。</p>
       <div class="cloud-secret"><code>{{ recoveryCode }}</code><n-button quaternary circle title="复制恢复码" aria-label="复制恢复码" @click="copy(recoveryCode)"><template #icon><n-icon><copy-outline /></n-icon></template></n-button></div>
@@ -92,7 +104,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { NButton, NCheckbox, NIcon, NInput, NInputNumber, NModal, NRadioButton, NRadioGroup, NSwitch, useDialog } from 'naive-ui'
 import { CloudOutline, CopyOutline, SyncOutline } from '@vicons/ionicons5'
 import { useCloudSyncStore } from '@/stores/cloudSync'
@@ -102,6 +114,14 @@ const dialog = useDialog()
 const mode = ref<'login' | 'register' | 'recover'>('login')
 const username = ref('')
 const password = ref('')
+const confirmPassword = ref('')
+const passwordDialog = ref(false)
+const currentPassword = ref('')
+const newPassword = ref('')
+const newPasswordConfirmation = ref('')
+const passwordError = ref('')
+watch(mode, () => { password.value = ''; confirmPassword.value = ''; feedback.value = '' }, { flush: 'sync' })
+watch(passwordDialog, () => { currentPassword.value = ''; newPassword.value = ''; newPasswordConfirmation.value = ''; passwordError.value = '' })
 const invite = ref('')
 const recoveryInput = ref('')
 const recoveryCode = ref('')
@@ -117,6 +137,7 @@ function describe(payload: string | null) {
   try {
     const value = JSON.parse(payload)
     if (value.kind === 'novel') return `${value.novel.title || '未命名小说'} · ${value.novel.chapters.length} 章 · ${value.novel.currentWordCount.toLocaleString('zh-CN')} 字 · ${new Date(value.novel.updatedAt).toLocaleString('zh-CN')}`
+    if (value.kind === 'inspiration') return `${value.inspiration.title} · ${value.inspiration.messages.length} 条消息${value.inspiration.draft ? ' · 含未发送草稿' : ''}`
     return `${value.knowledge.entries.length} 条资料 · ${value.knowledge.name}`
   } catch { return '已保存的版本' }
 }
@@ -130,6 +151,9 @@ async function perform(action: () => Promise<unknown>) {
 }
 async function submitAuth() {
   await perform(async () => {
+    if (mode.value !== 'login' && (password.value.length < 6 || password.value !== confirmPassword.value)) {
+      throw new Error('密码至少 6 个字符，且两次输入必须一致。')
+    }
     if (mode.value === 'recover') {
       recoveryCode.value = (await sync.recover(username.value.trim(), recoveryInput.value.trim(), password.value)).recoveryCode
       mode.value = 'login'
@@ -137,8 +161,29 @@ async function submitAuth() {
       feedback.value = '密码已重置，请使用新密码登录。'
     } else recoveryCode.value = await sync.authenticate(mode.value, username.value.trim(), password.value, invite.value.trim())
     password.value = ''
+    confirmPassword.value = ''
     invite.value = ''
   })
+}
+async function submitPasswordChange() {
+  if (working.value) return
+  passwordError.value = ''
+  if (newPassword.value.length < 6 || newPassword.value !== newPasswordConfirmation.value) {
+    passwordError.value = '新密码至少 6 个字符，且两次输入必须一致。'
+    return
+  }
+  working.value = true
+  try {
+    const account = sync.session?.user.username || ''
+    await sync.changePassword(currentPassword.value, newPassword.value)
+    passwordDialog.value = false
+    mode.value = 'login'
+    username.value = account
+    password.value = ''
+    await Promise.resolve()
+    feedback.value = '密码已修改，请使用新密码重新登录。其他设备也需要重新登录。'
+  } catch (cause) { passwordError.value = cause instanceof Error ? cause.message : '修改密码失败，请重试。' }
+  finally { working.value = false }
 }
 async function makeInvite() {
   await perform(async () => { createdInvite.value = (await sync.createInvite(inviteUses.value || 1)).code })
@@ -148,7 +193,7 @@ async function copy(value: string) {
   catch { feedback.value = '无法访问剪贴板，请选中文字手动复制。' }
 }
 function downloadRecovery() {
-  const blob = new Blob([`AI 写作云同步账号：${username.value.trim()}\n服务器：${sync.endpoint}\n恢复码：${recoveryCode.value}\n请勿向他人提供恢复码。\n`], { type: 'text/plain;charset=utf-8' })
+  const blob = new Blob([`AI 写作云同步账号：${username.value.trim()}\n恢复码：${recoveryCode.value}\n请勿向他人提供恢复码。\n`], { type: 'text/plain;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
@@ -175,6 +220,7 @@ function resolve(id: string, side: 'local' | 'remote') {
 .cloud-feedback { font-size:13px; overflow-wrap:anywhere; }
 .cloud-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-top:16px; }
 .cloud-form label { display:grid; gap:6px; font-size:13px; min-width:0; }
+.cloud-password-form,.cloud-password-form label { display:grid; gap:10px; min-width:0; }
 .cloud-form > .n-button { justify-self:start; align-self:end; }
 .cloud-server { margin-top:14px; font-size:13px; }
 summary { cursor:pointer; padding:8px 0; }
