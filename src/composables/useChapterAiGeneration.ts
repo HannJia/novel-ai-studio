@@ -4,6 +4,7 @@ import { buildChapterWritingPlanPrompt } from '@/services/prompts'
 import type { ModelConfig } from '@/stores/config'
 import type { Novel } from '@/types/novel'
 import { countNovelWords } from '@/utils/format'
+import { MAX_CHAPTER_DRAFT_REQUESTS } from '@/services/chapterGeneration'
 
 interface ChapterAiGenerationOptions {
   content: Ref<string>
@@ -25,10 +26,12 @@ export function getChapterGenerationStatus(wordCount: number, minWords: number, 
 
 export function useChapterAiGeneration(options: ChapterAiGenerationOptions) {
   let abortController: AbortController | null = null
+  let draftRequests = 0
 
   function beginGeneration() {
     options.writing.value = true
     abortController = new AbortController()
+    draftRequests = 0
   }
 
   function stopGeneration() {
@@ -56,10 +59,12 @@ export function useChapterAiGeneration(options: ChapterAiGenerationOptions) {
         maxTokens: 1200,
         signal: getGenerationSignal(),
         taskName: '写作计划',
+        noAutomaticRetry: true,
         activityParentId,
       })
       return result.content.trim()
     } catch (error) {
+      getGenerationSignal().throwIfAborted()
       if (error instanceof Error && error.name === 'AbortError') throw error
       options.onWarning?.('写作计划生成失败，已直接进入正文生成')
       return ''
@@ -70,52 +75,37 @@ export function useChapterAiGeneration(options: ChapterAiGenerationOptions) {
     model: ModelConfig,
     messages: ChatMessage[],
     maxTokens?: number,
-    streamOptions: { stopAtWords?: number; activityParentId?: string; taskName?: string } = {},
+    streamOptions: { activityParentId?: string; taskName?: string } = {},
   ) {
-    let stopAtNaturalSentence = false
-    if ((!abortController || abortController.signal.aborted) && options.writing.value) {
-      abortController = new AbortController()
+    const signal = getGenerationSignal()
+    signal.throwIfAborted()
+    if (draftRequests >= MAX_CHAPTER_DRAFT_REQUESTS) throw new Error('本次正文生成已达到 3 次请求上限，已保留草稿，请检查后再继续')
+    draftRequests++
+    const result = await callAI({
+      model,
+      skillTask: 'writing',
+      messages,
+      stream: true,
+      signal,
+      noAutomaticRetry: true,
+      maxTokens,
+      taskName: streamOptions.taskName || '正文生成',
+      activityParentId: streamOptions.activityParentId,
+      onChunk: (chunk) => {
+        signal.throwIfAborted()
+        options.content.value += chunk
+        options.statusText.value = getChapterGenerationStatus(
+          countNovelWords(options.content.value), options.minWords, options.softWords, options.hardWords,
+        )
+        options.onChunk?.()
+      },
+    })
+    signal.throwIfAborted()
+    if (result.finishReason && !['stop', 'length'].includes(result.finishReason)) {
+      throw new Error('模型未正常完成正文输出，已保留草稿，请查看接口返回情况')
     }
-    try {
-      await callAI({
-        model,
-        skillTask: 'writing',
-        messages,
-        stream: true,
-        signal: getGenerationSignal(),
-        maxTokens,
-        taskName: streamOptions.taskName || '正文生成',
-        activityParentId: streamOptions.activityParentId,
-        shouldStop: () => stopAtNaturalSentence,
-        onChunk: (chunk) => {
-          if (stopAtNaturalSentence) return
-          options.content.value += chunk
-          options.statusText.value = getChapterGenerationStatus(
-            countNovelWords(options.content.value),
-            options.minWords,
-            options.softWords,
-            options.hardWords,
-          )
-          options.onChunk?.()
-          if (streamOptions.stopAtWords && countNovelWords(options.content.value) >= streamOptions.stopAtWords) {
-            const endingPattern = /[。！？!?…](?:[」』”’）)]*)/g
-            let match: RegExpExecArray | null
-            while ((match = endingPattern.exec(options.content.value))) {
-              const end = match.index + match[0].length
-              if (countNovelWords(options.content.value.slice(0, end)) >= streamOptions.stopAtWords) {
-                options.content.value = options.content.value.slice(0, end)
-                stopAtNaturalSentence = true
-                break
-              }
-            }
-            options.statusText.value = `AI 正在收束本章...（已达到 ${streamOptions.stopAtWords} 字目标）`
-          }
-        },
-      })
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError' && options.writing.value) return
-      throw error
-    }
+    if (result.finishReason === 'length') options.onWarning?.('输出达到模型上限，已保留正文，将检查是否需要收尾')
+    return result
   }
 
   return { beginGeneration, stopGeneration, getGenerationSignal, generateWritingPlan, streamAppend }

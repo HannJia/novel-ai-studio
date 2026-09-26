@@ -23,6 +23,8 @@ interface ElectronAPI {
   configDecrypt: (value: string) => Promise<string>
   configSecurityStatus: () => Promise<{ encryptionAvailable: boolean }>
   onBeforeClose: (callback: () => void | Promise<void>) => () => void
+  onExitConfirm: (callback: (errorDetail: string) => void) => () => void
+  sendExitChoice: (confirmed: boolean) => void
   updateGetState: () => Promise<import('./types/update').AppUpdateState>
   updateCheck: () => Promise<import('./types/update').AppUpdateState>
   updateDownload: () => Promise<import('./types/update').AppUpdateState>

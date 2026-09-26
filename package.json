@@ -1,6 +1,6 @@
 {
   "name": "ai-novel-writer",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "本地优先的 AI 长篇小说写作软件，支持作者主笔、AI 写作、知识库与剧情数据记忆",
   "author": "HannJia",
   "repository": {
@@ -41,7 +41,6 @@
     "mammoth": "^1.12.0",
     "naive-ui": "^2.44.1",
     "pinia": "^3.0.4",
-    "semver": "^7.8.5",
     "sql.js": "^1.14.1",
     "vue": "^3.5.30",
     "vue-router": "^4.6.4"

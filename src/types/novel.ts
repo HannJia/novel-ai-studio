@@ -51,6 +51,10 @@ export interface EventLogEntry {
   targetChapter?: number    // 预计推进/回收章节（从 0 开始）
   importance?: 1 | 2 | 3 | 4 | 5
   source?: 'user' | 'ai'
+  relatedArcIds?: string[]  // 与已有弧线关联，不复制弧线内容
+  evidence?: string        // 首次记录时的正文原句
+  lastProgressChapterIndex?: number
+  resolvedChapterIndex?: number
   updatedAt?: string
   timestamp: string
 }
@@ -84,7 +88,7 @@ export interface StoryArc {
 }
 
 export type ChapterPlanHorizon = 'next' | 'near' | 'far'
-export type ChapterPlanStatus = 'planned' | 'active' | 'completed' | 'archived'
+export type ChapterPlanStatus = 'planned' | 'active' | 'awaiting_review' | 'completed' | 'archived'
 
 export interface ChapterPlan {
   id: string
@@ -105,7 +109,16 @@ export interface ChapterPlan {
 }
 
 export type StoryStateTargetType = 'story_arc' | 'arc_node' | 'event' | 'chapter_plan'
-export type StoryStateProposalField = 'status' | 'targetChapter'
+export type StoryStateProposalField = 'status' | 'targetChapter' | 'create'
+
+export interface StoryEventDraft {
+  title: string
+  description: string
+  characters: string[]
+  relatedArcIds: string[]
+  targetChapter?: number
+  evidence: string
+}
 
 export interface StoryStateProposal {
   id: string
@@ -118,6 +131,7 @@ export interface StoryStateProposal {
   newValue: string
   reason: string
   evidence: string
+  eventDraft?: StoryEventDraft
   chapterIndex: number
   status: 'pending' | 'accepted' | 'rejected'
   source: 'ai' | 'user'
@@ -200,7 +214,7 @@ export interface DataPanelItemDraft {
   equipmentState?: EquipmentState
 }
 
-export type DataPanelMutation =
+type DataPanelMutation =
   | { kind: 'create'; item: DataPanelItemDraft }
   | { kind: 'equipment'; ownerItemName: string; state: EquipmentState }
   | { kind: 'field'; field: DataPanelField }

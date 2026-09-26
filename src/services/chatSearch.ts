@@ -165,6 +165,8 @@ interface AssistantChatOptions {
   signal: AbortSignal
   onChunk?: (text: string) => void
   stream?: boolean
+  timeoutMs?: number
+  noAutomaticRetry?: boolean
 }
 
 export async function chatWithOptionalSearch(options: AssistantChatOptions): Promise<{ content: string; search?: ChatSearchRecord; responseFormat?: 'json' | 'claude-sse' }> {
@@ -175,7 +177,11 @@ export async function chatWithOptionalSearch(options: AssistantChatOptions): Pro
       throw new Error('当前配置是联网专用模型，无法保证关闭搜索。请在设置中切换普通模型后再使用不联网对话。')
     }
     // Search is scoped to explicit chat entry points, not writing/outline/review.
-    return callAI({ model, messages, signal, stream: options.stream ?? true, onChunk: options.onChunk })
+    return callAI({
+      model, messages, signal, stream: options.stream ?? true, onChunk: options.onChunk,
+      timeoutMs: options.timeoutMs,
+      noAutomaticRetry: options.noAutomaticRetry,
+    })
   }
   let endpoint: URL
   try { endpoint = new URL(openAiV1BaseUrl(model.baseUrl)) }

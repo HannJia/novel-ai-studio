@@ -23,7 +23,7 @@
         <template #icon><n-icon><add-outline /></n-icon></template>
         添加事件
       </n-button>
-      <n-button v-else-if="activeTab === 'proposals'" :loading="scanningState" :disabled="!latestCompletedChapter" type="primary" @click="scanLatestChapterState">
+      <n-button v-else-if="activeTab === 'proposals'" :loading="scanningState" :disabled="!latestCompletedChapter" type="primary" @click="scanChapterState()">
         检查最新章节
       </n-button>
     </header>
@@ -33,6 +33,8 @@
       <span><strong>{{ pendingNodeCount }}</strong> 个待完成节点</span>
       <span><strong>{{ unresolvedEventCount }}</strong> 个待推进事件</span>
       <span><strong>{{ activePlanCount }}</strong> 条进行中计划</span>
+      <span><strong>{{ awaitingPlans.length }}</strong> 条计划待核对</span>
+      <span><strong>{{ openPromises.length }}</strong> 条未兑现期待</span>
       <span><strong>{{ pendingProposalCount }}</strong> 条待审状态提案</span>
       <span><strong>{{ memoryRecordCount }}</strong> 条可检索记忆</span>
     </div>
@@ -98,6 +100,63 @@
             </div>
           </section>
         </div>
+      </n-tab-pane>
+
+      <n-tab-pane name="relay" tab="剧情接力">
+        <section class="relay-section">
+          <div class="relay-heading">
+            <h3>待核对计划</h3>
+            <n-button v-if="latestCompletedChapter" text type="primary" :loading="scanningState" @click="scanChapterState()">检查最新章节</n-button>
+          </div>
+          <div v-if="awaitingPlans.length" class="relay-list">
+            <div v-for="plan in awaitingPlans" :key="plan.id" class="relay-row">
+              <div class="relay-main">
+                <strong>{{ plan.title }}</strong>
+                <span>{{ chapterRangeLabel(plan.targetChapterStart, plan.targetChapterEnd) }} · {{ plan.objective }}</span>
+              </div>
+              <div class="relay-actions">
+                <n-button size="small" secondary :loading="scanningState" @click="scanChapterState(plan.targetChapterEnd, plan.targetChapterStart)">AI 核对</n-button>
+                <n-button size="small" quaternary @click="openPlanModal(plan)">手动核对</n-button>
+              </div>
+            </div>
+          </div>
+          <n-empty v-else description="没有待核对的章节计划" />
+        </section>
+        <section class="relay-section">
+          <div class="relay-heading">
+            <h3>未兑现的期待</h3>
+            <n-button text type="primary" @click="openEventModal()">手动记录</n-button>
+          </div>
+          <div v-if="openPromises.length" class="relay-list">
+            <div v-for="event in openPromises" :key="event.id" class="relay-row">
+              <div class="relay-main">
+                <strong>{{ event.title }}</strong>
+                <span>第 {{ event.chapterIndex + 1 }} 章提出 · {{ event.lastProgressChapterIndex === undefined ? '尚未记录后续推进' : `最近第 ${event.lastProgressChapterIndex + 1} 章推进` }}</span>
+                <span v-if="event.relatedArcIds?.length">关联：{{ event.relatedArcIds.map(id => novel?.storyArcs?.find(arc => arc.id === id)?.title).filter(Boolean).join('、') }}</span>
+                <span v-if="event.evidence" class="relay-evidence">原文：{{ event.evidence }}</span>
+              </div>
+              <n-button size="small" quaternary title="编辑期待" @click="openEventModal(event)">
+                <template #icon><n-icon><create-outline /></n-icon></template>
+              </n-button>
+            </div>
+          </div>
+          <n-empty v-else description="没有未兑现的长线期待" />
+        </section>
+        <section class="relay-section">
+          <div class="relay-heading"><h3>活跃弧线</h3></div>
+          <div v-if="relayArcs.length" class="relay-list">
+            <div v-for="arc in relayArcs" :key="arc.id" class="relay-row">
+              <div class="relay-main">
+                <strong>{{ arc.title }}</strong>
+                <span>{{ arc.description || '尚未填写目标' }} · {{ arc.nodes.filter(node => node.status === 'pending').length }} 个待推进节点</span>
+              </div>
+              <n-button size="small" quaternary title="编辑弧线" @click="openArcModal(arc)">
+                <template #icon><n-icon><create-outline /></n-icon></template>
+              </n-button>
+            </div>
+          </div>
+          <n-empty v-else description="没有活跃弧线" />
+        </section>
       </n-tab-pane>
 
       <n-tab-pane name="arcs" tab="故事弧线">
@@ -208,7 +267,10 @@
                 <span v-if="event.targetChapter !== undefined">预计第 {{ event.targetChapter + 1 }} 章推进</span>
                 <span>重要度 {{ event.importance || 3 }}/5</span>
                 <span>{{ eventStatusLabel(event.status) }}</span>
+                <span v-if="event.resolvedChapterIndex !== undefined">第 {{ event.resolvedChapterIndex + 1 }} 章兑现</span>
+                <span v-if="event.relatedArcIds?.length">关联：{{ event.relatedArcIds.map(id => novel?.storyArcs?.find(arc => arc.id === id)?.title).filter(Boolean).join('、') }}</span>
               </div>
+              <blockquote v-if="event.evidence" class="timeline-evidence">原文：{{ event.evidence }}</blockquote>
               <div v-if="event.characters?.length" class="character-tags">
                 <n-tag v-for="name in event.characters" :key="name" size="small" round>{{ name }}</n-tag>
               </div>
@@ -356,6 +418,8 @@
           <n-form-item label="地点"><n-input v-model:value="eventForm.location" /></n-form-item>
           <n-form-item label="重要度"><n-input-number v-model:value="eventForm.importance" :min="1" :max="5" /></n-form-item>
           <n-form-item label="相关角色"><n-input v-model:value="eventForm.characters" placeholder="多个角色用逗号分隔" /></n-form-item>
+          <n-form-item label="关联弧线"><n-select v-model:value="eventForm.relatedArcIds" multiple clearable :options="arcLinkOptions" placeholder="可选" /></n-form-item>
+          <n-form-item label="正文证据" class="span-2"><n-input v-model:value="eventForm.evidence" type="textarea" :rows="2" placeholder="可记录原文，便于后续核对" /></n-form-item>
           <n-form-item label="事件描述" class="span-2"><n-input v-model:value="eventForm.description" type="textarea" :rows="4" /></n-form-item>
         </div>
       </n-form>
@@ -365,7 +429,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NEmpty, NForm, NFormItem, NIcon, NInput, NInputNumber, NModal,
@@ -400,7 +464,7 @@ const configStore = useConfigStore()
 const novelId = computed(() => route.params.novelId as string)
 const novel = computed(() => novelStore.getNovel(novelId.value))
 
-const planningTabs = new Set(['volumes', 'plans', 'arcs', 'timeline', 'memory', 'proposals'])
+const planningTabs = new Set(['volumes', 'plans', 'relay', 'arcs', 'timeline', 'memory', 'proposals'])
 const requestedTab = String(route.query.tab || '')
 const activeTab = ref(planningTabs.has(requestedTab) ? requestedTab : 'plans')
 const timelineQuery = ref('')
@@ -420,7 +484,8 @@ const memorySearching = ref(false)
 const memoryIndexing = ref(false)
 const memoryResults = ref<SemanticEvidence[]>([])
 const memoryIndexInfo = ref<SemanticIndexInfo>({ recordCount: 0, provider: 'local', model: 'local-hash-v1', dimensions: 0, updatedAt: '' })
-const chapterCreationPrompted = ref(false)
+let chapterCreationPrompted = false
+let chapterCreationDialog: ReturnType<typeof dialog.info> | null = null
 
 const planLanes: Array<{ horizon: ChapterPlanHorizon; label: string; description: string }> = [
   { horizon: 'next', label: '下一章', description: '可直接进入写作的详细计划' },
@@ -430,6 +495,7 @@ const planLanes: Array<{ horizon: ChapterPlanHorizon; label: string; description
 const planHorizonOptions = planLanes.map(item => ({ label: item.label, value: item.horizon }))
 const planStatusOptions = [
   { label: '待执行', value: 'planned' }, { label: '进行中', value: 'active' },
+  { label: '待核对', value: 'awaiting_review' },
   { label: '已完成', value: 'completed' }, { label: '已归档', value: 'archived' },
 ]
 
@@ -458,10 +524,16 @@ const memorySourceOptions = [
 
 const characterOptions = computed(() => (novel.value?.characters || []).map(character => ({ label: character.name, value: character.id })))
 const sortedArcs = computed(() => [...(novel.value?.storyArcs || [])].sort((a, b) => b.importance - a.importance || a.createdAt.localeCompare(b.createdAt)))
+const arcLinkOptions = computed(() => sortedArcs.value.map(arc => ({ label: arc.title, value: arc.id })))
+const relayArcs = computed(() => sortedArcs.value.filter(arc => arc.status === 'active' || arc.status === 'paused'))
+const openPromises = computed(() => (novel.value?.eventLog || [])
+  .filter(event => event.type === '伏笔' && event.status !== 'resolved' && event.status !== 'abandoned')
+  .sort((a, b) => (b.lastProgressChapterIndex ?? b.chapterIndex) - (a.lastProgressChapterIndex ?? a.chapterIndex)))
 const activeArcCount = computed(() => sortedArcs.value.filter(arc => arc.status === 'active').length)
 const pendingNodeCount = computed(() => sortedArcs.value.reduce((sum, arc) => sum + arc.nodes.filter(node => node.status === 'pending').length, 0))
 const unresolvedEventCount = computed(() => (novel.value?.eventLog || []).filter(event => event.status !== 'resolved' && event.status !== 'abandoned').length)
 const sortedPlans = computed(() => [...(novel.value?.chapterPlans || [])].sort((a, b) => a.targetChapterStart - b.targetChapterStart || a.createdAt.localeCompare(b.createdAt)))
+const awaitingPlans = computed(() => sortedPlans.value.filter(plan => plan.status === 'awaiting_review'))
 const plansByHorizon = computed<Record<ChapterPlanHorizon, ChapterPlan[]>>(() => ({
   next: sortedPlans.value.filter(plan => plan.horizon === 'next' && (plan.status === 'planned' || plan.status === 'active')),
   near: sortedPlans.value.filter(plan => plan.horizon === 'near' && (plan.status === 'planned' || plan.status === 'active')),
@@ -547,21 +619,23 @@ async function runMemorySearch() {
 
 onMounted(() => { void refreshMemoryIndexInfo() })
 
-watch(planningReady, ready => {
-  if (!ready) {
-    chapterCreationPrompted.value = false
-    return
-  }
-  if (chapterCreationPrompted.value) return
-  chapterCreationPrompted.value = true
-  dialog.info({
+onBeforeUnmount(() => {
+  chapterCreationDialog?.destroy()
+  chapterCreationDialog = null
+})
+
+function offerChapterCreation() {
+  if (chapterCreationPrompted || !planningReady.value || novel.value?.chapters.length) return
+  chapterCreationPrompted = true
+  const targetNovelId = novelId.value
+  chapterCreationDialog = dialog.info({
     title: '剧情规划已完成',
     content: '分卷、章节计划、故事弧线和故事时间线都已创建完成，是否现在创建章节？',
     positiveText: '创建章节',
     negativeText: '稍后再说',
-    onPositiveClick: () => router.push(`/workspace/${novelId.value}/chapters`),
+    onPositiveClick: () => router.push(`/workspace/${targetNovelId}/chapters`),
   })
-}, { immediate: true })
+}
 
 function arcTypeLabel(type: StoryArcType) { return arcTypeOptions.find(item => item.value === type)?.label || type }
 function arcStatusLabel(status: StoryArcStatus) { return arcStatusOptions.find(item => item.value === status)?.label || status }
@@ -595,6 +669,7 @@ async function generatePlans() {
       added += 1
     }
     message.success(added ? `已生成 ${added} 条三层章节计划` : '没有新增计划，重复内容已跳过')
+    if (added) offerChapterCreation()
   } catch (error) {
     message.error(error instanceof Error ? error.message : '章节计划生成失败')
   } finally {
@@ -612,12 +687,14 @@ async function confirmVolumesAndGeneratePlans() {
   if ((novel.value?.chapterPlans || []).length) {
     novelStore.setChapterPlanConfirmed(novelId.value, true)
     message.success('分卷规划已确认，已有章节计划可继续编辑')
+    offerChapterCreation()
     return
   }
   message.info('分卷规划已确认，正在生成首批章节计划')
   await generatePlans()
   if ((novel.value?.chapterPlans || []).length) {
     novelStore.setChapterPlanConfirmed(novelId.value, true)
+    offerChapterCreation()
   }
 }
 
@@ -665,6 +742,7 @@ function submitPlan() {
   else novelStore.addChapterPlan(novelId.value, data)
   showPlanModal.value = false
   message.success('章节计划已保存')
+  offerChapterCreation()
 }
 function removePlan(planId: string) { novelStore.deleteChapterPlan(novelId.value, planId); message.success('章节计划已删除') }
 
@@ -691,13 +769,19 @@ function refreshPlan(plan: ChapterPlan) {
   message.success('已根据当前滚动位置局部刷新下一章计划，可继续编辑细节')
 }
 
-async function scanLatestChapterState() {
-  if (!novel.value || !latestCompletedChapter.value || scanningState.value) return
+async function scanChapterState(chapterIndex?: number, startIndex = chapterIndex) {
+  if (!novel.value || scanningState.value) return
+  const chapter = chapterIndex === undefined ? latestCompletedChapter.value
+    : [...novel.value.chapters].filter(item => item.chapterIndex <= chapterIndex
+      && item.chapterIndex >= (startIndex ?? chapterIndex)
+      && ['completed', 'reviewed', 'finalized', 'locked'].includes(item.status))
+      .sort((a, b) => b.chapterIndex - a.chapterIndex)[0]
+  if (!chapter) { message.warning('对应章节尚未完成，无法 AI 核对'); return }
   const model = configStore.getModelForTask('review') || configStore.getModelForTask('writing')
   if (!model) { message.warning('请先配置审查模型'); return }
   scanningState.value = true
   try {
-    const drafts = await generateStoryStateProposalDrafts(novel.value, latestCompletedChapter.value, model)
+    const drafts = await generateStoryStateProposalDrafts(novel.value, chapter, model)
     let added = 0
     for (const draft of drafts) {
       if (novelStore.addStoryStateProposal(novelId.value, draft)) added += 1
@@ -713,11 +797,12 @@ async function scanLatestChapterState() {
 const proposalTargetLabels: Record<StoryStateTargetType, string> = { story_arc: '故事弧线', arc_node: '弧线节点', event: '时间线事件', chapter_plan: '章节计划' }
 const proposalStatusLabels: Record<string, string> = {
   active: '推进中', paused: '暂停', completed: '已完成', abandoned: '已放弃', pending: '待完成',
-  planted: '已埋设', developing: '推进中', resolved: '已解决', planned: '待执行', archived: '已归档',
+  planted: '已埋设', developing: '推进中', resolved: '已解决', planned: '待执行', awaiting_review: '待核对', archived: '已归档',
 }
 function proposalTargetLabel(target: StoryStateTargetType) { return proposalTargetLabels[target] }
-function proposalFieldLabel(field: StoryStateProposalField) { return field === 'status' ? '状态变更' : '预计章节调整' }
+function proposalFieldLabel(field: StoryStateProposalField) { return field === 'create' ? '新增长线期待' : field === 'status' ? '状态变更' : '预计章节调整' }
 function proposalValueLabel(proposal: StoryStateProposal) {
+  if (proposal.field === 'create') return proposal.eventDraft?.description || proposal.reason
   if (proposal.field === 'targetChapter') return `第 ${Number(proposal.oldValue) + 1} 章 → 第 ${Number(proposal.newValue) + 1} 章`
   return `${proposalStatusLabels[proposal.oldValue] || proposal.oldValue} → ${proposalStatusLabels[proposal.newValue] || proposal.newValue}`
 }
@@ -767,6 +852,7 @@ async function extractArcsFromOutline(options: { onlyWhenEmpty?: boolean; silent
     }
     if (!createdCount && !options.silent) message.info('没有新增弧线，同名内容已跳过')
     else if (createdCount && !options.silent) message.success(`已提取 ${createdCount} 条故事弧线`)
+    if (createdCount) offerChapterCreation()
   } catch (error) {
     if (options.silent) message.warning('故事弧线自动提取失败，可手动重试')
     else message.error(error instanceof Error ? error.message : '故事弧线提取失败')
@@ -816,7 +902,7 @@ const showEventModal = ref(false)
 const editingEventId = ref('')
 const eventForm = ref(emptyEventForm())
 function emptyEventForm() {
-  return { title: '', description: '', type: '主线' as EventLogEntry['type'], status: 'developing' as NonNullable<EventLogEntry['status']>, chapter: Math.max(1, novel.value?.chapters.length || 1), targetChapter: null as number | null, storyTime: '', location: '', importance: 3 as 1 | 2 | 3 | 4 | 5, characters: '' }
+  return { title: '', description: '', type: '主线' as EventLogEntry['type'], status: 'developing' as NonNullable<EventLogEntry['status']>, chapter: Math.max(1, novel.value?.chapters.length || 1), targetChapter: null as number | null, storyTime: '', location: '', importance: 3 as 1 | 2 | 3 | 4 | 5, characters: '', relatedArcIds: [] as string[], evidence: '' }
 }
 function openEventModal(event?: EventLogEntry) {
   editingEventId.value = event?.id || ''
@@ -824,7 +910,7 @@ function openEventModal(event?: EventLogEntry) {
     title: event.title, description: event.description, type: event.type, status: event.status || 'resolved',
     chapter: event.chapterIndex + 1, targetChapter: event.targetChapter !== undefined ? event.targetChapter + 1 : null,
     storyTime: event.storyTime || '', location: event.location || '', importance: event.importance || 3,
-    characters: (event.characters || []).join('、'),
+    characters: (event.characters || []).join('、'), relatedArcIds: [...(event.relatedArcIds || [])], evidence: event.evidence || '',
   } : emptyEventForm()
   showEventModal.value = true
 }
@@ -835,6 +921,8 @@ function eventPayload() {
     targetChapter: eventForm.value.targetChapter ? eventForm.value.targetChapter - 1 : undefined,
     storyTime: eventForm.value.storyTime.trim(), location: eventForm.value.location.trim(), importance: eventForm.value.importance,
     characters: eventForm.value.characters.split(/[,，、]/).map(value => value.trim()).filter(Boolean),
+    relatedArcIds: eventForm.value.relatedArcIds, evidence: eventForm.value.evidence.trim(),
+    resolvedChapterIndex: eventForm.value.status === 'resolved' ? eventForm.value.chapter - 1 : undefined,
     scope: 'chapter' as const, hintCount: 0, source: 'user' as const,
   }
 }
@@ -843,6 +931,7 @@ function submitEvent() {
   else novelStore.addEvent(novelId.value, eventPayload())
   showEventModal.value = false
   message.success('时间线事件已保存')
+  offerChapterCreation()
 }
 function removeEvent(eventId: string) { novelStore.deleteEvent(novelId.value, eventId); message.success('事件已删除') }
 </script>
@@ -877,6 +966,16 @@ function removeEvent(eventId: string) { novelStore.deleteEvent(novelId.value, ev
 .plan-beats { margin: 8px 0 10px; padding-left: 18px; color: var(--text-color-secondary); font-size: 12px; line-height: 1.6; }
 .empty-plan { display: flex; min-height: 96px; align-items: center; justify-content: center; flex-direction: column; gap: 6px; border: 1px dashed var(--border-color); border-radius: var(--radius-md); background: transparent; color: var(--text-color-tertiary); cursor: pointer; }
 .empty-plan:hover { border-color: var(--color-primary); color: var(--color-primary); }
+.relay-section { padding: 18px 0; border-bottom: 1px solid var(--border-color-light); }
+.relay-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.relay-heading h3 { margin: 0; color: var(--text-color-primary); font-size: 15px; }
+.relay-list { display: grid; }
+.relay-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; padding: 12px 0; border-top: 1px solid var(--border-color-light); }
+.relay-main { display: grid; gap: 4px; min-width: 0; }
+.relay-main strong { color: var(--text-color-primary); font-size: 13px; }
+.relay-main span { color: var(--text-color-secondary); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.relay-evidence { color: var(--text-color-tertiary) !important; }
+.relay-actions { display: flex; flex-shrink: 0; gap: 6px; }
 .proposal-list { display: flex; flex-direction: column; padding-top: 8px; }
 .proposal-card { padding: 16px 0; border-bottom: 1px solid var(--border-color-light); }
 .proposal-header { flex-wrap: wrap; }
@@ -884,7 +983,7 @@ function removeEvent(eventId: string) { novelStore.deleteEvent(novelId.value, ev
 .proposal-header > span { color: var(--text-color-tertiary); font-size: 12px; }
 .proposal-change { display: flex; align-items: center; gap: 10px; margin: 12px 0 8px; }
 .proposal-change span { color: var(--text-color-tertiary); font-size: 12px; }
-.proposal-change code { padding: 4px 7px; border-radius: var(--radius-sm); background: var(--bg-color-secondary); color: var(--text-color-primary); font-family: inherit; font-size: 12px; }
+.proposal-change code { min-width: 0; padding: 4px 7px; border-radius: var(--radius-sm); background: var(--bg-color-secondary); color: var(--text-color-primary); font-family: inherit; font-size: 12px; white-space: normal; overflow-wrap: anywhere; }
 .proposal-card p, .proposal-card blockquote { color: var(--text-color-secondary); font-size: 13px; line-height: 1.65; }
 .proposal-card blockquote { margin: 8px 0; padding-left: 10px; border-left: 2px solid var(--border-color); color: var(--text-color-tertiary); }
 .proposal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
@@ -921,6 +1020,7 @@ function removeEvent(eventId: string) { novelStore.deleteEvent(novelId.value, ev
 .timeline-content { min-width: 0; padding: 14px 0 20px; border-bottom: 1px solid var(--border-color-light); }
 .timeline-heading strong { font-size: 14px; }
 .timeline-content p { margin: 8px 0; color: var(--text-color-secondary); font-size: 13px; line-height: 1.65; white-space: pre-wrap; }
+.timeline-evidence { margin: 8px 0; padding-left: 10px; border-left: 2px solid var(--border-color); color: var(--text-color-tertiary); font-size: 12px; }
 .character-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
 .memory-results { display: flex; flex-direction: column; }
 .memory-result { padding: 15px 0; border-bottom: 1px solid var(--border-color-light); }
@@ -946,5 +1046,6 @@ function removeEvent(eventId: string) { novelStore.deleteEvent(novelId.value, ev
   .timeline-row { grid-template-columns: 68px minmax(0, 1fr); gap: 12px; }
   .node-row { grid-template-columns: 24px 54px minmax(0, 1fr) 28px; }
   .plan-board { grid-template-columns: 1fr; }
+  .relay-row { align-items: flex-start; flex-direction: column; gap: 8px; }
 }
 </style>

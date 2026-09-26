@@ -1,6 +1,6 @@
 import type { Page } from 'tesseract.js'
 
-export interface OcrBox { x0: number; y0: number; x1: number; y1: number }
+interface OcrBox { x0: number; y0: number; x1: number; y1: number }
 export interface OcrLine {
   id: string; original: string; text: string; confidence: number; box: OcrBox; reasons: string[]
   status: 'local' | 'pending' | 'reviewed' | 'corrected' | 'uncertain' | 'manual'

@@ -182,6 +182,10 @@ export async function loadAllNovelsFromDb(): Promise<Novel[]> {
       targetChapter: r.target_chapter ?? undefined,
       importance: normalizeImportance(r.importance),
       source: r.source === 'ai' ? 'ai' : 'user',
+      relatedArcIds: JSON.parse(r.related_arc_ids || '[]'),
+      evidence: r.evidence || '',
+      lastProgressChapterIndex: r.last_progress_chapter ?? undefined,
+      resolvedChapterIndex: r.resolved_chapter ?? undefined,
       timestamp: r.created_at,
       updatedAt: r.updated_at || r.created_at,
     }))
@@ -313,10 +317,11 @@ export function writeNovelRows(novel: Novel) {
     }
     for (const e of novel.eventLog || []) {
       const category = eventTypeToCategory(e.type)
-      upsertRow('story_events', 'id, novel_id, chapter_index, category, scope, title, description, characters, status, hint_count, story_time, location, target_chapter, importance, source, created_at, updated_at', [
+      upsertRow('story_events', 'id, novel_id, chapter_index, category, scope, title, description, characters, status, hint_count, story_time, location, target_chapter, importance, source, related_arc_ids, evidence, last_progress_chapter, resolved_chapter, created_at, updated_at', [
         e.id, novel.id, e.chapterIndex, category, e.scope || 'chapter',
         e.title, e.description, JSON.stringify(e.characters), e.status || 'resolved', e.hintCount || 0,
         e.storyTime || '', e.location || '', e.targetChapter ?? null, e.importance || 3, e.source || 'user',
+        JSON.stringify(e.relatedArcIds || []), e.evidence || '', e.lastProgressChapterIndex ?? null, e.resolvedChapterIndex ?? null,
         e.timestamp, e.updatedAt || e.timestamp
       ])
     }

@@ -119,19 +119,10 @@ async function finishCloseHandshake({ event, ok, error = '' }) {
     return
   }
 
-  const choice = await dialog.showMessageBox(mainWindow, {
-    type: 'warning',
-    title: '保存未完成',
-    message: '关闭前保存未完成。是否仍然退出？',
-    detail: error || '请取消退出并重试保存。',
-    buttons: ['取消', '仍然退出'],
-    defaultId: 0,
-    cancelId: 0,
+  // 发送到渲染进程显示自定义对话框
+  mainWindow.webContents.send('app:exit-confirm', {
+    errorDetail: error || '本地数据保存失败。建议：取消退出，重试保存。',
   })
-  if (choice.response === 1) {
-    closeHandshakeComplete = true
-    mainWindow.close()
-  }
 }
 
 function createWindow() {
@@ -336,6 +327,17 @@ ipcMain.handle('config:write', async (event, data) => {
 ipcMain.on('app:close-ready', (event, result = {}) => {
   if (!isMainWindowSender(event)) return
   void finishCloseHandshake({ event, ok: result.ok === true, error: String(result.error || '') })
+})
+
+ipcMain.on('app:exit-choice', (event, confirmed) => {
+  if (!isMainWindowSender(event) || event.senderFrame !== mainWindow.webContents.mainFrame
+    || !isTrustedRendererUrl(event.senderFrame?.url)) return
+  if (confirmed === true) {
+    closeHandshakeComplete = true
+    mainWindow.close()
+  } else {
+    closeHandshakeInFlight = false
+  }
 })
 
 function assertUpdateSender(event) {

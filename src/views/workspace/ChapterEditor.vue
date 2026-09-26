@@ -17,7 +17,7 @@
           :value="chapter.title"
           @update:value="updateChapterTitle"
           class="chapter-title-input"
-          :readonly="isChapterLocked || aiWriting"
+          :readonly="isChapterLocked || aiWriting || completing"
           placeholder="章节标题"
           @blur="saveTitle"
         />
@@ -54,29 +54,13 @@
         </span>
         <n-button v-if="chapter.versions?.length" size="tiny" quaternary @click="openChapterVersionModal">版本 {{ chapter.versions.length }}</n-button>
         <n-button
-          v-if="chapter.status !== 'completed' && chapter.status !== 'finalized' && chapter.status !== 'locked'"
           type="primary"
           size="small"
-          :disabled="aiWriting || completing"
-          @click="completeChapter"
+          :disabled="chapterActionDisabled"
+          :loading="completing"
+          @click="handleChapterPrimaryAction"
         >
-          完成本章
-        </n-button>
-        <n-button
-          v-else-if="chapter.status === 'completed'"
-          type="warning"
-          size="small"
-          @click="finalizeChapter"
-        >
-          定稿入库
-        </n-button>
-        <n-button
-          v-else
-          type="primary"
-          size="small"
-          @click="nextChapter"
-        >
-          {{ writingMode === 'ai' ? '生成下一章' : '新建下一章' }} →
+          {{ chapterActionLabel }}
         </n-button>
       </div>
     </div>
@@ -85,7 +69,7 @@
       <div class="chapter-version-dialog">
         <p>选择要恢复的正文快照。恢复前的当前正文会自动保留为新版本。</p>
         <n-select v-model:value="selectedChapterVersionId" :options="chapterVersionOptions" />
-        <n-button type="warning" :disabled="!selectedChapterVersionId || isChapterLocked" @click="restoreSelectedChapterVersion">恢复此版本</n-button>
+        <n-button type="warning" :disabled="!selectedChapterVersionId || isChapterLocked || aiWriting || completing" @click="restoreSelectedChapterVersion">恢复此版本</n-button>
       </div>
     </n-modal>
 
@@ -127,7 +111,7 @@
           v-model="content"
           class="editor-textarea"
           :class="{ 'has-overlay': highlightEnabled }"
-          :readonly="isChapterLocked || aiWriting"
+          :readonly="isChapterLocked || aiWriting || completing"
           placeholder="正文"
           @input="onInput"
           @scroll="syncScroll"
@@ -202,6 +186,7 @@
       :writing-text="aiStatusText"
       :completing="completing"
       :completing-text="completingHint"
+      :can-stop-completing="true"
       :background-text="backgroundTaskStatus"
       :background-pending="backgroundTaskPendingCount"
       @stop="stopAI"
@@ -280,26 +265,6 @@
       </template>
     </n-modal>
 
-    <n-modal v-model:show="showDataRecommendationModal" preset="card" title="确认本章关联数据" style="width: min(620px, calc(100vw - 32px));">
-      <div v-if="dataPanels.length" class="recommendation-list">
-        <label v-for="item in dataPanels" :key="`recommend-${item.id}`" class="recommendation-row">
-          <input type="checkbox" :checked="recommendedDataPanelIds.has(item.id)" @change="toggleRecommendedDataPanel(item.id)" />
-          <span>
-            <strong>{{ getDataCategoryIcon(item.category) }} {{ item.name }}</strong>
-            <small>{{ recommendedDataPanelIds.has(item.id) ? '将作为本章生成约束' : '本章不注入' }}</small>
-          </span>
-        </label>
-      </div>
-      <div v-else class="panel-empty">当前没有数据对象，可直接继续生成。</div>
-      <template #footer>
-        <div class="data-form-actions">
-          <n-button @click="showDataRecommendationModal = false">取消</n-button>
-          <n-button @click="confirmDataRecommendations(false)">不关联并继续</n-button>
-          <n-button type="primary" @click="confirmDataRecommendations(true)">确认并生成</n-button>
-        </div>
-      </template>
-    </n-modal>
-
     <ChapterReviewSidebar
       :open="reviewPanelOpen"
       :has-content="hasReviewContent"
@@ -319,12 +284,17 @@
       :banned-result="bannedResult"
       :rendered-banned-result="renderBanned(bannedResult)"
       :expanded="expandedSections"
+      :review-status="currentReviewStatus"
+      :action-label="chapterActionLabel"
+      :action-disabled="chapterActionDisabled"
+      :action-loading="completing"
+      @proceed="handleChapterPrimaryAction"
       @toggle="reviewPanelOpen = !reviewPanelOpen"
       @close="reviewPanelOpen = false"
       @clear="closeReview"
       @approve-revision="approvePendingRevision"
       @reject-revision="rejectPendingRevision"
-      @rewrite="review => rewriteFromReview(review || undefined)"
+      @rewrite="handleReviewRepair"
       @replace-word="replaceWord"
       @replace-all="replaceAllSuggested"
       @toggle-section="toggleSection"
@@ -396,13 +366,13 @@
 
 <script setup lang="ts">
 import { registerDraftSaver } from '@/services/appLifecycle'
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, computed, onActivated, onDeactivated, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NInput, NInputNumber, NModal, NSelect, useDialog, useMessage } from 'naive-ui'
 import { useNovelStore } from '@/stores/novel'
 import { useConfigStore } from '@/stores/config'
 import { useKnowledgeStore } from '@/stores/knowledge'
-import { callAI, type ChatMessage } from '@/services/ai'
+import { callAI } from '@/services/ai'
 import { buildChapterPrompt, buildBannedWordsCheckPrompt, buildContentReviewPrompt, buildChapterSelfCheckPrompt } from '@/services/prompts'
 import { augmentWritingContextWithVectorMemory, buildWritingContext, buildReviewContext, buildChapterFactCard } from '@/services/context'
 import { chapterBackgroundQueue } from '@/services/aiTaskQueue'
@@ -418,6 +388,7 @@ import ChapterReviewSidebar from '@/components/chapter-editor/ChapterReviewSideb
 import ChapterAiStatus from '@/components/chapter-editor/ChapterAiStatus.vue'
 import WritingAdvisorSidebar from '@/components/chapter-editor/WritingAdvisorSidebar.vue'
 import { useChapterAiGeneration } from '@/composables/useChapterAiGeneration'
+import { chapterOutputTokenBudget } from '@/services/chapterGeneration'
 import { useChapterEndingCheck, type ChapterEndingCheck } from '@/composables/useChapterEndingCheck'
 import { useDataPanelSelection } from '@/composables/useDataPanelSelection'
 import { useChapterAnalysis } from '@/composables/useChapterAnalysis'
@@ -427,6 +398,8 @@ import { useWritingAdvisor } from '@/composables/useWritingAdvisor'
 import { scanContinuity, type ContinuityAlert } from '@/services/continuity'
 import type { WritingAdviceSuggestion } from '@/services/writingAdvisor'
 import { isPlaceholderChapterTitle, requestChapterMetadata } from '@/services/chapterMetadata'
+import { contentReviewVerdict, extractActionableReview, reviewNeedsRewrite } from '@/services/contentReview'
+import { requestChapterRepair, type ChapterRepairMode } from '@/services/chapterRepair'
 import {
   calculateDataPanelFieldValues,
   formatDataPanelAutomationRules,
@@ -444,8 +417,9 @@ const configStore = useConfigStore()
 const message = useMessage()
 const dialog = useDialog()
 
-const novelId = computed(() => route.params.novelId as string)
-const chapterId = computed(() => route.params.chapterId as string)
+// Each keyed, cached editor owns one chapter even while another route is active.
+const novelId = ref(route.params.novelId as string)
+const chapterId = ref(route.params.chapterId as string)
 const novel = computed(() => novelStore.getNovel(novelId.value))
 const writingMode = computed(() => novel.value?.writingMode || 'manual')
 const chapter = computed(() => novel.value?.chapters.find(c => c.id === chapterId.value))
@@ -460,6 +434,20 @@ const aiStatusText = ref('AI 正在续写...')
 const reviewLoading = ref(false)
 const completing = ref(false)
 const completingHint = ref('')
+let completionController: AbortController | null = null
+const lastMetadataSignature = ref('')
+const lastMemorySignature = ref('')
+const navigatingChapter = ref(false)
+const readyForNextChapter = computed(() => !!chapter.value
+  && ['finalized', 'locked'].includes(chapter.value.status)
+  && chapter.value.content === content.value)
+const followingChapter = computed(() => chapter.value
+  ? novel.value?.chapters.find(item => item.chapterIndex === chapter.value!.chapterIndex + 1) : undefined)
+const chapterActionLabel = computed(() => completing.value ? '正在完成本章'
+  : readyForNextChapter.value ? (followingChapter.value ? '进入下一章' : writingMode.value === 'ai' ? '生成下一章' : '新建下一章')
+    : chapter.value?.status === 'completed' ? '继续完成本章' : '完成本章')
+const chapterActionDisabled = computed(() => aiWriting.value || completing.value || savingContent.value
+  || navigatingChapter.value || !!pendingRevision.value)
 const backgroundTaskStatus = ref('')
 const backgroundTaskPendingCount = ref(0)
 const bannedResult = ref('')
@@ -467,6 +455,17 @@ const contentReviewResult = ref('')
 const editableReviewText = ref('')
 const lastContentReviewSignature = ref('')
 const lastEndingCheckSignature = ref('')
+const currentReviewStatus = computed(() => {
+  if (reviewLoading.value) return '内容审查中'
+  if (!contentReviewResult.value) return ''
+  const signature = lastContentReviewSignature.value || chapter.value?.contentReviewSignature || ''
+  if (!signature.startsWith('review-v2:')) return '原审查记录待重新验证'
+  if (signature !== getChapterContextSignature()) {
+    return '正文或设定已修改，原审查结果待更新'
+  }
+  return ({ passed: '当前正文审查已通过', 'changes-required': '当前正文需要修改', unknown: '审查结果待确认' })[
+    contentReviewVerdict(contentReviewResult.value)]
+})
 const endingCheckResult = ref<ChapterEndingCheck | null>(null)
 const pendingRevision = ref<ChapterRevision | null>(null)
 const revisionLoading = ref(false)
@@ -484,9 +483,7 @@ const dataHistoryItem = ref('all')
 const dataHistoryStatus = ref('all')
 const dataHistoryKeepCount = ref(100)
 const dataHistoryKeepChapters = ref(20)
-const showDataRecommendationModal = ref(false)
-const recommendedDataPanelIds = ref(new Set<string>())
-const dataRecommendationConfirmedChapterId = ref('')
+const manualDataPanelSelection = ref(new Map<string, boolean>())
 const dataItemForm = ref({
   name: '',
   category: '自定义' as DataPanelCategory,
@@ -524,6 +521,12 @@ const dataTemplateOptions = [
   { label: '角色面板', value: 'character' },
 ]
 const reviewPanelOpen = ref(false)
+watch(dataPanelOpen, open => {
+  if (open) reviewPanelOpen.value = false
+}, { flush: 'sync' })
+watch(reviewPanelOpen, open => {
+  if (open) dataPanelOpen.value = false
+}, { flush: 'sync' })
 const showChapterVersionModal = ref(false)
 const selectedChapterVersionId = ref('')
 const expandedSections = ref({
@@ -571,7 +574,7 @@ const {
   selectedItems: selectedDataPanels,
   selectedChanges: selectedPendingDataChanges,
   allChangesSelected: allPendingDataChangesSelected,
-  toggleItem: toggleSelectedDataPanel,
+  toggleItem: toggleDataPanelSelection,
   toggleChange: toggleDataChangeSelection,
   toggleAllChanges: toggleAllPendingDataChanges,
   clearChange: clearDataChangeSelection,
@@ -738,6 +741,32 @@ function getContentSignature(text: string): string {
   return `${text.length}:${hash >>> 0}`
 }
 
+const reviewContextSignature = computed(() => {
+  if (!novel.value || !chapter.value) return ''
+  const book = novel.value
+  const current = chapter.value
+  const source = {
+    settings: book.settings, style: book.writingStyle, outline: book.outline,
+    volume: book.volumes.find(item => item.volumeIndex === current.volumeIndex),
+    plans: (book.chapterPlans || []).filter(item => item.targetChapterStart <= current.chapterIndex && item.targetChapterEnd >= current.chapterIndex)
+      .map(item => [item.id, item.title, item.objective, item.summary, item.beats, item.relatedArcIds, item.relatedEventIds]),
+    characters: book.characters.map(item => [item.name, item.identity, item.personality, item.powerLevel, item.faction, item.description]),
+    previous: book.chapters.filter(item => item.chapterIndex < current.chapterIndex)
+      .map(item => [item.id, item.summary, item.chapterIndex === current.chapterIndex - 1 ? item.content.slice(-4000) : '']),
+    events: book.eventLog.filter(item => item.chapterIndex < current.chapterIndex)
+      .map(item => [item.id, item.title, item.description, item.type, item.status]),
+    data: book.dataPanels.map(item => [item.id, item.name, item.fields, item.ownerItemId, item.equipmentState]),
+    knowledge: (book.knowledgeBaseIds || []).map(id => [
+      id, useKnowledgeStore().getKB(id)?.entries.map(entry => [entry.id, entry.updatedAt]),
+    ]),
+  }
+  return getContentSignature(JSON.stringify(source))
+})
+
+function getChapterContextSignature(text = content.value): string {
+  return `review-v2:${getContentSignature(text)}:${reviewContextSignature.value}`
+}
+
 async function loadPendingRevision() {
   if (!chapter.value) {
     pendingRevision.value = null
@@ -838,18 +867,6 @@ function applyDataTemplate(template: string) {
   if (!dataItemForm.value.keywordsText) dataItemForm.value.keywordsText = selected.keywords
 }
 
-function getDataCategoryIcon(category: string) {
-  const map: Record<string, string> = {
-    角色: '👤',
-    作物: '🌱',
-    资源: '💰',
-    建筑: '🏗️',
-    任务: '📌',
-    自定义: '🔢',
-  }
-  return map[category] || '🔢'
-}
-
 function openDataItemModal(item?: DataPanelItem) {
   if (item) {
     editingDataItemId.value = item.id
@@ -924,16 +941,36 @@ function saveDataItem() {
 function deleteDataItem(itemId: string) {
   novelStore.deleteDataPanelItem(novelId.value, itemId)
   clearDataPanelSelection(itemId)
+  manualDataPanelSelection.value.delete(itemId)
   message.success('数据已删除')
+}
+
+function toggleSelectedDataPanel(itemId: string) {
+  toggleDataPanelSelection(itemId)
+  const overrides = new Map(manualDataPanelSelection.value)
+  overrides.set(itemId, selectedDataPanelIds.value.has(itemId))
+  manualDataPanelSelection.value = overrides
 }
 
 function autoSelectRelatedData() {
   if (!chapter.value) return
   const recommendations = getRecommendedDataPanelIds()
   const next = new Set(selectedDataPanelIds.value)
-  for (const id of recommendations) next.add(id)
+  const overrides = new Map(manualDataPanelSelection.value)
+  for (const id of recommendations) {
+    next.add(id)
+    overrides.set(id, true)
+  }
   selectedDataPanelIds.value = next
+  manualDataPanelSelection.value = overrides
   message.success(recommendations.length ? `已根据章节计划推荐 ${recommendations.length} 个数据对象` : '章节计划中未匹配到数据对象')
+}
+
+function selectRelatedDataForGeneration() {
+  const recommendations = new Set(getRecommendedDataPanelIds())
+  selectedDataPanelIds.value = new Set(dataPanels.value
+    .filter(item => manualDataPanelSelection.value.get(item.id) ?? recommendations.has(item.id))
+    .map(item => item.id))
 }
 
 function getRecommendedDataPanelIds(): string[] {
@@ -958,13 +995,6 @@ function getCurrentChapterPlanText(): string {
   )
     .map(plan => [plan.title, plan.objective, plan.summary, ...plan.beats].join('\n'))
     .join('\n')
-}
-
-function toggleRecommendedDataPanel(itemId: string) {
-  const next = new Set(recommendedDataPanelIds.value)
-  if (next.has(itemId)) next.delete(itemId)
-  else next.add(itemId)
-  recommendedDataPanelIds.value = next
 }
 
 function formatSelectedDataPanels(limit = 1200) {
@@ -1106,7 +1136,7 @@ onMounted(() => {
     pendingRevision.value = null
     bannedResult.value = chapter.value.bannedReview || ''
     contentReviewResult.value = chapter.value.contentReview || ''
-    editableReviewText.value = chapter.value.contentReview || ''
+    editableReviewText.value = extractActionableReview(chapter.value.contentReview || '')
     lastContentReviewSignature.value = chapter.value.contentReviewSignature || ''
     reviewPanelOpen.value = hasReviewContent.value
     void loadPendingRevision()
@@ -1145,40 +1175,8 @@ onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
 })
 
-// 监听路由切换（SPA 复用能触发）
-watch(
-  () => chapterId.value,
-  (newId, oldId) => {
-    if (newId === oldId) return
-    if (chapter.value) {
-      // 重新加载内容
-      content.value = chapter.value.content
-      chapterStoryDays.value = chapter.value.storyDaysElapsed || 0
-      selectedDataPanelIds.value = new Set()
-      selectedDataChangeIds.value = new Set()
-      recommendedDataPanelIds.value = new Set()
-      dataRecommendationConfirmedChapterId.value = ''
-      showDataRecommendationModal.value = false
-      endingCheckResult.value = null
-      lastEndingCheckSignature.value = ''
-      pendingRevision.value = null
-      bannedResult.value = chapter.value.bannedReview || ''
-      contentReviewResult.value = chapter.value.contentReview || ''
-      editableReviewText.value = chapter.value.contentReview || ''
-      lastContentReviewSignature.value = chapter.value.contentReviewSignature || ''
-      reviewPanelOpen.value = hasReviewContent.value
-      void loadPendingRevision()
-      // 如果是新章节则自动续写
-       if (writingMode.value === 'ai' && !content.value && configStore.getModelForTask('writing')) {
-        setTimeout(() => {
-          if (content.value || pendingRevision.value || aiWriting.value) return
-          message.info('新章节已创建，AI 开始续写...')
-          aiContinue()
-        }, 400)
-      }
-    }
-  }
-)
+onDeactivated(() => window.removeEventListener('keydown', handleKeydown))
+onActivated(() => window.addEventListener('keydown', handleKeydown))
 
 const unregisterDraftSaver = registerDraftSaver(async () => {
   if (!unsaved.value) return
@@ -1186,6 +1184,7 @@ const unregisterDraftSaver = registerDraftSaver(async () => {
 })
 
 onUnmounted(() => {
+  completionController?.abort(new DOMException('编辑器已关闭', 'AbortError'))
   unregisterDraftSaver()
   if (autoSaveTimer) clearInterval(autoSaveTimer)
   if (scanTimer) clearTimeout(scanTimer)
@@ -1215,7 +1214,7 @@ function handleKeydown(e: KeyboardEvent) {
   }
   // Escape 停止 AI
   if (e.key === 'Escape') {
-    if (aiWriting.value) {
+    if (aiWriting.value || completing.value) {
       stopAI()
     }
   }
@@ -1261,59 +1260,6 @@ function normalizeGeneratedChapterHeading() {
   unsaved.value = true
 }
 
-function endsAtNaturalSentence(text: string): boolean {
-  return /(?:[。！？!?]|…{1,2})(?:[」』”’）)]|["'])*\s*$/.test(text.trim())
-}
-
-function findLastNaturalSentenceEnd(text: string): number {
-  const trimmed = text.replace(/\s+$/, '')
-  const sentenceEndPattern = /(?:[。！？!?]|…{1,2})(?:[」』”’）)]|["'])*/g
-  let lastEnd = -1
-  let match: RegExpExecArray | null
-
-  while ((match = sentenceEndPattern.exec(trimmed))) {
-    lastEnd = match.index + match[0].length
-  }
-
-  return lastEnd
-}
-
-function removeDanglingGeneratedTail() {
-  const lines = content.value.split('\n')
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim()
-    if (!line) continue
-    const isSymbolOnly = /^[“”"'.。…·、，,；;：:\-—\s]+$/.test(line)
-    const isDanglingQuote = /^[“"']\s*[.。…·、，,；;：:\-—\s]*$/.test(line)
-    const isVeryShortUnfinished = line.length <= 12 && !endsAtNaturalSentence(line)
-    if (isSymbolOnly || isDanglingQuote || isVeryShortUnfinished) {
-      lines.splice(i)
-      content.value = lines.join('\n').replace(/\s+$/, '')
-      unsaved.value = true
-    }
-    break
-  }
-
-  if (endsAtNaturalSentence(content.value)) return
-
-  const lastNaturalEnd = findLastNaturalSentenceEnd(content.value)
-  if (lastNaturalEnd <= 0) return
-
-  const trimmedContent = content.value.slice(0, lastNaturalEnd).replace(/\s+$/, '')
-  if (trimmedContent.length === content.value.replace(/\s+$/, '').length) return
-
-  content.value = trimmedContent
-  unsaved.value = true
-}
-
-function ensureCompleteGeneratedEnding() {
-  const before = content.value
-  removeDanglingGeneratedTail()
-  if (before !== content.value && countNovelWords(content.value) < MIN_CHAPTER_WORDS) {
-    message.warning(`已清理未完成的截断句，当前 ${countNovelWords(content.value)} 字，低于 ${MIN_CHAPTER_WORDS} 字最低标准，请继续生成或重新完成本章`)
-  }
-}
-
 // 保存内容
 async function saveContent(): Promise<boolean> {
   if (!chapter.value || isChapterLocked.value || savingContent.value) return false
@@ -1324,20 +1270,20 @@ async function saveContent(): Promise<boolean> {
   }
   const contentSnapshot = content.value
   const contentSignature = getContentSignature(content.value)
-  const shouldKeepReviewSignature = lastContentReviewSignature.value === contentSignature
-    || chapter.value.contentReviewSignature === contentSignature
+  const reviewSignature = getChapterContextSignature()
+  const shouldKeepReviewSignature = lastContentReviewSignature.value === reviewSignature
+    || chapter.value.contentReviewSignature === reviewSignature
   const updated = novelStore.updateChapter(novelId.value, chapterId.value, {
     content: content.value,
-    contentReviewSignature: shouldKeepReviewSignature ? contentSignature : '',
+    contentReviewSignature: shouldKeepReviewSignature ? reviewSignature : '',
     reviewRewriteBlockedSignature: chapter.value.reviewRewriteBlockedSignature === contentSignature
       ? contentSignature
       : '',
-    status: content.value.length > 0
-      ? (chapter.value.status === 'finalized' || chapter.value.status === 'locked' ? chapter.value.status : 'writing')
-      : 'draft',
+    status: content.value === chapter.value.content && ['completed', 'finalized', 'locked'].includes(chapter.value.status)
+      ? chapter.value.status : content.value.length > 0 ? 'writing' : 'draft',
   })
   if (!updated) return false
-  lastContentReviewSignature.value = shouldKeepReviewSignature ? contentSignature : ''
+  lastContentReviewSignature.value = shouldKeepReviewSignature ? reviewSignature : ''
   savingContent.value = true
   unsaved.value = true
   try {
@@ -1389,9 +1335,17 @@ async function ensureGeneratedDraftEnding(
   const signal = getGenerationSignal()
   const maxAttempts = 1
   aiStatusText.value = 'AI 正在检查章节结尾是否完整...'
-  let check = await requestChapterEndingCheck(reviewModel, content.value, chapterGuidance, writingPlan, signal, activityParentId)
+  async function checkCurrentEnding() {
+    const signature = getChapterContextSignature()
+    const result = await requestChapterEndingCheck(reviewModel, content.value, chapterGuidance, writingPlan, signal, activityParentId)
+    signal.throwIfAborted()
+    if (signature !== getChapterContextSignature()) throw new Error('正文或设定已变化，未采纳旧版本的结尾检查')
+    return result
+  }
+  let check = await checkCurrentEnding()
   if (!chapterEndingPasses(check) && aiWriting.value) {
     aiStatusText.value = `章节结尾尚未收束，AI 正在补完当前剧情节拍（第 1/${maxAttempts} 次）...`
+    const signature = getChapterContextSignature()
     const continuation = await generateEndingContinuation(
       writingModel,
       content.value,
@@ -1402,11 +1356,12 @@ async function ensureGeneratedDraftEnding(
       signal,
       activityParentId,
     )
+    signal.throwIfAborted()
+    if (signature !== getChapterContextSignature()) throw new Error('正文或设定已变化，未写入旧版本的收尾')
     if (continuation) {
       content.value = `${content.value.replace(/\s+$/, '')}\n\n${continuation}`
       unsaved.value = true
-      ensureCompleteGeneratedEnding()
-      check = await requestChapterEndingCheck(reviewModel, content.value, chapterGuidance, writingPlan, signal, activityParentId)
+      check = await checkCurrentEnding()
     }
   }
   return check
@@ -1418,10 +1373,13 @@ async function gateChapterEndingBeforeStatusChange(
   activityParentId?: string,
 ): Promise<boolean> {
   if (!novel.value || !chapter.value) return false
+  const sourceNovelId = novelId.value
+  const sourceChapterId = chapterId.value
+  const sourceContent = content.value
   const ctx = buildWritingContext(novel.value, chapter.value)
   const chapterGuidance = ctx.chapterGuidance
   const factCard = buildChapterFactCard(novel.value, chapter.value, ctx)
-  const contentSignature = getContentSignature(content.value)
+  const contentSignature = getChapterContextSignature()
   if (
     endingCheckResult.value
     && lastEndingCheckSignature.value === contentSignature
@@ -1430,8 +1388,10 @@ async function gateChapterEndingBeforeStatusChange(
     return true
   }
 
-  completingHint.value = '正在检查章节结尾是否形成完整单章...'
-  const initialCheck = await requestChapterEndingCheck(reviewModel, content.value, chapterGuidance, '', undefined, activityParentId)
+  completingHint.value = '1/4 检查章节结尾...'
+  const initialCheck = await requestChapterEndingCheck(reviewModel, content.value, chapterGuidance, '', completionController?.signal, activityParentId)
+  assertChapterSnapshot(sourceNovelId, sourceChapterId, sourceContent)
+  if (contentSignature !== getChapterContextSignature()) throw new Error('设定已变化，请重新检查本章')
   endingCheckResult.value = initialCheck
   lastEndingCheckSignature.value = contentSignature
   if (chapterEndingPasses(initialCheck)) return true
@@ -1453,12 +1413,14 @@ async function gateChapterEndingBeforeStatusChange(
       chapterGuidance,
       '',
       factCard,
-      undefined,
+      completionController?.signal,
       activityParentId,
     )
+    assertChapterSnapshot(sourceNovelId, sourceChapterId, sourceContent)
     if (!continuation) break
     proposedContent = `${proposedContent.replace(/\s+$/, '')}\n\n${continuation}`
-    proposalCheck = await requestChapterEndingCheck(reviewModel, proposedContent, chapterGuidance, '', undefined, activityParentId)
+    proposalCheck = await requestChapterEndingCheck(reviewModel, proposedContent, chapterGuidance, '', completionController?.signal, activityParentId)
+    assertChapterSnapshot(sourceNovelId, sourceChapterId, sourceContent)
   }
 
   const issue = initialCheck.openAction || initialCheck.reason || '当前剧情节拍尚未收束'
@@ -1478,20 +1440,21 @@ async function gateChapterEndingBeforeStatusChange(
   return false
 }
 
-async function selfCheckAndReviseChapter(
+async function selfCheckDraft(
   model: import('@/stores/config').ModelConfig,
   factCard: string,
   writingPlan: string,
   activityParentId?: string,
-): Promise<boolean> {
-  if (isChapterLocked.value || !novel.value || !chapter.value || !content.value.trim()) return false
+) {
+  if (isChapterLocked.value || !novel.value || !chapter.value || !content.value.trim()) return
   aiStatusText.value = 'AI 正在自检本章设定一致性...'
   try {
     const result = await callAI({
       model,
       skillTask: 'review',
       messages: buildChapterSelfCheckPrompt(novel.value, factCard, writingPlan, content.value),
-      maxTokens: Math.min(model.maxTokens || 4000, 5000),
+      maxTokens: Math.min(model.maxTokens || 1200, 1200),
+      noAutomaticRetry: true,
       signal: getGenerationSignal(),
       taskName: '一致性自检',
       activityParentId,
@@ -1500,25 +1463,13 @@ async function selfCheckAndReviseChapter(
       needsRevision?: boolean
       severity?: string
       issues?: string[]
-      revisedContent?: string
     }>(result.content)
-    const revised = parsed?.revisedContent?.trim()
-    if (!parsed?.needsRevision || !revised) return false
-    const revisedWords = countNovelWords(revised)
-    if (revisedWords < MIN_CHAPTER_WORDS || revisedWords > HARD_CHAPTER_WORDS + 200) {
-      message.warning('AI 自检发现问题，但修正文长度异常，已保留原文')
-      return false
+    if (parsed?.needsRevision) {
+      message.warning(`自检发现 ${parsed.issues?.length || 1} 处待核对事项，将在完成本章时统一审查，原文保留`)
     }
-    content.value = revised
-    ensureCompleteGeneratedEnding()
-    normalizeGeneratedChapterHeading()
-    saveContent()
-    const issueCount = parsed.issues?.length || 0
-    message.info(`AI 自检已修正 ${issueCount || 1} 处可能的不一致`)
-    return true
-  } catch {
+  } catch (error) {
+    getGenerationSignal().throwIfAborted()
     message.warning('AI 自检失败，已保留当前正文')
-    return false
   }
 }
 
@@ -1532,24 +1483,7 @@ function aiContinue() {
     message.info(`本章已达到 ${MIN_CHAPTER_WORDS} 字，请先点击“完成本章”进行收束和审查`)
     return
   }
-  if (dataPanels.value.length && dataRecommendationConfirmedChapterId.value !== chapter.value.id) {
-    recommendedDataPanelIds.value = new Set([
-      ...selectedDataPanelIds.value,
-      ...getRecommendedDataPanelIds(),
-    ])
-    showDataRecommendationModal.value = true
-    return
-  }
-  void runAiContinue()
-}
-
-function confirmDataRecommendations(includeSelected: boolean) {
-  if (!chapter.value) return
-  selectedDataPanelIds.value = includeSelected
-    ? new Set(recommendedDataPanelIds.value)
-    : new Set()
-  dataRecommendationConfirmedChapterId.value = chapter.value.id
-  showDataRecommendationModal.value = false
+  selectRelatedDataForGeneration()
   void runAiContinue()
 }
 
@@ -1559,7 +1493,7 @@ async function runAiContinue() {
     message.info('当前为人工主笔辅助模式；如需 AI 续写，请先切换正文创作方式')
     return
   }
-  if (isChapterLocked.value || !novel.value || !chapter.value) return
+  if (isChapterLocked.value || !novel.value || !chapter.value || aiWriting.value || aiDrafting.value || completing.value) return
   if (pendingRevision.value) {
     message.info('请先处理当前待确认的正文修订')
     return
@@ -1608,12 +1542,9 @@ async function runAiContinue() {
 
       const existingWordCount = countNovelWords(content.value)
       const remainingWords = Math.max(0, SOFT_CHAPTER_WORDS - existingWordCount)
-      const dynamicMaxTokens = existingWordCount > 50
-        ? Math.max(300, Math.ceil(Math.max(0, remainingWords) * 1.4))
-        : 3000
+      const dynamicMaxTokens = chapterOutputTokenBudget(writingModel.maxTokens, remainingWords)
 
       await streamAppend(writingModel, messages, dynamicMaxTokens, {
-        stopAtWords: MIN_CHAPTER_WORDS,
         activityParentId: generationActivity.id,
         taskName: '正文生成',
       })
@@ -1625,7 +1556,6 @@ async function runAiContinue() {
         const beforeWords = countNovelWords(content.value)
         aiStatusText.value = `当前 ${countNovelWords(content.value)} 字，AI 正在自动补足到 ${MIN_CHAPTER_WORDS} 字以上...`
         await generateOnce()
-        ensureCompleteGeneratedEnding()
         saveContent()
         const afterWords = countNovelWords(content.value)
         noProgressAttempts = afterWords > beforeWords ? 0 : noProgressAttempts + 1
@@ -1637,7 +1567,6 @@ async function runAiContinue() {
 
     aiStatusText.value = 'AI 正在生成正文...'
     await generateOnce()
-    ensureCompleteGeneratedEnding()
     saveContent()
 
     await ensureMinimumWords()
@@ -1648,16 +1577,9 @@ async function runAiContinue() {
       return
     }
 
-    const revisedBySelfCheck = aiWorkflowPolicy.value.selfCheckDraft
-      ? await selfCheckAndReviseChapter(writingModel, factCard, writingPlan, generationActivity.id)
-      : false
-    if (revisedBySelfCheck) {
-      await ensureMinimumWords()
-      const finalWc = countNovelWords(content.value)
-      if (finalWc < MIN_CHAPTER_WORDS) {
-        message.warning(`AI 自检修正后仅 ${finalWc} 字，已保留草稿，请继续生成后再完成本章`)
-        return
-      }
+    getGenerationSignal().throwIfAborted()
+    if (aiWorkflowPolicy.value.selfCheckDraft) {
+      await selfCheckDraft(writingModel, factCard, writingPlan, generationActivity.id)
     }
 
     draftEndingCheck = await ensureGeneratedDraftEnding(
@@ -1667,6 +1589,9 @@ async function runAiContinue() {
       ctx.chapterGuidance,
       generationActivity.id,
     )
+    getGenerationSignal().throwIfAborted()
+    endingCheckResult.value = draftEndingCheck
+    lastEndingCheckSignature.value = getChapterContextSignature()
     if (chapterEndingPasses(draftEndingCheck)) {
       message.success('AI 续写完成，章节结尾完整性检查已通过')
     } else {
@@ -1677,7 +1602,6 @@ async function runAiContinue() {
     if (err.name !== 'AbortError') {
       message.error('AI 续写失败：' + err.message)
     } else {
-      ensureCompleteGeneratedEnding()
       saveContent()
       const wc = countNovelWords(content.value)
       if (wc < MIN_CHAPTER_WORDS) {
@@ -1697,17 +1621,33 @@ async function runAiContinue() {
 }
 
 function stopAI() {
+  if (completing.value) {
+    completingHint.value = '正在停止，等待当前操作结束...'
+    completionController?.abort(new DOMException('已停止完成流程', 'AbortError'))
+    stopGeneration()
+    return
+  }
   stopGeneration()
-  if (writingMode.value === 'ai') ensureCompleteGeneratedEnding()
 }
 
 // --- 完成章节的子步骤 ---
+
+function assertChapterSnapshot(sourceNovelId: string, sourceChapterId: string, sourceContent: string) {
+  if (completionController?.signal.aborted) throw completionController.signal.reason
+  if (novelId.value !== sourceNovelId || chapterId.value !== sourceChapterId || content.value !== sourceContent
+    || chapter.value?.content !== sourceContent) {
+    throw new Error('章节或正文已变化，已停止处理旧版本，请重新完成本章')
+  }
+}
 
 async function generateChapterCompletion(
   model: import('@/stores/config').ModelConfig,
   activityParentId?: string,
 ) {
-  completingHint.value = 'AI 正在生成章节总结和章节名...'
+  completingHint.value = '3/4 整理章节总结...'
+  const sourceNovelId = novelId.value
+  const sourceChapterId = chapterId.value
+  const sourceContent = content.value
   const currentTitle = chapter.value!.title
   const metadata = await requestChapterMetadata({
     model,
@@ -1715,7 +1655,9 @@ async function generateChapterCompletion(
     chapterTitle: currentTitle,
     chapterIndex: chapter.value!.chapterIndex + 1,
     activityParentId,
+    signal: completionController?.signal,
   })
+  assertChapterSnapshot(sourceNovelId, sourceChapterId, sourceContent)
   const updates: { title?: string; summary?: string } = {}
   updates.summary = metadata.summary
   if (isPlaceholderChapterTitle(currentTitle) && metadata.title) updates.title = metadata.title
@@ -1762,31 +1704,42 @@ async function reviewBannedWords(
 }
 
 function isValidContentReviewText(reviewText: string): boolean {
-  const text = reviewText.trim()
-  return text.length > 0 && /总体判断|必改问题|建议修改|全维度审查报告/.test(text)
+  return contentReviewVerdict(reviewText) !== 'unknown'
 }
 
 async function requestContentReview(
   model: import('@/stores/config').ModelConfig,
-  options: { liveUpdate?: boolean; activityParentId?: string } = {},
+  options: { liveUpdate?: boolean; activityParentId?: string; candidateContent?: string; signal?: AbortSignal } = {},
 ): Promise<string> {
-  const reviewContext = buildReviewContext(novel.value!, chapter.value!, content.value)
+  const reviewContext = buildReviewContext(novel.value!, chapter.value!, options.candidateContent ?? content.value)
   const reviewMsgs = buildContentReviewPrompt(reviewContext, chapter.value!.chapterIndex)
   const reviewModel = configStore.getModelForTask('review') || model
+  const sourceNovelId = novelId.value
+  const sourceChapterId = chapterId.value
+  const sourceContent = content.value
+  const contextSignature = getChapterContextSignature()
 
   for (let attempt = 0; attempt < 2; attempt++) {
     let reviewText = ''
-    await callAI({
+    if (attempt > 0 && completing.value) completingHint.value = '2/4 审查结果不完整，正在重试...'
+    const result = await callAI({
       model: reviewModel,
       skillTask: 'review',
       messages: reviewMsgs,
       stream: true,
+      taskName: attempt ? '内容审查（重试）' : '内容审查',
+      signal: options.signal || completionController?.signal,
+      noAutomaticRetry: true,
       activityParentId: options.activityParentId,
       onChunk: (c) => {
         reviewText += c
-        if (options.liveUpdate) contentReviewResult.value = reviewText
+        if (options.liveUpdate && chapterId.value === sourceChapterId) contentReviewResult.value = reviewText
       },
     })
+    options.signal?.throwIfAborted()
+    assertChapterSnapshot(sourceNovelId, sourceChapterId, sourceContent)
+    if (contextSignature !== getChapterContextSignature()) throw new Error('设定已变化，已跳过旧版本的审查结果')
+    if (result.finishReason && result.finishReason !== 'stop') throw new Error('内容审查输出未正常完成，未将部分报告当作通过结果')
 
     if (isValidContentReviewText(reviewText)) return reviewText.trim()
     if (attempt === 0) message.warning('内容审查返回为空或格式不完整，正在自动重试...')
@@ -1799,8 +1752,8 @@ function saveContentReviewResult(reviewText: string) {
   const localReviewBlock = buildLocalConsistencyReviewBlock(content.value)
   const mergedReviewText = [localReviewBlock, reviewText].filter(Boolean).join('\n\n---\n\n')
   contentReviewResult.value = mergedReviewText
-  editableReviewText.value = mergedReviewText
-  const reviewSignature = getContentSignature(content.value)
+  editableReviewText.value = extractActionableReview(mergedReviewText)
+  const reviewSignature = getChapterContextSignature()
   lastContentReviewSignature.value = reviewSignature
   novelStore.updateChapter(novelId.value, chapterId.value, {
     contentReview: mergedReviewText,
@@ -1812,23 +1765,26 @@ async function reviewContentConsistency(
   model: import('@/stores/config').ModelConfig,
   activityParentId?: string,
 ): Promise<string> {
-  completingHint.value = 'AI 正在进行内容审查（10-30秒）...'
+  completingHint.value = '2/4 审查章节内容...'
+  const previousReview = contentReviewResult.value
+  const previousEditableReview = editableReviewText.value
+  const previousSignature = lastContentReviewSignature.value
   contentReviewResult.value = ''
-  const reviewText = await requestContentReview(model, { activityParentId })
-  saveContentReviewResult(reviewText)
+  reviewLoading.value = true
   reviewPanelOpen.value = true
-  message.success('内容审查完成')
-  return reviewText
-}
-
-function reviewSectionHasItems(sectionBody: string): boolean {
-  const cleaned = sectionBody
-    .split(/\r?\n/)
-    .map(line => line.trim())
-    .filter(line => line && !/^-{3,}$/.test(line))
-    .join('\n')
-  const compact = cleaned.replace(/\s/g, '').replace(/[。.!！、，,；;：:]/g, '')
-  return !!compact && compact !== '无' && compact !== '暂无'
+  try {
+    const reviewText = await requestContentReview(model, { activityParentId, liveUpdate: true })
+    saveContentReviewResult(reviewText)
+    await novelStore.saveNovelNow(novelId.value)
+    return contentReviewResult.value
+  } catch (error) {
+    contentReviewResult.value = previousReview
+    editableReviewText.value = previousEditableReview
+    lastContentReviewSignature.value = previousSignature
+    throw error
+  } finally {
+    reviewLoading.value = false
+  }
 }
 
 function parseChineseNumber(value: string): number | null {
@@ -1965,30 +1921,25 @@ function buildLocalConsistencyReviewBlock(text: string): string {
 ${findings.join('\n\n')}`
 }
 
-function hasLocalCriticalFindings(reviewText: string): boolean {
-  const section = reviewText.match(/##\s*本地硬伤预检[\s\S]*?(?=\n#\s|##\s*结论|$)/)?.[0] || ''
-  return reviewSectionHasItems(section.replace(/^##\s*本地硬伤预检[^\n]*/, ''))
-}
-
-function reviewNeedsRewrite(reviewText: string): boolean {
-  if (hasLocalCriticalFindings(reviewText)) return true
-
-  const conclusionMatch = reviewText.match(/总体判断[：:]\s*([^\n]+)/)
-  const conclusion = conclusionMatch?.[1] || ''
-  if (/必须修改|❌/.test(conclusion)) return true
-
-  const requiredSection = reviewText.match(/##\s*必改问题[\s\S]*?(?=\n##\s*|$)/)?.[0] || ''
-  return reviewSectionHasItems(requiredSection.replace(/^##\s*必改问题[^\n]*/, ''))
-}
-
 function getReusableContentReview(currentSignature: string): string {
   const existingReview = contentReviewResult.value || chapter.value?.contentReview || ''
   if (!existingReview) return ''
 
   const existingSignature = lastContentReviewSignature.value || chapter.value?.contentReviewSignature || ''
-  if (existingSignature === currentSignature) return existingReview
+  if (existingSignature === currentSignature && isValidContentReviewText(existingReview)) return existingReview
 
   return ''
+}
+
+async function handleChapterPrimaryAction() {
+  if (chapterActionDisabled.value) return
+  try {
+    if (readyForNextChapter.value) await nextChapter()
+    else await completeChapter()
+  } catch (error) {
+    completing.value = false
+    message.error(error instanceof Error ? error.message : String(error))
+  }
 }
 
 async function completeChapter() {
@@ -2020,21 +1971,20 @@ async function completeChapter() {
   }
 
   const completionActivity = startAiActivity('完成本章')
+  const controller = new AbortController()
+  completionController = controller
+  const targetNovelId = novelId.value
+  const targetChapterId = chapterId.value
+  let completionFailure: unknown
+  let succeeded = false
   try {
     if (!(await gateChapterEndingBeforeStatusChange(writingModel, reviewModel, completionActivity.id))) return
 
-    completingHint.value = '正在完成章节：生成总结和章节名...'
-    try {
-      await generateChapterCompletion(writingModel, completionActivity.id)
-    } catch {
-      message.warning('章节总结和命名失败，已跳过')
-    }
-
-    completingHint.value = '正在完成章节：审查内容一致性...'
+    completingHint.value = '2/4 审查章节内容...'
     const currentSignature = getContentSignature(content.value)
-    let reviewText = getReusableContentReview(currentSignature)
+    let reviewText = getReusableContentReview(getChapterContextSignature())
     if (reviewText) {
-      completingHint.value = '正在完成章节：复用当前正文已通过的审查结果...'
+      completingHint.value = '2/4 已复用当前正文的审查结果'
     } else if (content.value.length > 200) {
       reviewText = await reviewContentConsistency(reviewModel, completionActivity.id)
     }
@@ -2049,17 +1999,21 @@ async function completeChapter() {
     }
     while (reviewText && reviewNeedsRewrite(reviewText) && reviewRewriteCycle < maxReviewRewriteCycles) {
       reviewRewriteCycle += 1
-      completingHint.value = `审查发现需要修改的问题，AI 正在自动重写（第 ${reviewRewriteCycle}/${maxReviewRewriteCycles} 轮）...`
-      message.info(`审查发现需要修改的问题，正在自动重写第 ${reviewRewriteCycle} 轮...`)
+      completingHint.value = `2/4 尝试局部修正（${reviewRewriteCycle}/${maxReviewRewriteCycles}）...`
       const rewriteOk = await rewriteFromReview(reviewText, {
         keepCompleting: true,
         model: writingModel,
         activityParentId: completionActivity.id,
       })
-      saveContent()
+      if (!(await saveContent())) throw new Error('正文尚未保存，请重试')
+      if (controller.signal.aborted) throw controller.signal.reason
 
       const revisedWordCount = countNovelWords(content.value)
-      if (!rewriteOk || revisedWordCount < MIN_CHAPTER_WORDS || revisedWordCount > HARD_CHAPTER_WORDS) {
+      if (!rewriteOk) {
+        reviewPanelOpen.value = true
+        return
+      }
+      if (revisedWordCount < MIN_CHAPTER_WORDS) {
         const rangeText = revisedWordCount < MIN_CHAPTER_WORDS
           ? `低于 ${MIN_CHAPTER_WORDS} 字最低标准`
           : revisedWordCount > HARD_CHAPTER_WORDS
@@ -2070,8 +2024,10 @@ async function completeChapter() {
         return
       }
 
-      completingHint.value = `正在复审自动重写后的正文（第 ${reviewRewriteCycle}/${maxReviewRewriteCycles} 轮）...`
-      reviewText = await reviewContentConsistency(reviewModel, completionActivity.id)
+      if (!(await gateChapterEndingBeforeStatusChange(writingModel, reviewModel, completionActivity.id))) return
+      completingHint.value = `2/4 复审修改后的正文（${reviewRewriteCycle}/${maxReviewRewriteCycles}）...`
+      reviewText = getReusableContentReview(getChapterContextSignature())
+        || await reviewContentConsistency(reviewModel, completionActivity.id)
     }
 
     if (reviewText && reviewNeedsRewrite(reviewText)) {
@@ -2090,6 +2046,13 @@ async function completeChapter() {
       return
     }
 
+    if (controller.signal.aborted) throw controller.signal.reason
+    if (novelId.value !== targetNovelId || chapterId.value !== targetChapterId) {
+      throw new Error('章节已切换，请返回原章节继续完成')
+    }
+    const approvedContent = content.value
+    assertChapterSnapshot(targetNovelId, targetChapterId, approvedContent)
+    const approvedSignature = getContentSignature(approvedContent)
     const manuallyEnteredDays = Math.max(0, Number(chapterStoryDays.value) || 0)
     const storyTimeAlreadyApplied = chapter.value.storyDay !== undefined
     novelStore.updateChapter(novelId.value, chapterId.value, {
@@ -2099,39 +2062,49 @@ async function completeChapter() {
     if (manuallyEnteredDays > 0 && !storyTimeAlreadyApplied) {
       novelStore.advanceStoryClock(novelId.value, manuallyEnteredDays, chapter.value.chapterIndex)
     }
-    novelStore.completeChapterPlans(novelId.value, chapter.value.chapterIndex)
-    message.success('本章已通过审查并完成')
-    const nextPlan = novelStore.ensureNextChapterPlan(novelId.value, chapter.value.chapterIndex)
-    if (nextPlan) message.info(`已补齐第 ${nextPlan.targetChapterStart + 1} 章计划`)
-
-    const automaticChangeCount = novelStore.queueAutomaticDataPanelChanges(
-      novelId.value,
-      chapter.value.chapterIndex,
-      `${chapter.value.title}\n${getCurrentChapterPlanText()}\n${content.value}`,
-    )
-    if (automaticChangeCount) {
-      dataPanelOpen.value = true
-      message.info(`已生成 ${automaticChangeCount} 条自动推算结果，请在数据面板确认`)
+    await novelStore.saveNovelNow(targetNovelId)
+    assertChapterSnapshot(targetNovelId, targetChapterId, approvedContent)
+    if (lastMetadataSignature.value !== approvedSignature) {
+      await generateChapterCompletion(writingModel, completionActivity.id)
+      lastMetadataSignature.value = approvedSignature
+      await novelStore.saveNovelNow(targetNovelId)
     }
 
-    const completedNovelId = novelId.value
-    const completedChapterId = chapterId.value
-    const completedChapterIndex = chapter.value.chapterIndex
-    const completedContent = content.value
-    if (completedContent.trim()) {
-      chapterBackgroundQueue.enqueue('数据面板变化扫描', async () => {
-        const currentNovel = novelStore.getNovel(completedNovelId)
-        if (!currentNovel) return
-        await scanDataPanelChanges(reviewModel, {
-          novelId: completedNovelId,
-          chapterIndex: completedChapterIndex,
-          content: completedContent,
-          panels: currentNovel.dataPanels,
-          activityParentId: completionActivity.id,
-        })
+    completingHint.value = '4/4 更新章节记忆...'
+    assertChapterSnapshot(targetNovelId, targetChapterId, approvedContent)
+    if (lastMemorySignature.value !== approvedSignature) {
+      const applied = await analyzeChapterStructure(reviewModel, {
+        target: { novelId: targetNovelId, chapterId: targetChapterId },
+        replaceExistingAiTimeline: true,
+        activityParentId: completionActivity.id,
+        signal: controller.signal,
       })
+      assertChapterSnapshot(targetNovelId, targetChapterId, approvedContent)
+      if (!applied) throw new Error('章节记忆未返回有效结果，已保留审查结果，可继续完成本章')
+      lastMemorySignature.value = approvedSignature
+      novelStore.queueAutomaticDataPanelChanges(targetNovelId, chapter.value.chapterIndex,
+        `${chapter.value.title}\n${getCurrentChapterPlanText()}\n${approvedContent}`)
+      await novelStore.saveNovelNow(targetNovelId)
     }
+    completingHint.value = '4/4 保存记忆与完成状态...'
+    const kbStore = useKnowledgeStore()
+    await syncSemanticIndexForNovel(novel.value, kbStore.knowledgeBases, configStore.embedding)
+    assertChapterSnapshot(targetNovelId, targetChapterId, approvedContent)
+    novelStore.completeChapterPlans(targetNovelId, chapter.value.chapterIndex)
+    novelStore.ensureNextChapterPlan(targetNovelId, chapter.value.chapterIndex)
+    novelStore.updateChapter(targetNovelId, targetChapterId, { status: 'finalized' })
+    try {
+      await novelStore.saveNovelNow(targetNovelId)
+    } catch (error) {
+      novelStore.updateChapter(targetNovelId, targetChapterId, { status: 'completed' })
+      throw error
+    }
+    succeeded = true
+    message.success('本章已完成，记忆已更新，可以进入下一章')
 
+    const completedNovelId = targetNovelId
+    const completedChapterId = targetChapterId
+    const completedContent = approvedContent
     const runExtendedBackgroundChecks = aiWorkflowPolicy.value.runExtendedBackgroundChecks
     if (runExtendedBackgroundChecks && content.value.length > 200) {
       chapterBackgroundQueue.enqueue('违禁词审查', async () => {
@@ -2141,20 +2114,8 @@ async function completeChapter() {
           content: completedContent,
         }, completionActivity.id)
       })
-
-      chapterBackgroundQueue.enqueue('故事时间线更新', async () => {
-        await analyzeChapterStructure(reviewModel, {
-          target: { novelId: completedNovelId, chapterId: completedChapterId },
-          includeCharacters: false,
-          includeDataChanges: false,
-          replaceExistingAiTimeline: true,
-          activityParentId: completionActivity.id,
-        })
-      })
     }
     if (runExtendedBackgroundChecks && (novel.value.storyArcs?.length || 0) + (novel.value.eventLog?.length || 0) + (novel.value.chapterPlans?.length || 0) > 0) {
-      const completedNovelId = novelId.value
-      const completedChapterId = chapterId.value
       chapterBackgroundQueue.enqueue('故事状态提案', async () => {
         const currentNovel = novelStore.getNovel(completedNovelId)
         const completedChapter = currentNovel?.chapters.find(item => item.id === completedChapterId)
@@ -2164,48 +2125,16 @@ async function completeChapter() {
       })
     }
   } catch (err: any) {
-    message.error('完成章节失败：' + (err?.message || String(err)))
+    completionFailure = err
+    if (succeeded) message.warning('本章已完成，附加后台任务未能启动')
+    else if (controller.signal.aborted) message.info('已停止完成流程，已保存的检查结果会在下次继续使用')
+    else message.error('本章尚未完成：' + (err?.message || String(err)))
   } finally {
     completing.value = false
     completingHint.value = ''
     aiWriting.value = false
-    finishAiActivity(completionActivity)
-  }
-}
-
-// 违禁词检测
-async function finalizeChapter() {
-  if (isChapterLocked.value || !chapter.value || !novel.value) return
-  if (aiWriting.value || aiDrafting.value || completing.value) {
-    message.info('请等待当前 AI 任务完成后，再定稿本章')
-    return
-  }
-  if (pendingRevision.value) {
-    reviewPanelOpen.value = true
-    message.info('请先处理当前待确认的正文修订')
-    return
-  }
-  if (!(await saveContent())) return
-  const model = configStore.getModelForTask('review') || configStore.getModelForTask('writing')
-  if (!model) {
-    message.warning('请先配置 AI 模型，定稿需要更新故事状态。')
-    return
-  }
-
-  completing.value = true
-  completingHint.value = '正在定稿：检查章节结尾完整性...'
-  try {
-    if (!(await gateChapterEndingBeforeStatusChange(model, model))) return
-    completingHint.value = '正在定稿：提取故事状态并更新语义记忆...'
-    await analyzeChapterStructure(model, { replaceExistingAiTimeline: true })
-    const kbStore = useKnowledgeStore()
-    await syncSemanticIndexForNovel(novel.value, kbStore.knowledgeBases, configStore.embedding)
-    novelStore.updateChapter(novelId.value, chapterId.value, { status: 'finalized' })
-    message.success('本章已定稿，故事状态和语义记忆已更新')
-  } catch (err: any) {
-    message.error('定稿失败：' + (err?.message || String(err)))
-  } finally {
-    completing.value = false
+    if (completionController === controller) completionController = null
+    finishAiActivity(completionActivity, completionFailure || (!succeeded ? new Error('本章尚有待处理事项') : undefined))
   }
 }
 
@@ -2242,7 +2171,7 @@ async function checkBannedWords() {
 
 // 全维度内容审查（手动触发）
 async function contentReview() {
-  if (!novel.value || !chapter.value) return
+  if (!novel.value || !chapter.value || aiWriting.value || completing.value || isChapterLocked.value) return
   const model = configStore.getModelForTask('review')
   if (!model) {
     message.warning('请先在设置页配置 AI 模型')
@@ -2252,6 +2181,7 @@ async function contentReview() {
     message.warning('正文内容不足，无法进行审查')
     return
   }
+  if (!(await saveContent())) return
 
   const previousReview = contentReviewResult.value
   const previousEditableReview = editableReviewText.value
@@ -2266,6 +2196,7 @@ async function contentReview() {
   try {
     const reviewText = await requestContentReview(model, { liveUpdate: true })
     saveContentReviewResult(reviewText)
+    await novelStore.saveNovelNow(novelId.value)
     message.success('内容审查完成')
   } catch (err: any) {
     contentReviewResult.value = previousReview
@@ -2278,16 +2209,29 @@ async function contentReview() {
   }
 }
 
-// 根据审查意见重写当前章节（支持传入选中的部分意见）
+function handleReviewRepair(review: string, mode: ChapterRepairMode = 'targeted') {
+  if (mode === 'full') {
+    dialog.warning({
+      title: '整章修订',
+      content: '将额外生成并检查一份完整修订稿。检查通过后替换正文，原稿保留在版本记录中。',
+      positiveText: '生成并检查', negativeText: '取消',
+      onPositiveClick: () => { void rewriteFromReview(review || undefined, { mode }) },
+    })
+  } else void rewriteFromReview(review || undefined, { mode })
+}
+
+// Validate a separate candidate before applying it through the revision API.
 async function rewriteFromReview(
   selectedIssues?: string,
   options: {
     keepCompleting?: boolean
     model?: import('@/stores/config').ModelConfig
     activityParentId?: string
+    mode?: ChapterRepairMode
   } = {},
 ): Promise<boolean> {
-  if (!novel.value || !chapter.value) return false
+  if (!novel.value || !chapter.value || isChapterLocked.value || pendingRevision.value) return false
+  if ((aiWriting.value || completing.value) && !options.keepCompleting) return false
   if (writingMode.value !== 'ai') {
     message.info('辅助写作模式不会自动修改正文，请根据审查报告手动调整')
     return false
@@ -2297,7 +2241,6 @@ async function rewriteFromReview(
     message.warning('请先在设置页面配置 AI 模型')
     return false
   }
-  const rewriteModel = model
 
   const reviewRef = selectedIssues || contentReviewResult.value
   if (!reviewRef) {
@@ -2305,215 +2248,78 @@ async function rewriteFromReview(
     return false
   }
 
-  const rewriteActivity = options.activityParentId
-    ? null
-    : startAiActivity('根据审查意见重写')
+  if (!(await saveContent())) return false
+  const sourceNovelId = novelId.value
+  const sourceChapterId = chapterId.value
+  const originalContent = content.value
+  const originalSignature = getChapterContextSignature()
+  const mode = options.mode || 'targeted'
+  const rewriteActivity = options.activityParentId ? null : startAiActivity(mode === 'full' ? '整章修订' : '局部修正')
   const rewriteParentId = options.activityParentId || rewriteActivity?.id
   let rewriteFailure: unknown
-  aiStatusText.value = 'AI 正在根据审查意见重写...'
+  aiStatusText.value = mode === 'full' ? '正在生成整章修订候选稿...' : '正在生成局部修正候选稿...'
+  if (options.keepCompleting) completingHint.value = aiStatusText.value
   beginGeneration()
-
-  // 保留原文副本用于 Prompt
-  const originalContent = content.value
-  // 先清空编辑器，准备流式写入
-  content.value = ''
-
-  // 检测审查意见是否涉及设定偏差，如有则注入完整知识库内容
-  const settingKeywords = ['设定', '世界观', '历史', '时代', '年代', '朝代', '不符', '偏离', '冲突', '矛盾', '不一致', '时间线', '地理', '制度', '官职', '币制', '称谓', '尊称', '科技', '服饰', '食物', '建筑']
-  const hasSettingIssue = settingKeywords.some(kw => reviewRef.includes(kw))
-  let fullKBContext = ''
-  if (hasSettingIssue && novel.value.knowledgeBaseIds && novel.value.knowledgeBaseIds.length > 0) {
-    try {
-      const kbStore = useKnowledgeStore()
-      const kbParts: string[] = []
-      for (const kbId of novel.value.knowledgeBaseIds) {
-        const kb = kbStore.getKB(kbId)
-        if (kb && kb.entries.length > 0) {
-          for (const entry of kb.entries) {
-            kbParts.push(`### [${entry.category}] ${entry.title}\n${entry.content}`)
-          }
-        }
-      }
-      if (kbParts.length > 0) {
-        fullKBContext = `\n\n【知识库完整参考资料（审查发现设定偏差，请严格参照）】\n${kbParts.join('\n\n')}`
-        message.info('检测到设定偏差问题，已注入完整知识库内容作为参考')
-      }
-    } catch {
-      // 静默处理
-    }
+  const signal = getGenerationSignal()
+  function ensureSourceUnchanged() {
+    signal.throwIfAborted()
+    assertChapterSnapshot(sourceNovelId, sourceChapterId, originalContent)
+    if (getChapterContextSignature() !== originalSignature) throw new Error('设定已变化，修订未写入，请重新审查')
   }
 
   try {
     let ctx = buildWritingContext(novel.value, chapter.value)
     ctx = await augmentWritingContextWithVectorMemory(novel.value, chapter.value, ctx, configStore.embedding)
-    const rewriteMessages: ChatMessage[] = [
-      {
-        role: 'system' as const,
-        content: `你是网文写手，正在修改长篇小说《${novel.value.title}》的第 ${chapter.value.chapterIndex + 1} 章。
-请根据内容审查报告指出的问题，对章节正文进行修正和重写。保留原有内容的核心剧情和结构，只修正审查报告中指出的具体问题。
-涉及年份、时间、人物状态或世界观时，必须以小说核心设定和事实卡为准；如果审查报告与核心设定冲突，不要照抄错误建议。
-字数要求：严格控制在 2000~2200 字附近，达到 2000 字后立即收束当前剧情节拍；仅为完成当前动作允许略超，但绝不超过 2400 字。
-只输出正文，不要输出章节标题、Markdown 标题、书名、作者名或目录格式。
-结尾必须是完整自然的句子，不能用“……”“......”或未闭合引号作为最后一行。`
-      },
-      {
-        role: 'user' as const,
-        content: `【需要修正的审查意见】
-${reviewRef}
-
-【章节计划参考】
-${ctx.chapterGuidance || '无'}
-【小说核心设定】
-${JSON.stringify(novel.value.settings)}
-【本章事实卡】
-${buildChapterFactCard(novel.value, chapter.value, ctx)}
-${fullKBContext}
-【现有章节正文】
-${originalContent}
-
-请根据以上审查意见中指出的问题，重写本章正文。保留原有的核心剧情走向和人物互动，只修正指出的具体问题。如果某些"问题"实际上是合理的创作选择（如 AI 自创的世界观元素），请保留。直接输出修正后的完整章节正文，不要在正文开头添加“第X章/章节名”。`
-      },
-    ]
-
-    async function topUpRewriteToMinimum() {
-      let topUpAttempts = 0
-      while (countNovelWords(content.value) < MIN_CHAPTER_WORDS && topUpAttempts < 2 && aiWriting.value) {
-        topUpAttempts += 1
-        aiStatusText.value = `重写后仅 ${countNovelWords(content.value)} 字，AI 正在补足到 ${MIN_CHAPTER_WORDS} 字以上...`
-        const remainingWords = Math.max(0, SOFT_CHAPTER_WORDS - countNovelWords(content.value))
-        const topUpMessages: ChatMessage[] = [
-          {
-            role: 'system',
-            content: `你是网文写手，正在补足一个重写后字数不足的章节。只能在现有正文后自然续写和收束，不要从头重写，不要输出章节标题。`,
-          },
-          {
-            role: 'user',
-            content: `【原始章节正文】
-${originalContent.slice(0, 2400)}
-
-【审查意见】
-${reviewRef}
-
-【当前重写稿】
-${content.value}
-
-当前重写稿只有 ${countNovelWords(content.value)} 字，低于 ${MIN_CHAPTER_WORDS} 字最低标准。请在不新增重大设定、不推翻当前内容的前提下，补写约 ${remainingWords} 字，使全文达到 ${MIN_CHAPTER_WORDS}~${SOFT_CHAPTER_WORDS} 字。直接输出续写内容，不要重复已有正文。`,
-          },
-        ]
-        await streamAppend(rewriteModel, topUpMessages, Math.max(700, Math.ceil(remainingWords * 2)), {
-          activityParentId: rewriteParentId,
-          taskName: '补足正文',
-        })
-        ensureCompleteGeneratedEnding()
-        saveContent()
-      }
+    ensureSourceUnchanged()
+    const candidate = await requestChapterRepair({
+      model, source: originalContent, review: reviewRef,
+      factCard: buildChapterFactCard(novel.value, chapter.value, ctx),
+      guidance: ctx.chapterGuidance || '', mode, signal, activityParentId: rewriteParentId,
+    })
+    ensureSourceUnchanged()
+    const words = countNovelWords(candidate)
+    if (words < Math.min(MIN_CHAPTER_WORDS, countNovelWords(originalContent))
+      || words > Math.max(HARD_CHAPTER_WORDS, countNovelWords(originalContent) + 200)) {
+      throw new Error('候选修订的篇幅变化异常，原文未改动')
     }
-
-    async function runRewriteAttempt(messages: ChatMessage[], statusText: string) {
-      content.value = ''
-      aiStatusText.value = statusText
-      await streamAppend(rewriteModel, messages, undefined, {
-        activityParentId: rewriteParentId,
-        taskName: '审查重写',
-      })
-      ensureCompleteGeneratedEnding()
-      saveContent()
-      await topUpRewriteToMinimum()
-    }
-
-    await runRewriteAttempt(rewriteMessages, 'AI 正在根据审查意见重写...')
-
-    let retryAttempts = 0
-    while (aiWriting.value) {
-      const currentWordCount = countNovelWords(content.value)
-      const isInValidRange = currentWordCount >= MIN_CHAPTER_WORDS && currentWordCount <= HARD_CHAPTER_WORDS
-      if (isInValidRange) break
-      if (retryAttempts >= 2) break
-
-      retryAttempts += 1
-      const rangeIssue = currentWordCount < MIN_CHAPTER_WORDS
-        ? `上一轮重写只有 ${currentWordCount} 字，低于 ${MIN_CHAPTER_WORDS} 字最低标准。`
-        : `上一轮重写有 ${currentWordCount} 字，超过 ${HARD_CHAPTER_WORDS} 字硬上限。`
-      const retryMessages: ChatMessage[] = [
-        rewriteMessages[0],
-        {
-          role: 'user' as const,
-          content: `${rewriteMessages[1].content}
-
-【上一轮重写字数不合格】
-${rangeIssue}
-
-请重新完整写一版，不要只补写。必须控制在 ${MIN_CHAPTER_WORDS}~${SOFT_CHAPTER_WORDS} 字之间，最多不超过 ${HARD_CHAPTER_WORDS} 字，并保证结尾是完整自然句。`,
-        },
-      ]
-      await runRewriteAttempt(retryMessages, `重写字数不合格，AI 正在自动重写第 ${retryAttempts + 1} 版...`)
-    }
-
-    const finalWordCount = countNovelWords(content.value)
-    if (finalWordCount < MIN_CHAPTER_WORDS || finalWordCount > HARD_CHAPTER_WORDS) {
-      const rangeText = finalWordCount < MIN_CHAPTER_WORDS
-        ? `低于 ${MIN_CHAPTER_WORDS} 字最低标准`
-        : `超过 ${HARD_CHAPTER_WORDS} 字硬上限`
-      message.warning(`自动重写后仍为 ${finalWordCount} 字，${rangeText}，本次重写未达标`)
+    const reviewModel = configStore.getModelForTask('review') || model
+    aiStatusText.value = '正在检查候选修订，原文保留...'
+    if (options.keepCompleting) completingHint.value = aiStatusText.value
+    reviewLoading.value = true
+    reviewPanelOpen.value = true
+    const ending = await requestChapterEndingCheck(reviewModel, candidate, ctx.chapterGuidance, '', signal, rewriteParentId)
+    ensureSourceUnchanged()
+    const review = chapterEndingPasses(ending)
+      ? await requestContentReview(reviewModel, { candidateContent: candidate, signal, activityParentId: rewriteParentId }) : ''
+    ensureSourceUnchanged()
+    const mergedReview = [buildLocalConsistencyReviewBlock(candidate), review].filter(Boolean).join('\n\n---\n\n')
+    const passed = chapterEndingPasses(ending) && !reviewNeedsRewrite(mergedReview)
+    const revision = await novelStore.proposeChapterRevision(sourceNovelId, sourceChapterId, candidate, 'review',
+      passed ? '修订已通过结尾与内容检查' : '候选修订仍有待确认问题，原文未改动')
+    if (revision && novelId.value === sourceNovelId && chapterId.value === sourceChapterId) pendingRevision.value = revision
+    ensureSourceUnchanged()
+    if (!revision) throw new Error('未能保存修订记录，原文未改动')
+    if (!passed) {
+      pendingRevision.value = revision
+      message.warning('候选修订尚未通过检查，已保留原文，请查看待确认修订')
       return false
     }
-    if (!options.keepCompleting) {
-      const reviewModel = configStore.getModelForTask('review') || rewriteModel
-      aiStatusText.value = 'AI 正在复审重写后的正文...'
-      reviewLoading.value = true
-      reviewPanelOpen.value = true
-      let reviewText = await reviewContentConsistency(reviewModel, rewriteParentId)
-      let reviewRewriteCycle = 0
-      const maxReviewRewriteCycles = aiWorkflowPolicy.value.reviewRewriteCycles
-
-      while (reviewNeedsRewrite(reviewText) && reviewRewriteCycle < maxReviewRewriteCycles) {
-        reviewRewriteCycle += 1
-        aiStatusText.value = `复审仍有需要修改的问题，AI 正在自动重写第 ${reviewRewriteCycle}/${maxReviewRewriteCycles} 轮...`
-        message.info(`复审仍有需要修改的问题，正在自动重写第 ${reviewRewriteCycle} 轮...`)
-        const rewriteOk = await rewriteFromReview(reviewText, {
-          keepCompleting: true,
-          model: rewriteModel,
-          activityParentId: rewriteParentId,
-        })
-        saveContent()
-
-        const retryWordCount = countNovelWords(content.value)
-        if (!rewriteOk || retryWordCount < MIN_CHAPTER_WORDS || retryWordCount > HARD_CHAPTER_WORDS) {
-          const rangeText = retryWordCount < MIN_CHAPTER_WORDS
-            ? `低于 ${MIN_CHAPTER_WORDS} 字最低标准`
-            : retryWordCount > HARD_CHAPTER_WORDS
-              ? `超过 ${HARD_CHAPTER_WORDS} 字硬上限`
-              : '重写失败'
-          message.warning(`自动重写后为 ${retryWordCount} 字，${rangeText}，请查看审查面板`)
-          return false
-        }
-
-        aiStatusText.value = `AI 正在复审自动重写后的正文（第 ${reviewRewriteCycle}/${maxReviewRewriteCycles} 轮）...`
-        reviewText = await reviewContentConsistency(reviewModel, rewriteParentId)
-      }
-
-      const passedWordCount = countNovelWords(content.value)
-      if (reviewNeedsRewrite(reviewText)) {
-        message.warning(`已达到 ${maxReviewRewriteCycles} 轮自动审查/重写上限，复审仍有需要修改的问题，请查看审查面板`)
-        return false
-      } else {
-        message.success(`重写完成并通过复审，当前 ${passedWordCount} 字`)
-      }
-    } else {
-      message.success(`根据审查意见重写完成，当前 ${finalWordCount} 字`)
-    }
+    const applied = await novelStore.acceptChapterRevision(sourceNovelId, sourceChapterId, revision.id)
+    if (!applied || applied.status !== 'accepted') throw new Error('修订未写入，请稍后重试')
+    if (novelId.value !== sourceNovelId || chapterId.value !== sourceChapterId) return false
+    if (chapter.value.content !== candidate) throw new Error('正文已被其他操作修改，未覆盖当前内容')
+    pendingRevision.value = null
+    content.value = candidate
+    unsaved.value = false
+    endingCheckResult.value = ending
+    lastEndingCheckSignature.value = getChapterContextSignature()
+    saveContentReviewResult(review)
+    await novelStore.saveNovelNow(sourceNovelId)
+    message.success('修订已通过检查并写入，原稿已保留在版本记录中')
     return true
   } catch (err: any) {
     rewriteFailure = err
-    ensureCompleteGeneratedEnding()
-    if (content.value) saveContent()
-    if (err.name !== 'AbortError') {
-      message.error('重写失败：' + err.message)
-      // 如果失败且编辑器被清空了，恢复原文
-      if (!content.value) {
-        content.value = originalContent
-      }
-    }
+    if (err.name !== 'AbortError') message.error('修订未完成：' + err.message)
     return false
   } finally {
     reviewLoading.value = false
@@ -2572,10 +2378,22 @@ function replaceAllSuggested() {
 
 // 生成下一章
 async function nextChapter() {
-  const newChapter = novelStore.addChapter(novelId.value, {})
-  if (newChapter) {
-    await router.push(`/workspace/${novelId.value}/editor/${newChapter.id}`)
-    message.success(writingMode.value === 'ai' ? '已创建新章节，即将开始 AI 续写...' : '已创建新章节')
+  if (!novel.value || !chapter.value || !readyForNextChapter.value || chapterActionDisabled.value) return
+  navigatingChapter.value = true
+  const sourceNovelId = novelId.value
+  const sourceChapterId = chapterId.value
+  try {
+    await novelStore.saveNovelNow(sourceNovelId)
+    if (novelId.value !== sourceNovelId || chapterId.value !== sourceChapterId) return
+    const next = followingChapter.value || novelStore.addChapter(sourceNovelId, {})
+    if (!next) throw new Error('创建下一章失败')
+    await novelStore.saveNovelNow(sourceNovelId)
+    reviewPanelOpen.value = false
+    await router.push(`/workspace/${sourceNovelId}/editor/${next.id}`)
+  } catch (error) {
+    message.error('无法进入下一章：' + (error instanceof Error ? error.message : String(error)))
+  } finally {
+    navigatingChapter.value = false
   }
 }
 
@@ -3500,36 +3318,7 @@ function redo() {
   justify-self: start;
 }
 
-.recommendation-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  max-height: 360px;
-  overflow-y: auto;
-}
-
-.recommendation-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--border-color-light);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-
-.recommendation-row span,
-.recommendation-row small {
-  display: block;
-}
-
-.recommendation-row small {
-  margin-top: 3px;
-  color: var(--text-color-tertiary);
-}
-
 @media (max-width: 700px) {
-  .recommendation-list { grid-template-columns: 1fr; }
   .editor-view--advisor-open .side-toolbar { display: none; }
   .editor-view--advisor-open :deep(.review-toggle-btn) { display: none; }
   .editor-view--advisor-open :deep(.data-panel-sidebar),

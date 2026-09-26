@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Chapter, Novel } from '@/types/novel'
 import {
-  formatChapterPlanContext, normalizeChapterPlanDrafts, normalizeStoryArcDrafts, normalizeStoryStateProposalDrafts,
+  formatChapterPlanContext, normalizeChapterPlanDrafts, normalizeStoryArcDrafts, normalizeStoryPromiseDrafts, normalizeStoryStateProposalDrafts,
 } from '@/services/storyPlanning'
 
 function createNovel(): Novel {
@@ -61,14 +61,40 @@ describe('chapter planning', () => {
   it('validates state targets and converts proposed chapter numbers', () => {
     const novel = createNovel()
     const chapter = novel.chapters[0] as Chapter
+    chapter.content = '正文已发现线索，追查需要后移。'
     const proposals = normalizeStoryStateProposalDrafts(novel, chapter, [
       { targetType: 'arc_node', targetId: 'node-1', parentId: 'arc-1', field: 'status', newValue: 'completed', evidence: '正文已发现线索' },
-      { targetType: 'event', targetId: 'event-1', field: 'targetChapter', newValue: 8, reason: '需要后移' },
+      { targetType: 'event', targetId: 'event-1', field: 'targetChapter', newValue: 8, reason: '需要后移', evidence: '追查需要后移' },
       { targetType: 'event', targetId: 'missing', field: 'status', newValue: 'resolved' },
     ])
     expect(proposals).toHaveLength(2)
     expect(proposals[0].oldValue).toBe('pending')
     expect(proposals[1].newValue).toBe('7')
+    expect(normalizeStoryStateProposalDrafts(novel, chapter, [
+      { targetType: 'event', targetId: 'event-1', field: 'status', newValue: 'resolved', evidence: '凭空解决了失踪案' },
+    ])).toHaveLength(0)
+  })
+
+  it('only proposes new promises backed by chapter text and known arcs', () => {
+    const novel = createNovel()
+    const chapter = novel.chapters[0]
+    chapter.content = '她留下了一封封存十年的密信。'
+    const drafts = normalizeStoryPromiseDrafts(novel, chapter, [{
+      title: '十年密信', description: '未来揭开密信', evidence: '封存十年的密信',
+      relatedArcIds: ['arc-1', 'unknown'], targetChapter: 12,
+    }, {
+      title: '虚构密信', description: '无根据', evidence: '另一封神秘的密信',
+    }])
+    expect(drafts).toHaveLength(1)
+    expect(drafts[0].field).toBe('create')
+    expect(drafts[0].eventDraft?.relatedArcIds).toEqual(['arc-1'])
+    expect(drafts[0].eventDraft?.targetChapter).toBe(11)
+    novel.storyStateProposals = [{
+      ...drafts[0], id: 'pending-promise', status: 'pending', createdAt: novel.createdAt, updatedAt: novel.updatedAt,
+    }]
+    expect(normalizeStoryPromiseDrafts(novel, chapter, [{
+      title: '十年密信', description: '重复', evidence: '封存十年的密信',
+    }])).toHaveLength(0)
   })
 
   it('formats next, near and far plans for the writing fact card', () => {
@@ -83,5 +109,7 @@ describe('chapter planning', () => {
     expect(text).toContain('[下一章 / 第2章]')
     expect(text).toContain('[近期 / 第3-6章]')
     expect(text).toContain('[远期 / 第21-31章]')
+    novel.chapterPlans[0].status = 'awaiting_review'
+    expect(formatChapterPlanContext(novel, 1)).not.toContain('找到信号源')
   })
 })

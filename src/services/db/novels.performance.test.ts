@@ -44,6 +44,38 @@ function largeNovel(): Novel {
 }
 
 describe('large novel SQLite persistence', () => {
+  it('round-trips new-book promise evidence and review proposals', async () => {
+    const novel = largeNovel()
+    novel.id = 'promise-roundtrip'
+    novel.dataPanelChanges = []
+    const now = novel.createdAt
+    novel.eventLog = [{
+      id: 'promise-1', title: '封存的密信', description: '等待主角揭开内容',
+      chapterIndex: 0, type: '伏笔', scope: 'global', status: 'planted',
+      characters: ['林青'], relatedArcIds: ['arc-1'], evidence: '密信将在十年后启封',
+      lastProgressChapterIndex: 0, targetChapter: 12, timestamp: now, updatedAt: now,
+    }]
+    novel.chapterPlans = [{
+      id: 'plan-1', horizon: 'next', title: '找到密信', objective: '揭开线索',
+      summary: '', beats: [], targetChapterStart: 0, targetChapterEnd: 0,
+      relatedArcIds: [], relatedEventIds: [], status: 'awaiting_review',
+      source: 'user', createdAt: now, updatedAt: now,
+    }]
+    novel.storyStateProposals = [{
+      id: 'proposal-1', targetType: 'event', targetId: 'draft:chapter-1:密信',
+      targetTitle: '密信', field: 'create', oldValue: '', newValue: 'planted',
+      reason: '等待兑现', evidence: '密信将在十年后启封',
+      eventDraft: { title: '密信', description: '等待兑现', evidence: '密信将在十年后启封',
+        characters: [], relatedArcIds: ['arc-1'] },
+      chapterIndex: 0, source: 'ai', status: 'pending', createdAt: now, updatedAt: now,
+    }]
+    await saveNovelToDb(novel)
+    const loaded = (await loadAllNovelsFromDb()).find(book => book.id === novel.id)!
+    expect(loaded.eventLog).toMatchObject(novel.eventLog)
+    expect(loaded.chapterPlans?.[0].status).toBe('awaiting_review')
+    expect(loaded.storyStateProposals?.[0].eventDraft).toEqual(novel.storyStateProposals[0].eventDraft)
+  })
+
   it('round-trips equipment ownership, modifiers and pending creations through SQLite', async () => {
     const novel = largeNovel()
     novel.id = 'equipment-roundtrip'

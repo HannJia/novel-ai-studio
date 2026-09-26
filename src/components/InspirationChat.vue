@@ -49,9 +49,11 @@
       <article v-if="streamText" data-streaming-assistant class="inspiration-message assistant">
         <strong>AI</strong><div v-html="renderMd(streamText)"></div>
       </article>
-      <p v-else-if="busy" class="inspiration-progress" role="status">{{ extracting
-        ? extractionProgress
-        : requestWebSearch ? '正在请求联网回复，完成后显示回答和来源；开关修改下条生效…' : 'AI 正在回复…' }}</p>
+      <p v-else-if="busy" class="inspiration-progress" role="status">{{ compacting
+        ? compactionProgress
+        : extracting
+          ? extractionProgress
+          : requestWebSearch ? '正在请求联网回复，完成后显示回答和来源；开关修改下条生效…' : 'AI 正在回复…' }}</p>
     </div>
     <div class="inspiration-composer">
       <n-input v-model:value="input" type="textarea" :rows="3" :maxlength="4000" :disabled="busy"
@@ -61,10 +63,26 @@
       <p class="inspiration-input-hint">回车发送 · 上档键＋回车换行</p>
       <div v-if="error" role="alert" class="inspiration-error">{{ error }}</div>
       <div class="inspiration-actions">
-        <n-button v-if="busy" @click="stop"><template #icon><n-icon><stop-outline /></n-icon></template>停止</n-button>
-        <n-button v-else :disabled="!input.trim()" type="primary" @click="send">
-          <template #icon><n-icon><send-outline /></n-icon></template>发送
-        </n-button>
+        <div class="inspiration-send-group">
+          <div v-if="contextStatus" class="inspiration-context-status" role="status">
+            <button type="button" class="inspiration-context-summary" :aria-label="contextTooltip">
+              <span class="inspiration-context-ring" :style="{ background: contextRingBackground }" aria-hidden="true"></span>
+            </button>
+            <div class="inspiration-context-tooltip" role="tooltip">
+              <strong>背景信息窗口：</strong>
+              <span>{{ contextPercent }}% 已用（剩余 {{ contextRemainingPercent }}%）</span>
+              <span>已用 {{ contextLength.toLocaleString() }} 字符，共 {{ INSPIRATION_CONTEXT_BUDGET.toLocaleString() }} 字符</span>
+              <span v-if="compacting">{{ compactionProgress }}</span>
+              <span v-else-if="compressedMessageCount">已压缩前 {{ compressedMessageCount }} 条消息</span>
+            </div>
+            <progress class="inspiration-context-progress-native" :value="contextPercent" max="100"
+              aria-label="灵感对话上下文使用量"></progress>
+          </div>
+          <n-button v-if="busy" @click="stop"><template #icon><n-icon><stop-outline /></n-icon></template>停止</n-button>
+          <n-button v-else :disabled="!input.trim()" type="primary" @click="send">
+            <template #icon><n-icon><send-outline /></n-icon></template>发送
+          </n-button>
+        </div>
         <n-button v-if="retryAvailable && !busy" @click="respond">重试回复</n-button>
         <n-button :loading="extracting" :disabled="busy || !history.some(item => item.role === 'user')" @click="extract">
           <template #icon><n-icon><checkmark-outline /></n-icon></template>{{ extracting ? '整理中' : '整理设定并检查' }}
@@ -77,12 +95,20 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NButton, NIcon, NInput, NSelect } from 'naive-ui'
 import { AddOutline, CheckmarkOutline, SaveOutline, SendOutline, StopOutline } from '@vicons/ionicons5'
 import { useConfigStore } from '@/stores/config'
 import { useKnowledgeStore } from '@/stores/knowledge'
-import { chatInspiration, extractInspirationSettings, type InspirationMessage } from '@/services/inspiration'
+import {
+  chatInspiration,
+  compactInspirationContext,
+  extractInspirationSettings,
+  inspirationContextLength,
+  INSPIRATION_COMPACT_AT,
+  INSPIRATION_CONTEXT_BUDGET,
+  type InspirationMessage,
+} from '@/services/inspiration'
 import type { CreateWizardForm } from '@/types/novel'
 import { renderMd } from '@/utils/markdown'
 import { formatChatReply } from '@/utils/chatPresentation'
@@ -123,6 +149,8 @@ const error = ref('')
 const busy = ref(false)
 const extracting = ref(false)
 const extractionProgress = ref('正在整理设定…')
+const compacting = ref(false)
+const compactionProgress = ref('正在自动压缩较早的对话…')
 const conversationContext = ref<InspirationSession['context']>()
 const webSearch = ref(false)
 const requestWebSearch = ref(false)
@@ -135,6 +163,27 @@ const latestPromptIndex = computed(() => {
   return -1
 })
 const latestPrompt = computed(() => history.value[latestPromptIndex.value]?.content || '')
+const contextLength = computed(() =>
+  inspirationContextLength(history.value, conversationContext.value),
+)
+const contextPercent = computed(() => Math.min(100, Math.round(
+  contextLength.value / INSPIRATION_CONTEXT_BUDGET * 100,
+)))
+const contextRemainingPercent = computed(() => Math.max(0, 100 - contextPercent.value))
+const compressedMessageCount = computed(() => conversationContext.value?.messageCount || 0)
+const contextRingBackground = computed(() =>
+  `conic-gradient(var(--color-primary) ${contextPercent.value}%, var(--border-color-light) 0)`,
+)
+const contextStatus = computed(() => {
+  if (!history.value.some(item => item.role === 'user')) return ''
+  return `上下文 ${contextLength.value.toLocaleString()} / ${INSPIRATION_CONTEXT_BUDGET.toLocaleString()} 字，接近上限时自动压缩`
+})
+const contextTooltip = computed(() => [
+  `背景信息窗口：${contextPercent.value}% 已用（剩余 ${contextRemainingPercent.value}%）`,
+  `已用 ${contextLength.value.toLocaleString()} 字符，共 ${INSPIRATION_CONTEXT_BUDGET.toLocaleString()} 字符`,
+  compacting.value ? compactionProgress.value
+    : compressedMessageCount.value ? `已压缩前 ${compressedMessageCount.value} 条消息` : '接近上限时自动压缩',
+].join('。'))
 let controller: AbortController | null = null
 
 let restoring = false
@@ -213,9 +262,7 @@ function loadSession(id: string | null) {
   webSearch.value = session.webSearch
   conversationContext.value = session.context
   error.value = ''
-  void nextTick(() => {
-    if (historyElement.value) historyElement.value.scrollTop = historyElement.value.scrollHeight
-  })
+  void scrollToLatestMessage()
   } finally { restoring = false }
 }
 
@@ -246,6 +293,12 @@ function jumpToLatestPrompt() {
   scrollMessageToStart(container?.querySelector<HTMLElement>(`[data-message-index="${latestPromptIndex.value}"]`) || null)
 }
 
+async function scrollToLatestMessage() {
+  await nextTick()
+  if (!props.active || !history.value.length || !historyElement.value) return
+  historyElement.value.scrollTop = historyElement.value.scrollHeight
+}
+
 async function scrollToReplyStart(request: AbortController, replyIndex: number) {
   await nextTick()
   if (controller !== request || request.signal.aborted || !props.active) return
@@ -260,6 +313,7 @@ function stop() {
   controller = null
   busy.value = false
   extracting.value = false
+  compacting.value = false
   streamText.value = ''
 }
 function handleInputKeydown(event: KeyboardEvent) {
@@ -293,6 +347,27 @@ async function respond() {
   void scrollToReplyStart(request, replyIndex)
   try {
     const snapshot = JSON.parse(JSON.stringify(history.value)) as InspirationMessage[]
+    if (inspirationContextLength(snapshot, conversationContext.value) >= INSPIRATION_COMPACT_AT) {
+      compacting.value = true
+      compactionProgress.value = '正在自动压缩较早的对话…'
+      const compacted = await compactInspirationContext(
+        { ...model },
+        snapshot,
+        conversationContext.value,
+        request.signal,
+        (completed, total) => {
+          if (controller === request) {
+            compactionProgress.value = total
+              ? `正在自动压缩上下文：已完成 ${completed}/${total} 批…`
+              : '正在整理上下文…'
+          }
+        },
+      )
+      if (controller !== request || request.signal.aborted) return
+      conversationContext.value = compacted
+      persistCurrentHistory()
+      compacting.value = false
+    }
     const result = await chatInspiration({ ...model }, snapshot, request.signal, chunk => {
       if (controller === request && !request.signal.aborted) {
         streamText.value += chunk
@@ -328,7 +403,7 @@ async function extract() {
     const base = JSON.parse(JSON.stringify(props.form)) as CreateWizardForm
     const snapshot = JSON.parse(JSON.stringify(history.value)) as InspirationMessage[]
     const form = await extractInspirationSettings({ ...model }, snapshot, base, request.signal, (completed, total) => {
-      if (controller === request) extractionProgress.value = `正在整理设定：已完成 ${completed}/${total} 批…`
+      if (controller === request) extractionProgress.value = `正在整理设定：已完成 ${completed}/${total} 步…`
     })
     if (controller === request && !request.signal.aborted && props.active) {
       conversationContext.value = { content: JSON.stringify(form), messageCount: snapshot.length }
@@ -341,7 +416,11 @@ async function extract() {
     if (controller === request) stop()
   }
 }
-watch(() => props.active, active => { if (!active) { stop(); showKnowledgeDraft.value = false } })
+onMounted(() => { void scrollToLatestMessage() })
+watch(() => props.active, active => {
+  if (active) void scrollToLatestMessage()
+  else { stop(); showKnowledgeDraft.value = false }
+})
 watch(history, value => emit('history-change', cloneHistory(value)), { deep: true, immediate: true })
 watch([input, webSearch], persistCurrentHistory, { flush: 'sync' })
 onBeforeUnmount(() => { persistCurrentHistory(); stop() })
@@ -380,7 +459,24 @@ onBeforeUnmount(() => { persistCurrentHistory(); stop() })
 .inspiration-message :deep(ul), .inspiration-message :deep(ol) { padding-left: 22px; }
 .inspiration-composer { flex: 0 0 auto; padding: 12px 0; border-top: 1px solid var(--border-color-light); }
 .inspiration-input-hint { margin: 6px 0 0; color: var(--text-color-tertiary); font-size: 12px; line-height: 1.5; }
-.inspiration-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.inspiration-send-group { display: inline-flex; align-items: center; gap: 8px; }
+.inspiration-context-status { position: relative; display: inline-flex; align-items: center; color: var(--text-color-tertiary); font-size: 11px; line-height: 1; }
+.inspiration-context-summary { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px;
+  padding: 0; border: 0; border-radius: 6px; background: transparent; cursor: help; }
+.inspiration-context-summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.inspiration-context-ring { position: relative; display: inline-block; width: 22px; height: 22px; flex: 0 0 22px; border-radius: 50%; }
+.inspiration-context-ring::after { content: ''; position: absolute; inset: 4px; border-radius: 50%; background: var(--bg-color-card); }
+.inspiration-context-tooltip { position: absolute; z-index: 5; bottom: calc(100% + 8px); left: 0; display: flex; flex-direction: column; gap: 3px;
+  width: max-content; max-width: min(280px, calc(100vw - 32px)); padding: 9px 11px; border-radius: 9px;
+  background: #1c1c1e; color: #f5f5f7; box-shadow: 0 7px 20px rgba(0, 0, 0, 0.22);
+  font-size: 11px; line-height: 1.45; opacity: 0; pointer-events: none; transform: translateY(3px);
+  transition: opacity 120ms ease, transform 120ms ease; white-space: nowrap; }
+.inspiration-context-tooltip strong { color: #fff; font-weight: 600; }
+.inspiration-context-status:hover .inspiration-context-tooltip,
+.inspiration-context-summary:focus + .inspiration-context-tooltip { opacity: 1; transform: translateY(0); }
+.inspiration-context-progress-native { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; clip-path: inset(50%); }
+.inspiration-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; clip-path: inset(50%); }
+.inspiration-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .inspiration-error { color: var(--color-error); margin-top: 8px; overflow-wrap: anywhere; }
 @media (max-width: 600px) {
   .inspiration-message { padding: 10px 12px; }

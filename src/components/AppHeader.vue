@@ -47,10 +47,14 @@ import { useCloudSyncStore } from '@/stores/cloudSync'
 import { useThemeStore, themeOptions } from '@/stores/theme'
 
 const router = useRouter()
+const emit = defineEmits<{
+  'open-settings': []
+}>()
 const themeStore = useThemeStore()
 const cloud = useCloudSyncStore()
 function openCloud() {
-  router.push({ path: '/settings', query: { returnTo: router.currentRoute.value.path === '/settings' ? '/' : router.currentRoute.value.fullPath } })
+  if (router.currentRoute.value.path === '/settings') return
+  emit('open-settings')
 }
 
 function goHome() {
@@ -58,10 +62,8 @@ function goHome() {
 }
 
 function goSettings() {
-  const returnTo = router.currentRoute.value.fullPath
-  router.push(returnTo && returnTo !== '/settings'
-    ? { path: '/settings', query: { returnTo } }
-    : '/settings')
+  if (router.currentRoute.value.path === '/settings') return
+  emit('open-settings')
 }
 </script>
 

@@ -1,7 +1,7 @@
 <template>
   <div class="page-container fade-in" id="settings-page">
     <div class="settings-header">
-      <button class="back-btn" @click="returnToPreviousPage">
+      <button v-if="!props.overlay" class="back-btn" @click="handleClose">
         <n-icon :size="20"><arrow-back-outline /></n-icon>
         <span>{{ returnPath ? '返回上页' : '返回书架' }}</span>
       </button>
@@ -387,6 +387,10 @@ const message = useMessage()
 const dialog = useDialog()
 const route = useRoute()
 const router = useRouter()
+const props = defineProps<{ overlay?: boolean }>()
+const emit = defineEmits<{
+  close: []
+}>()
 
 const returnPath = computed(() => {
   const candidate = String(route?.query?.returnTo || '')
@@ -396,6 +400,14 @@ const returnPath = computed(() => {
 function returnToPreviousPage() {
   if (!router) return
   void router.push(returnPath.value || '/')
+}
+
+function handleClose() {
+  if (props.overlay) {
+    emit('close')
+    return
+  }
+  returnToPreviousPage()
 }
 
 const showAddModel = ref(false)

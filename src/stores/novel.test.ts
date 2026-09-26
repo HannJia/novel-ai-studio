@@ -112,7 +112,7 @@ describe('novel store data panel integration', () => {
       createdAt: novel.createdAt, updatedAt: novel.updatedAt,
     }]
     expect(store.completeChapterPlans(novel.id, 0)).toBe(1)
-    expect(novel.chapterPlans[0].status).toBe('completed')
+    expect(novel.chapterPlans[0].status).toBe('awaiting_review')
     const plan = store.ensureNextChapterPlan(novel.id, 0)
     expect(plan?.horizon).toBe('next')
     expect(plan?.targetChapterStart).toBe(1)
@@ -131,6 +131,44 @@ describe('novel store data panel integration', () => {
     expect(panel.fields[0].value).toBe('0')
     store.applyDataPanelChange(novel.id, novel.dataPanelChanges[0].id)
     expect(panel.fields[0].value).toBe('1')
+  })
+
+  it('confirms evidence-backed promises and goals without accepting stale text', () => {
+    const store = useNovelStore()
+    const novel = createBook('期待核对')
+    const chapter = store.addChapter(novel.id, { title: '第一章', volumeIndex: 0 })!
+    store.updateChapter(novel.id, chapter.id, { content: '她留下了一封封存十年的密信，主角终于找到了入口。' })
+    const plan = store.addChapterPlan(novel.id, {
+      horizon: 'next', title: '找到入口', objective: '找到入口', summary: '', beats: [],
+      targetChapterStart: chapter.chapterIndex, targetChapterEnd: chapter.chapterIndex,
+      relatedArcIds: [], relatedEventIds: [], status: 'active', source: 'user',
+    })!
+    store.completeChapterPlans(novel.id, chapter.chapterIndex)
+    const proposal = store.addStoryStateProposal(novel.id, {
+      targetType: 'chapter_plan', targetId: plan.id, targetTitle: plan.title, field: 'status',
+      oldValue: 'awaiting_review', newValue: 'completed', reason: '找到了入口', evidence: '主角终于找到了入口',
+      chapterIndex: chapter.chapterIndex, source: 'ai',
+    })!
+    const promise = store.addStoryStateProposal(novel.id, {
+      targetType: 'event', targetId: 'draft:secret', targetTitle: '密信', field: 'create',
+      oldValue: '', newValue: 'planted', reason: '未来揭开密信', evidence: '封存十年的密信',
+      eventDraft: { title: '密信', description: '未来揭开密信', evidence: '封存十年的密信',
+        characters: [], relatedArcIds: [] }, chapterIndex: chapter.chapterIndex, source: 'ai',
+    })!
+    expect(store.applyStoryStateProposal(novel.id, proposal.id)).toBe(true)
+    expect(plan.status).toBe('completed')
+    expect(store.applyStoryStateProposal(novel.id, promise.id)).toBe(true)
+    expect(novel.eventLog.find(event => event.title === '密信')?.status).toBe('planted')
+
+    const stale = store.addStoryStateProposal(novel.id, {
+      targetType: 'event', targetId: 'draft:stale', targetTitle: '旧伏笔', field: 'create',
+      oldValue: '', newValue: 'planted', reason: '', evidence: '封存十年的密信',
+      eventDraft: { title: '旧伏笔', description: '已过期', evidence: '封存十年的密信',
+        characters: [], relatedArcIds: [] }, chapterIndex: chapter.chapterIndex, source: 'ai',
+    })!
+    store.updateChapter(novel.id, chapter.id, { content: '主角进入了城门。' })
+    expect(store.applyStoryStateProposal(novel.id, stale.id)).toBe(false)
+    expect(novel.eventLog.some(event => event.title === '旧伏笔')).toBe(false)
   })
 
   it('keeps scans idempotent and applies multi-chapter changes in chronological order', () => {

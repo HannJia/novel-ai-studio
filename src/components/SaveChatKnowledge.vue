@@ -11,20 +11,32 @@
         <n-input v-model:value="name" :maxlength="100" :disabled="saving || Boolean(pending)" aria-label="新知识库名称" />
       </template>
       <label>条目标题</label>
-      <n-input v-model:value="title" :maxlength="180" :disabled="saving || Boolean(pending)" aria-label="条目标题" />
+      <n-input v-model:value="title" :maxlength="180" :disabled="saving || extracting || Boolean(pending)" aria-label="条目标题" />
       <label>分类</label>
-      <n-select v-model:value="category" :options="kbCategories" :disabled="saving || Boolean(pending)" aria-label="条目分类" />
+      <n-select v-model:value="category" :options="kbCategories" :disabled="saving || extracting || Boolean(pending)" aria-label="条目分类" />
       <label>内容</label>
-      <n-input v-model:value="draft" type="textarea" :rows="10" :disabled="saving || Boolean(pending)" aria-label="知识条目内容" />
+      <n-input v-model:value="draft" type="textarea" :rows="10" :disabled="saving || extracting || Boolean(pending)" aria-label="知识条目内容" />
       <label>标签</label>
-      <n-input v-model:value="tags" placeholder="用逗号分隔" :disabled="saving || Boolean(pending)" aria-label="知识条目标签" />
+      <n-input v-model:value="tags" placeholder="用逗号分隔" :disabled="saving || extracting || Boolean(pending)" aria-label="知识条目标签" />
+      <label>提取摘要（供后续检索与写作参考）</label>
+      <p v-if="extracting" class="knowledge-extract-status" role="status">{{ extractionStatus }}</p>
+      <p v-if="extractError" class="knowledge-save-error" role="alert">{{ extractError }}；可以重试或直接按原文保存。</p>
+      <p v-if="content.length > CHAT_KNOWLEDGE_EXTRACT_LIMIT" class="knowledge-extract-status">
+        本条回复较长，AI 仅读取前 {{ CHAT_KNOWLEDGE_EXTRACT_LIMIT.toLocaleString() }} 字；请核对摘要是否遗漏后续信息。
+      </p>
+      <n-input v-model:value="summary" type="textarea" :rows="4" :disabled="saving || Boolean(pending) || extracting"
+        placeholder="提取完成后可编辑；留空则仅保存原文" aria-label="知识条目摘要" />
+      <p class="knowledge-extract-status">AI 提取仅供参考，请核对重要事实与数字；原回复保留在上方正文。</p>
       <p v-if="error" class="knowledge-save-error" role="alert">{{ error }}</p>
     </div>
     <template #action>
-      <n-button :disabled="saving" @click="emit('update:show', false)">取消</n-button>
-      <n-button type="primary" :loading="saving" :disabled="!canSave" @click="save">
-        <template #icon><n-icon><save-outline /></n-icon></template>{{ pending ? '重试保存' : '确认保存' }}
-      </n-button>
+      <div class="knowledge-save-actions">
+        <n-button :disabled="saving" @click="emit('update:show', false)">取消</n-button>
+        <n-button v-if="extractError && !saving && !pending" :disabled="extracting" @click="extract">重试提取</n-button>
+        <n-button type="primary" :loading="saving" :disabled="!canSave" @click="save">
+          <template #icon><n-icon><save-outline /></n-icon></template>{{ pending ? '重试保存' : '确认保存' }}
+        </n-button>
+      </div>
     </template>
   </n-modal>
 </template>
@@ -34,6 +46,8 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { NButton, NIcon, NInput, NModal, NSelect } from 'naive-ui'
 import { SaveOutline } from '@vicons/ionicons5'
 import { kbCategories, useKnowledgeStore } from '@/stores/knowledge'
+import { useConfigStore } from '@/stores/config'
+import { CHAT_KNOWLEDGE_EXTRACT_LIMIT, extractChatKnowledge } from '@/services/chatKnowledgeExtraction'
 
 const props = defineProps<{ show: boolean; content: string; preferredIds?: string[] }>()
 const emit = defineEmits<{
@@ -41,6 +55,7 @@ const emit = defineEmits<{
   saved: [result: { kbId: string; kbName: string; entryId: string; title: string }]
 }>()
 const store = useKnowledgeStore()
+const config = useConfigStore()
 const NEW_BASE = '__new_knowledge_base__'
 const target = ref(NEW_BASE)
 const name = ref('')
@@ -48,29 +63,87 @@ const title = ref('')
 const category = ref('其他')
 const draft = ref('')
 const tags = ref('')
+const summary = ref('')
+const extracting = ref(false)
+const extractionStatus = ref('正在从本条回复提取信息…')
+const extractError = ref('')
+let extractionController: AbortController | null = null
+let summarizedContent = ''
 const saving = ref(false)
 let active = true
-onBeforeUnmount(() => { active = false })
+onBeforeUnmount(() => { active = false; extractionController?.abort() })
 const error = ref('')
 const pending = ref<{ kbId: string; entryId: string; title: string } | null>(null)
 const options = computed(() => [
   ...store.knowledgeBases.map(base => ({ label: base.name, value: base.id })),
   { label: '新建知识库', value: NEW_BASE },
 ])
-const canSave = computed(() => !saving.value && (Boolean(pending.value)
+const canSave = computed(() => !saving.value && !extracting.value && (Boolean(pending.value)
   || Boolean(title.value.trim() && draft.value.trim() && (target.value !== NEW_BASE || name.value.trim()))))
 
 watch(() => props.show, show => {
-  if (!show) return
+  if (!show) {
+    extractionController?.abort()
+    extractionController = null
+    extracting.value = false
+    return
+  }
   target.value = props.preferredIds?.find(id => store.getKB(id)) || NEW_BASE
   name.value = ''
   title.value = props.content.split('\n').map(line => line.replace(/^[#*\s]+|[*\s]+$/g, '')).find(Boolean)?.slice(0, 180) || ''
   draft.value = props.content
   category.value = '其他'
   tags.value = ''
+  summary.value = ''
+  summarizedContent = ''
   error.value = ''
+  extractError.value = ''
   pending.value = null
+  if (props.content.trim()) void extract()
 }, { immediate: true })
+
+watch(draft, value => {
+  if (summarizedContent && value !== summarizedContent) {
+    summary.value = ''
+    summarizedContent = ''
+    extractError.value = '正文已修改，原摘要已清空'
+  }
+})
+
+async function extract() {
+  if (!props.show || !draft.value.trim() || extracting.value || pending.value) return
+  const model = config.getModelForTask('chat')
+  if (!model?.apiKey.trim()) {
+    extractError.value = '请先配置可用的对话模型与接口密钥'
+    return
+  }
+  const request = new AbortController()
+  extractionController = request
+  extracting.value = true
+  extractionStatus.value = '正在从本条回复提取信息…'
+  extractError.value = ''
+  const source = draft.value
+  try {
+    const extracted = await extractChatKnowledge({ ...model }, source, request.signal, () => {
+      if (extractionController === request) extractionStatus.value = '正在尝试简洁摘要格式…'
+    })
+    if (!active || !props.show || extractionController !== request || request.signal.aborted) return
+    title.value = extracted.title
+    category.value = extracted.category
+    tags.value = extracted.tags.join('、')
+    summary.value = extracted.summary
+    summarizedContent = source
+  } catch (cause) {
+    if (active && props.show && extractionController === request && !request.signal.aborted) {
+      extractError.value = cause instanceof Error ? cause.message : 'AI 提取失败'
+    }
+  } finally {
+    if (extractionController === request) {
+      extractionController = null
+      extracting.value = false
+    }
+  }
+}
 
 async function save() {
   if (!canSave.value) return
@@ -86,7 +159,7 @@ async function save() {
       }
       if (!kb) throw new Error('目标知识库已不存在，请重新选择。')
       const entry = store.addEntry(kb.id, {
-        title: title.value.trim(), content: draft.value.trim(), category: category.value, summary: '',
+        title: title.value.trim(), content: draft.value.trim(), category: category.value, summary: summary.value.trim(),
         tags: tags.value.split(/[,，、]/).map(tag => tag.trim()).filter(Boolean).slice(0, 20),
       })
       if (!entry) throw new Error('未能创建条目，请重试。')
@@ -112,4 +185,10 @@ async function save() {
 .knowledge-draft-form { display: grid; gap: 8px; min-width: 0; }
 .knowledge-draft-form label { font-size: 13px; color: var(--text-color-secondary); }
 .knowledge-save-error { color: var(--color-error); overflow-wrap: anywhere; margin: 0; }
+.knowledge-extract-status { color: var(--text-color-tertiary); font-size: 12px; margin: 0; }
+.knowledge-save-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.knowledge-save-actions :deep(.n-button) { width: 108px; height: 36px; }
+@media (max-width: 420px) {
+  .knowledge-save-actions :deep(.n-button) { flex: 1 1 88px; width: auto; }
+}
 </style>

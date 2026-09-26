@@ -136,7 +136,9 @@ function formatDataPanelItem(item: Novel['dataPanels'][number], panels: Novel['d
 function buildStageSummary(novel: Novel, chapterIdx: number, limit: number): string {
   const olderSummaries = novel.chapters
     .filter(c => c.chapterIndex < chapterIdx - 15 && c.summary)
-    .sort((a, b) => a.chapterIndex - b.chapterIndex)
+    .sort((a, b) => b.chapterIndex - a.chapterIndex)
+    .slice(0, 30)
+    .reverse()
 
   if (olderSummaries.length === 0) return ''
 
@@ -158,11 +160,19 @@ function buildPreviousSummary(novel: Novel, chapterIdx: number, budget: ContextB
     .slice(0, budget.summaryChapterCount)
     .reverse()
 
-  const recentSummary = summaryChapters.length > 0
-    ? summaryChapters.map(c => `【第${c.chapterIndex + 1}章 ${c.title}】${c.summary}`).join('\n\n')
-    : ''
   const stageSummary = buildStageSummary(novel, chapterIdx, Math.floor(budget.summaryText * 0.35))
-  return limitText([stageSummary, recentSummary].filter(Boolean).join('\n\n'), budget.summaryText)
+  const recentBudget = budget.summaryText - stageSummary.length - (stageSummary ? 2 : 0)
+  const recent: string[] = []
+  let remaining = recentBudget
+  for (const chapter of summaryChapters.reverse()) {
+    const label = `【第${chapter.chapterIndex + 1}章 ${chapter.title}】`
+    const available = remaining - label.length - (recent.length ? 2 : 0)
+    if (available <= 0) break
+    const line = label + limitText(chapter.summary, available)
+    recent.unshift(line)
+    remaining -= line.length + (recent.length > 1 ? 2 : 0)
+  }
+  return [stageSummary, recent.join('\n\n')].filter(Boolean).join('\n\n')
 }
 
 function buildContextSignature(novel: Novel, currentChapter: Chapter, contextWindow?: number): string {
@@ -209,6 +219,9 @@ function buildContextSignature(novel: Novel, currentChapter: Chapter, contextWin
     currentChapter.updatedAt,
     previousChapter?.updatedAt || '',
     previousChapter?.content.length || 0,
+    novel.chapters.filter(chapter => chapter.chapterIndex < currentChapter.chapterIndex && chapter.summary)
+      .sort((a, b) => b.chapterIndex - a.chapterIndex).slice(0, 45)
+      .map(chapter => `${chapter.id}:${chapter.updatedAt}:${chapter.summary.length}`).join(','),
     contextWindow || 8000,
     novel.outline.length,
     currentVolume ? [currentVolume.title, currentVolume.theme, currentVolume.summary, currentVolume.keyTurningPoints, currentVolume.characterChanges].join(':') : '',
@@ -319,12 +332,22 @@ export function buildWritingContext(
 
   let globalPlanContext = ''
   const activeGlobalPlans = (novel.eventLog || []).filter(isActiveGlobalPlan)
+  const activePromises = (novel.eventLog || [])
+    .filter(event => event.type === '伏笔' && event.chapterIndex >= 0 && event.chapterIndex < chapterIdx
+      && event.status !== 'resolved' && event.status !== 'abandoned')
+    .sort((a, b) => (b.lastProgressChapterIndex ?? b.chapterIndex) - (a.lastProgressChapterIndex ?? a.chapterIndex))
   if (activeGlobalPlans.length > 0) {
     const lines = activeGlobalPlans.map(event => {
       const statusLabel = event.status === 'planted' ? '待推进' : '推进中'
       return `• [${statusLabel}] ${event.title}：${event.description}${event.hintCount ? `（已铺垫${event.hintCount}次）` : ''}`
     })
     globalPlanContext = limitText(`\n\n【全书规划（请在合适时机自然推进，不要强行收束）】\n${lines.join('\n')}`, budget.globalPlans)
+  }
+  if (activePromises.length > 0) {
+    const promiseBudget = Math.max(180, Math.floor(budget.timeline * 0.45))
+    const lines = activePromises.slice(0, 5).map(event =>
+      `• ${event.title}（第${event.chapterIndex + 1}章提出${event.targetChapter !== undefined ? `，预计第${event.targetChapter + 1}章推进` : ''}）：${limitText(event.description, 100)}`)
+    globalPlanContext += limitText(`\n\n【尚未兑现的读者期待（保持连续性，不提前兑现）】\n${lines.join('\n')}`, promiseBudget)
   }
 
   let knowledgeContext = ''
@@ -421,6 +444,12 @@ export function buildChapterFactCard(
     .filter(isActiveGlobalPlan)
     .slice(0, 10)
     .map(event => `• [${event.status === 'planted' ? '待推进' : '推进中'}] ${event.title}：${event.description}${event.hintCount ? `（已铺垫${event.hintCount}次）` : ''}`)
+  const openPromises = (novel.eventLog || [])
+    .filter(event => event.type === '伏笔' && event.chapterIndex >= 0 && event.chapterIndex < chapterIdx
+      && event.status !== 'resolved' && event.status !== 'abandoned')
+    .sort((a, b) => (b.lastProgressChapterIndex ?? b.chapterIndex) - (a.lastProgressChapterIndex ?? a.chapterIndex))
+    .slice(0, 5)
+    .map(event => `• ${event.title}：${limitText(event.description, 100)}`)
   const allDataPanels = novel.dataPanels || []
   const relatedData = allDataPanels
     .filter(item => {
@@ -451,6 +480,7 @@ export function buildChapterFactCard(
     relevantCharacters.length ? `必须遵守的角色状态：\n${relevantCharacters.map(formatCharacter).join('\n')}` : '',
     recentEvents.length ? `近期已发生事件：\n${recentEvents.join('\n')}` : '',
     activeGlobalPlans.length ? `待推进的全书规划：\n${activeGlobalPlans.join('\n')}` : '',
+    openPromises.length ? `尚未兑现的读者期待：\n${openPromises.join('\n')}` : '',
     relatedData.length || globalNumericData.length ? `相关/关键数据面板：\n${[...relatedData, ...globalNumericData].join('\n')}` : '',
     writingContext.semanticEvidence ? `可引用证据：\n${limitText(writingContext.semanticEvidence, 1000)}` : '',
     `硬性要求：不得改写已定角色状态、等级、资源、位置、时间线；涉及时间、倒计时、剩余天数、灵石收支、作物成熟进度等数字时必须逐项演算，不能凭感觉估算；不得突然新增未铺垫的重大设定、道具、势力或人物。`,

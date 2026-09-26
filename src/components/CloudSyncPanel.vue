@@ -6,6 +6,9 @@
     </div>
     <p v-if="feedback" class="cloud-feedback" role="alert">{{ feedback }}</p>
     <p v-if="sync.error" class="cloud-feedback" role="alert">{{ sync.error }}</p>
+    <p v-if="isWebBrowser && sync.error" class="cloud-note" style="background: #fff3cd; padding: 0.75rem; border-radius: 4px; margin-top: 0.5rem;">
+      <strong>浏览器版限制：</strong>由于浏览器的跨域安全策略（CORS），云同步功能仅在桌面版中可用。如需使用云同步，请下载并安装桌面版应用。
+    </p>
     <template v-if="!sync.session">
       <n-radio-group v-model:value="mode" name="cloud-auth-mode" size="small">
         <n-radio-button value="login">登录</n-radio-button>
@@ -111,6 +114,7 @@ import { useCloudSyncStore } from '@/stores/cloudSync'
 
 const sync = useCloudSyncStore()
 const dialog = useDialog()
+const isWebBrowser = !window.electronAPI
 const mode = ref<'login' | 'register' | 'recover'>('login')
 const username = ref('')
 const password = ref('')

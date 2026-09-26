@@ -3,7 +3,13 @@ import { createPinia, setActivePinia } from 'pinia'
 import { useNovelStore } from '@/stores/novel'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { callAI } from './ai'
-import { chatInspiration, extractInspirationSettings, parseInspirationSettings } from './inspiration'
+import {
+  chatInspiration,
+  compactInspirationContext,
+  extractInspirationSettings,
+  inspirationContextLength,
+  parseInspirationSettings,
+} from './inspiration'
 import type { ModelConfig } from '@/stores/config'
 import type { CreateWizardForm } from '@/types/novel'
 import type { InspirationMessage } from './inspiration'
@@ -26,10 +32,49 @@ describe('inspiration settings', () => {
     const progress = vi.fn()
     const form = await extractInspirationSettings(model, messages, base(), new AbortController().signal, progress)
     expect(form.settings.protagonist.name).toBe('小林')
-    expect(callAI).toHaveBeenCalledTimes(3)
-    expect(vi.mocked(callAI).mock.calls.slice(-1)[0][0].messages.map(item => item.content).join('')).toContain('最终决定')
-    expect(progress).toHaveBeenLastCalledWith(3, 3)
+    expect(callAI).toHaveBeenCalledTimes(6)
+    expect(vi.mocked(callAI).mock.calls.some(([request]) =>
+      request.messages.some(item => item.content.includes('最终决定')),
+    )).toBe(true)
+    expect(vi.mocked(callAI).mock.calls.slice(-1)[0][0]).toMatchObject({
+      timeoutMs: 240_000,
+      noAutomaticRetry: true,
+    })
+    expect(progress).toHaveBeenLastCalledWith(6, 6)
     expect(messages[0].content.length).toBe(65000)
+  })
+  it('preserves chronological notes through a second merge layer for very long conversations', async () => {
+    const messages: InspirationMessage[] = [
+      { role: 'user', content: '旧方案'.repeat(40_000) },
+      { role: 'user', content: '最终决定：改为商战' },
+    ]
+    vi.mocked(callAI).mockImplementation(async request => {
+      const prompt = request.messages.map(item => item.content).join('\n')
+      if (prompt.includes('请输出待作者确认的新书设定 JSON')) {
+        expect(prompt).toContain('最终决定')
+        return { content: JSON.stringify({ genre: 'urban', subGenre: 'business', settings: { otherSettings: '最终决定：改为商战' } }) }
+      }
+      return { content: prompt.includes('最终决定') ? '最终决定：改为商战' : '旧方案' }
+    })
+    const progress = vi.fn()
+    const form = await extractInspirationSettings(model, messages, base(), new AbortController().signal, progress)
+    expect(form.settings.otherSettings).toContain('最终决定')
+    expect(progress).toHaveBeenLastCalledWith(11, 11)
+    const finalMessages = vi.mocked(callAI).mock.calls.slice(-1)[0][0].messages
+    expect(finalMessages[finalMessages.length - 2]?.content).toContain('最终决定')
+  })
+  it('does not produce settings when a batch is empty or cancellation arrives during parallel work', async () => {
+    const messages: InspirationMessage[] = [{ role: 'user', content: '长'.repeat(32_000) }]
+    vi.mocked(callAI).mockResolvedValueOnce({ content: '' }).mockResolvedValue({ content: '要点' })
+    await expect(extractInspirationSettings(model, messages, base(), new AbortController().signal))
+      .rejects.toThrow('未返回整理要点')
+    vi.clearAllMocks()
+    const controller = new AbortController()
+    vi.mocked(callAI).mockImplementation(async () => {
+      controller.abort()
+      return { content: '要点' }
+    })
+    await expect(extractInspirationSettings(model, messages, base(), controller.signal)).rejects.toThrow()
   })
   it('uses organized context to continue chatting while retaining full history in storage', async () => {
     vi.mocked(callAI).mockResolvedValue({ content: '继续聊' })
@@ -39,6 +84,31 @@ describe('inspiration settings', () => {
     expect(prompt).toContain('主角小林')
     expect(prompt).toContain('新的选择')
     expect(prompt).not.toContain('旧旧旧')
+  })
+  it('compacts enough older messages to keep a long recent exchange in budget', async () => {
+    const messages: InspirationMessage[] = [
+      ...['甲', '乙', '丙', '丁', '戊', '己'].map((char, index) => ({
+        role: index % 2 ? 'assistant' as const : 'user' as const,
+        content: char.repeat(9000),
+      })),
+      { role: 'user', content: '最新问题' },
+      { role: 'assistant', content: '上一条回复' },
+    ]
+    const before = JSON.stringify(messages)
+    vi.mocked(callAI).mockResolvedValue({ content: '旧决定摘要' })
+    const progress = vi.fn()
+    const context = await compactInspirationContext(model, messages, undefined, new AbortController().signal, progress)
+    expect(context).toEqual({ content: '旧决定摘要', messageCount: 4 })
+    expect(inspirationContextLength(messages, context)).toBeLessThan(24_000)
+    expect(progress).toHaveBeenLastCalledWith(4, 4)
+    expect(JSON.stringify(messages)).toBe(before)
+    vi.clearAllMocks()
+    vi.mocked(callAI).mockResolvedValue({ content: '继续讨论' })
+    await chatInspiration(model, messages, new AbortController().signal, () => {}, false, [], context)
+    const prompt = JSON.stringify(vi.mocked(callAI).mock.calls[0][0].messages)
+    expect(prompt).toContain('旧决定摘要')
+    expect(prompt).toContain('最新问题')
+    expect(prompt).not.toContain('甲'.repeat(100))
   })
   it('reads current software knowledge without web search, respects selection, and sees new entries next turn', async () => {
     const store = useKnowledgeStore()
@@ -77,8 +147,36 @@ describe('inspiration settings', () => {
     expect(form.settings.protagonist.name).toBe('')
   })
 
-  it('rejects malformed responses and genre mismatch', () => {
-    expect(() => parseInspirationSettings('随便聊聊', base())).toThrow('有效设定')
+  it('accepts markdown, nested provider envelopes, partial fields and Chinese labels', () => {
+    const form = base()
+    const result = parseInspirationSettings(`整理结果如下：
+\`\`\`json
+{"data":{"genre":"历史","subGenre":"清史民国","settings":{"otherSettings":"资料待核实"},"targetWordCountMin":"80万字"}}
+\`\`\``, form)
+    expect(result).toMatchObject({ genre: 'history', subGenre: 'qing-republic', targetWordCountMin: 80 })
+    expect(result.settings.otherSettings).toBe('资料待核实')
+    expect(result.settings.protagonist.name).toBe('')
+  })
+
+  it('keeps the base selection when the response only contains partial settings', () => {
+    const form = base()
+    form.genre = 'urban'
+    form.subGenre = 'business'
+    const result = parseInspirationSettings(JSON.stringify({ settings: { otherSettings: '主线待确认' } }), form)
+    expect(result).toMatchObject({ genre: 'urban', subGenre: 'business' })
+    expect(result.settings.otherSettings).toBe('主线待确认')
+  })
+
+  it('allows partial settings before selecting a genre, so the author can finish it in the wizard', () => {
+    const result = parseInspirationSettings('{"settings":{"protagonist":{"name":"小林"}}}', base())
+    expect(result.genre).toBe('')
+    expect(result.subGenre).toBe('')
+    expect(result.settings.protagonist.name).toBe('小林')
+  })
+
+  it('rejects malformed responses and genre mismatch with actionable errors', () => {
+    expect(() => parseInspirationSettings('', base())).toThrow('未返回内容')
+    expect(() => parseInspirationSettings('随便聊聊', base())).toThrow('不是完整 JSON')
     expect(() => parseInspirationSettings('{"genre":"urban","subGenre":"fantasy-cultivation","settings":{"otherSettings":"test"}}', base())).toThrow('子类')
   })
 
@@ -141,6 +239,8 @@ describe('inspiration settings', () => {
     expect(callAI).toHaveBeenCalledTimes(1)
     const request = vi.mocked(callAI).mock.calls[0][0]
     expect(request.stream).toBe(false)
+    expect(request.timeoutMs).toBe(240_000)
+    expect(request.noAutomaticRetry).toBe(true)
     expect(JSON.stringify(request.messages)).toContain('https://example.org/event')
     expect(JSON.stringify(request.messages)).not.toContain('javascript:')
     expect(form.settings.otherSettings).toContain('https://example.org/event')

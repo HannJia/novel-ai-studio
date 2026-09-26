@@ -7,8 +7,5 @@
     "src/**/*.{ts,vue}",
     "app-main/**/*.js",
     "scripts/**/*.js"
-  ],
-  "ignore": [
-    ".compare/**"
   ]
 }

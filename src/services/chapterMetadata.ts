@@ -69,7 +69,10 @@ export async function requestChapterMetadata(options: {
       signal: options.signal,
       activityParentId: options.activityParentId,
       maxTokens: 900,
+      noAutomaticRetry: true,
     })
+    options.signal?.throwIfAborted()
+    if (result.finishReason && result.finishReason !== 'stop') throw new Error('章节总结输出未正常完成，请检查模型输出上限后重试')
     lastOutput = result.content
     const metadata = parseChapterMetadata(lastOutput, requireTitle)
     if (metadata) return metadata

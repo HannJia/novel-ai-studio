@@ -4,7 +4,12 @@ import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import InspirationChat from './InspirationChat.vue'
 import { NSelect } from 'naive-ui'
-import { chatInspiration, extractInspirationSettings } from '@/services/inspiration'
+import {
+  chatInspiration,
+  compactInspirationContext,
+  extractInspirationSettings,
+  inspirationContextLength,
+} from '@/services/inspiration'
 import { useConfigStore } from '@/stores/config'
 import { useNovelStore } from '@/stores/novel'
 import { useKnowledgeStore } from '@/stores/knowledge'
@@ -13,7 +18,14 @@ import type { CreateWizardForm } from '@/types/novel'
 import { useInspirationSessionsStore } from '@/stores/inspirationSessions'
 import { parseInspirationSession } from '@/services/inspirationSessions'
 
-vi.mock('@/services/inspiration', () => ({ chatInspiration: vi.fn(), extractInspirationSettings: vi.fn() }))
+vi.mock('@/services/inspiration', () => ({
+  chatInspiration: vi.fn(),
+  compactInspirationContext: vi.fn(),
+  extractInspirationSettings: vi.fn(),
+  inspirationContextLength: vi.fn(() => 0),
+  INSPIRATION_COMPACT_AT: 18_000,
+  INSPIRATION_CONTEXT_BUDGET: 24_000,
+}))
 vi.mock('@/services/db/inspirationSessions', () => ({
   loadInspirationSessions: async () => JSON.parse(localStorage.getItem('novel-writer-inspiration-sessions') || '[]').map(parseInspirationSession),
   saveInspirationSessions: async () => {},
@@ -21,13 +33,13 @@ vi.mock('@/services/db/inspirationSessions', () => ({
 beforeEach(async () => { setActivePinia(createPinia()); vi.resetAllMocks(); localStorage.clear(); await useInspirationSessionsStore().initialize() })
 afterEach(() => vi.restoreAllMocks())
 
-function mountChat() {
+function mountChat(active = true) {
   const store = useNovelStore()
   const form: CreateWizardForm = { genre: '', subGenre: '', tags: [], targetWordCountMin: 1, targetWordCountMax: 2,
     writingStyle: store.defaultWritingStyle(), settings: store.defaultSettings() }
   useConfigStore().models = [{ id: 'local', name: 'local', baseUrl: 'https://example.test', modelName: 'test',
     apiKey: 'synthetic', temperature: 0.7, topP: 0.9, maxTokens: 8000 }]
-  return shallowMount(InspirationChat, { props: { form, active: true }, global: { renderStubDefaultSlot: true, stubs: {
+  return shallowMount(InspirationChat, { props: { form, active }, global: { renderStubDefaultSlot: true, stubs: {
     Input: { props: ['value', 'disabled'], emits: ['update:value'], template: '<textarea :value="value" :disabled="disabled" @input="$emit(\'update:value\', $event.target.value)" />' },
     Button: { props: ['disabled'], emits: ['click'], template: '<button :disabled="disabled" @click="$emit(\'click\')"><slot /></button>' },
   } } })
@@ -38,6 +50,45 @@ function button(wrapper: Wrapper, text: string) {
 }
 
 describe('inspiration search controls', () => {
+  it('opens a restored conversation at the newest message, including after returning to inspiration', async () => {
+    useInspirationSessionsStore().adopt([parseInspirationSession({
+      id: 'saved-session', title: '已有想法', updatedAt: '2026-09-06T10:00:00.000Z',
+      messages: [{ role: 'user', content: '最早的提问' }, { role: 'assistant', content: '最新的回答' }],
+    })])
+    const wrapper = mountChat()
+    const container = wrapper.get('.inspiration-history').element
+    Object.defineProperty(container, 'scrollHeight', { configurable: true, value: 1500 })
+    await flushPromises()
+    expect(container.scrollTop).toBe(1500)
+
+    container.scrollTop = 210
+    await wrapper.setProps({ active: false })
+    expect(container.scrollTop).toBe(210)
+    await wrapper.setProps({ active: true })
+    await flushPromises()
+    expect(container.scrollTop).toBe(1500)
+    wrapper.unmount()
+  })
+
+  it('opens a selected history session at the newest message', async () => {
+    useInspirationSessionsStore().adopt([
+      parseInspirationSession({ id: 'newer', title: '新对话', updatedAt: '2026-09-07T10:00:00.000Z',
+        messages: [{ role: 'user', content: '新对话内容' }] }),
+      parseInspirationSession({ id: 'older', title: '旧对话', updatedAt: '2026-09-06T10:00:00.000Z',
+        messages: [{ role: 'user', content: '旧对话内容' }, { role: 'assistant', content: '旧对话回复' }] }),
+    ])
+    const wrapper = mountChat()
+    const container = wrapper.get('.inspiration-history').element
+    Object.defineProperty(container, 'scrollHeight', { configurable: true, value: 1800 })
+    await flushPromises()
+    container.scrollTop = 0
+    wrapper.findComponent(NSelect).vm.$emit('update:value', 'older')
+    await flushPromises()
+    expect(wrapper.get('.inspiration-message.assistant').text()).toContain('旧对话回复')
+    expect(container.scrollTop).toBe(1800)
+    wrapper.unmount()
+  })
+
   it('restores a synced unfinished draft and web setting, then continues the same conversation', async () => {
     const store = useInspirationSessionsStore()
     store.adopt([parseInspirationSession({ id: 'cloud-session', title: '公司的想法', updatedAt: new Date().toISOString(),
@@ -53,7 +104,67 @@ describe('inspiration search controls', () => {
     expect(store.sessions[0].id).toBe('cloud-session')
     expect(store.sessions[0].messages).toHaveLength(4)
     expect(store.sessions[0].draft).toBe('')
+    expect(compactInspirationContext).not.toHaveBeenCalled()
     expect(vi.mocked(chatInspiration).mock.calls[0][6]).toEqual({ content: '已有设定', messageCount: 2 })
+    wrapper.unmount()
+  })
+  it('shows context usage and compacts earlier messages before a long conversation continues', async () => {
+    vi.mocked(inspirationContextLength).mockReturnValue(18_000)
+    vi.mocked(compactInspirationContext).mockResolvedValue({ content: '前面对话摘要', messageCount: 1 })
+    vi.mocked(chatInspiration).mockResolvedValue({ content: '基于摘要继续回复' })
+    const wrapper = mountChat()
+
+    await wrapper.get('textarea').setValue('继续讨论新的冲突')
+    await button(wrapper, '发送').trigger('click')
+    expect(wrapper.find('.inspiration-send-group .inspiration-context-ring').exists()).toBe(true)
+    expect(wrapper.find('.inspiration-context-summary').text()).toBe('')
+    expect(wrapper.find('.inspiration-context-summary').attributes('aria-label')).toContain('18,000 字符，共 24,000 字符')
+    await flushPromises()
+
+    expect(compactInspirationContext).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.inspiration-progress').exists()).toBe(false)
+    expect(chatInspiration).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(chatInspiration).mock.calls[0][6]).toEqual({ content: '前面对话摘要', messageCount: 1 })
+    expect(useInspirationSessionsStore().sessions[0].messages).toEqual([
+      { role: 'user', content: '继续讨论新的冲突' },
+      { role: 'assistant', content: '基于摘要继续回复' },
+    ])
+    expect(wrapper.find('progress').attributes('aria-label')).toBe('灵感对话上下文使用量')
+    wrapper.unmount()
+  })
+  it('shows compression progress and allows stopping before a reply is requested', async () => {
+    vi.mocked(inspirationContextLength).mockReturnValue(18_000)
+    let complete!: (result: { content: string; messageCount: number }) => void
+    vi.mocked(compactInspirationContext).mockImplementation((_model, _messages, _context, _signal, progress) => {
+      progress?.(1, 3)
+      return new Promise(resolve => { complete = resolve })
+    })
+    const wrapper = mountChat()
+    await wrapper.get('textarea').setValue('再谈人物')
+    await button(wrapper, '发送').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.inspiration-progress').text()).toContain('1/3 批')
+    await button(wrapper, '停止').trigger('click')
+    complete({ content: '迟到摘要', messageCount: 1 })
+    await flushPromises()
+    expect(chatInspiration).not.toHaveBeenCalled()
+    expect(useInspirationSessionsStore().sessions[0].context).toBeUndefined()
+    wrapper.unmount()
+  })
+  it('keeps the original transcript and shows an error when automatic compaction fails', async () => {
+    vi.mocked(inspirationContextLength).mockReturnValue(18_000)
+    vi.mocked(compactInspirationContext).mockRejectedValue(new Error('压缩失败'))
+    const wrapper = mountChat()
+    await wrapper.get('textarea').setValue('需要保留的长对话')
+    await button(wrapper, '发送').trigger('click')
+    await flushPromises()
+
+    expect(chatInspiration).not.toHaveBeenCalled()
+    expect(wrapper.find('[role="alert"]').text()).toContain('压缩失败')
+    expect(wrapper.find('.inspiration-message.user').text()).toContain('需要保留的长对话')
+    expect(useInspirationSessionsStore().sessions[0].messages).toEqual([
+      { role: 'user', content: '需要保留的长对话' },
+    ])
     wrapper.unmount()
   })
   it('defaults to available knowledge, remembers a cleared selection and opens a draft without writing', async () => {
@@ -257,6 +368,28 @@ describe('inspiration search controls', () => {
     await button(wrapper, '整理设定并检查').trigger('click')
     await flushPromises()
     expect(vi.mocked(extractInspirationSettings).mock.calls[0][0].id).toBe('outline')
+    wrapper.unmount()
+  })
+  it('shows extraction progress and keeps the conversation intact after a failed long extraction', async () => {
+    const wrapper = mountChat()
+    vi.mocked(chatInspiration).mockResolvedValue({ content: '先讨论人物' })
+    await wrapper.get('textarea').setValue('写一个商战故事')
+    await button(wrapper, '发送').trigger('click')
+    await flushPromises()
+    let fail!: (error: Error) => void
+    vi.mocked(extractInspirationSettings).mockImplementation((_model, _messages, _base, _signal, progress) => {
+      progress?.(2, 6)
+      return new Promise((_resolve, reject) => { fail = reject })
+    })
+    await button(wrapper, '整理设定并检查').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[role="status"]').text()).toContain('2/6 步')
+    fail(new Error('请求超时（240秒）'))
+    await flushPromises()
+    expect(wrapper.find('[role="alert"]').text()).toContain('240秒')
+    expect(wrapper.findAll('.inspiration-message')).toHaveLength(2)
+    expect(wrapper.emitted('apply')).toBeUndefined()
+    expect(button(wrapper, '整理设定并检查').attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
 

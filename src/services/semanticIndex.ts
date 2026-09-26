@@ -81,22 +81,21 @@ function cosine(a: number[], b: number[]): number {
   return dot
 }
 
-function lexicalRelevance(query: string, text: string): number {
-  const terms = Array.from(new Set(tokenize(query)))
+function lexicalRelevance(terms: string[], text: string): number {
   if (terms.length === 0) return 0
   const normalized = text.toLowerCase()
   const matched = terms.filter(term => normalized.includes(term)).length
   return matched / terms.length
 }
 
-function relevanceScore(query: string, queryVector: number[], record: SemanticRecord, vector?: number[]): number {
+function relevanceScore(queryTerms: string[], queryVector: number[], record: SemanticRecord, vector?: number[]): number {
   const text = `${record.title}\n${record.content}`
   const candidateVector = vector || embedText(text)
   const semantic = queryVector.length > 0 && queryVector.length === candidateVector.length
     ? cosine(queryVector, candidateVector)
     : 0
-  const lexical = lexicalRelevance(query, text)
-  const titleBoost = lexicalRelevance(query, record.title) * 0.12
+  const lexical = lexicalRelevance(queryTerms, text)
+  const titleBoost = lexicalRelevance(queryTerms, record.title) * 0.12
   return Math.min(1, semantic * 0.68 + lexical * 0.32 + titleBoost)
 }
 
@@ -315,10 +314,11 @@ export function retrieveSemanticEvidence(
   minScore = 0.08,
 ): SemanticEvidence[] {
   const queryVector = embedText(query)
+  const queryTerms = Array.from(new Set(tokenize(query)))
   const scored = records
     .map(record => ({
       ...record,
-      score: relevanceScore(query, queryVector, record),
+      score: relevanceScore(queryTerms, queryVector, record),
       citation: citationFor(record),
     }))
     .filter(record => record.score >= minScore)
@@ -564,6 +564,7 @@ export async function queryPersistedSemanticEvidence(
     remoteQueryVector = (await embedTextsWithProvider(embeddingConfig, [query]))[0] || []
   }
   const localQueryVector = embedText(query)
+  const queryTerms = Array.from(new Set(tokenize(query)))
   const scored = rows
     .map(row => {
       const metadata = parseMetadata(row.metadata)
@@ -580,7 +581,7 @@ export async function queryPersistedSemanticEvidence(
       const queryVector = provider === 'remote' ? remoteQueryVector : localQueryVector
       return {
         ...record,
-        score: relevanceScore(query, queryVector, record, JSON.parse(row.embedding || '[]')),
+        score: relevanceScore(queryTerms, queryVector, record, JSON.parse(row.embedding || '[]')),
         citation: citationFor(record),
       }
     })

@@ -1,5 +1,5 @@
 <template>
-  <div class="workspace-layout" v-if="isWorkspaceRoute && novel" id="workspace-page">
+  <div class="workspace-layout" v-if="novel" id="workspace-page">
     <!-- 侧边栏 -->
     <aside class="workspace-sidebar">
       <div class="sidebar-header">
@@ -108,17 +108,17 @@
             <button
               type="button"
               class="ai-task-row"
-              :class="`ai-task-${activity.status}`"
-              :title="activity.status === 'completed' ? '点击返回任务位置并标记已读' : '点击返回任务位置'"
+              :class="`ai-task-${aiActivityState(activity)}`"
+              :title="aiActivityState(activity) === 'running' ? '点击返回任务位置' : '点击返回任务位置并标记已读'"
               @click="openAiActivity(activity)"
             >
-              <span class="ai-task-indicator" :class="{ 'ai-task-indicator-done': activity.status === 'completed' }"></span>
+              <span class="ai-task-indicator" :class="{ 'ai-task-indicator-done': aiActivityState(activity) === 'completed' }"></span>
               <span class="ai-task-name">{{ activity.name }}</span>
               <span class="ai-task-state">
-                {{ activity.status === 'running' ? '进行中' : activity.status === 'completed' ? '已完成' : '失败' }}
+                {{ aiActivityState(activity) === 'running' ? '进行中' : aiActivityState(activity) === 'completed' ? '已完成' : '失败' }}
               </span>
             </button>
-            <details v-if="childActivitiesOf(activity.id).length" class="ai-task-children" :open="activity.status === 'running'">
+            <details v-if="childActivitiesOf(activity.id).length" class="ai-task-children" :open="aiActivityState(activity) === 'running'">
               <summary>执行步骤（{{ childActivitiesOf(activity.id).length }}）</summary>
               <div v-for="child in childActivitiesOf(activity.id)" :key="child.id" class="ai-task-child">
                 <span class="ai-task-indicator" :class="{
@@ -180,7 +180,7 @@
   </div>
 
   <!-- 找不到小说 -->
-  <div v-else-if="isWorkspaceRoute" class="page-container fade-in" style="display:flex;align-items:center;justify-content:center;min-height:60vh;">
+  <div v-else class="page-container fade-in" style="display:flex;align-items:center;justify-content:center;min-height:60vh;">
     <div style="text-align:center;">
       <div style="font-size:64px;">📖</div>
       <h2 style="margin:16px 0 8px;">找不到这本小说</h2>
@@ -211,11 +211,11 @@ const {
   activities: aiActivities,
   runningActivities: runningAiActivities,
   childrenOf: childActivitiesOf,
+  aiActivityState,
 } = useAiActivities()
 
-const novelId = computed(() => route.params.novelId as string)
+const novelId = ref(route.params.novelId as string)
 const novel = computed(() => novelStore.getNovel(novelId.value))
-const isWorkspaceRoute = computed(() => route.matched.some(record => record.path.startsWith('/workspace')))
 
 const exportOptions = [
   { label: '📄 导出为 TXT', key: 'txt' },

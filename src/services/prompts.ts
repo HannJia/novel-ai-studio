@@ -378,7 +378,7 @@ export function buildChapterSelfCheckPrompt(
   return [
     {
       role: 'system',
-      content: '你是严谨的网文章节自检编辑。请只检查正文是否违反事实卡和写作计划，并在必要时修正正文。必须输出 JSON。',
+      content: '你是严谨的网文章节自检编辑。只标出有正文证据的事实卡或计划冲突，不修改正文。必须输出 JSON。',
     },
     {
       role: 'user',
@@ -397,17 +397,16 @@ ${chapterContent}
 2. 是否突然新增未铺垫的重大人物、道具、势力、世界规则
 3. 是否偏离已确认的章节计划和本次写作计划
 4. 是否有章节标题、半截句、未闭合引号、结尾不完整
-5. 字数应在 2000~2500 字附近，最高不能超过 3000 字
+5. 字数以约 2000~2200 字为目标；先完成本章剧情节拍，不把一句话结束等同于剧情收束
 
 【输出格式】只输出 JSON 对象，不要代码块：
 {
   "needsRevision": true,
   "severity": "none|minor|major",
-  "issues": ["问题1"],
-  "revisedContent": "如果 needsRevision 为 true，输出修正后的完整正文；如果没有问题，输出空字符串"
+  "issues": ["问题及原文证据"]
 }
 
-规则：只有出现设定冲突、明显偏离、标题残留、断句残留时才改正文；不要为了润色大幅重写。`,
+规则：只报告设定冲突、明显偏离、标题残留、断句残留；润色建议不视为硬伤。不要输出替换正文。`,
     },
   ]
 }
@@ -479,13 +478,13 @@ ${dataPanelText || '无'}
 【输出格式】只输出 JSON 对象，不要解释，不要代码块：
 {
   "events": [
-    {"title":"事件标题","description":"简要描述","characters":["角色名"],"type":"主线|支线|伏笔|转折|战斗|其他","status":"planted|resolved","scope":"chapter|volume|global"}
+    {"title":"事件标题","description":"简要描述","characters":["角色名"],"type":"主线|支线|伏笔|转折|战斗|其他","status":"planted|resolved","scope":"chapter|volume|global","evidence":"正文连续原句"}
   ],
   "characters": [
     {"name":"角色名","identity":"身份","personality":"性格","powerLevel":"实力","faction":"阵营","description":"简介"}
   ],
   "globalPlans": [
-    {"id":"全书规划ID","status":"developing或resolved","hintCount":1,"note":"说明变化原因"}
+    {"id":"全书规划ID","status":"developing或resolved","hintCount":1,"note":"说明变化原因","evidence":"正文连续原句"}
   ],
   "timeAdvanceDays": 0,
   "newItems": [],
@@ -497,9 +496,9 @@ ${dataPanelText || '无'}
 ${DATA_MEMORY_OUTPUT}
 
 【规则】
-1. events 提取 1-5 个关键事件；如果正文出现新埋伏笔，type 必须填 "伏笔"，status 填 "planted"，scope 按影响范围填写。
+1. events 提取 1-5 个关键事件；如果正文出现新埋伏笔，type 必须填 "伏笔"，status 填 "planted"，scope 按影响范围填写。伏笔需作者确认才能存入时间线。
 2. characters 只输出本章明确出场或首次出现的角色，没有则输出 []。
-3. globalPlans 只更新已记录全书规划中本章有明确推进或回收证据的条目，没有则输出 []。
+3. globalPlans 只提议已记录全书规划中本章有明确推进或回收证据的条目，没有则输出 []。evidence 必须为正文连续原句，不能概括。
 4. timeAdvanceDays 只填写正文明确表达的故事内时间推进天数；例如“过去三天”填 3，“一个月后”填 30，“转眼十日”填 10。没有明确时间推进填 0，不要根据章节序号、写作时间或常识猜测。
 5. 数据记忆提取要求：
 ${DATA_MEMORY_RULES}`,

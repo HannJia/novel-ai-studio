@@ -10,7 +10,7 @@ function splitKeywords(text: string): string[] {
   ))
 }
 
-export function getBoundKnowledgeEntries(novel: Novel, query = '', maxEntries = 8): KBEntry[] {
+function getBoundKnowledgeEntries(novel: Novel, query = '', maxEntries = 8): KBEntry[] {
   if (!novel.knowledgeBaseIds?.length) return []
   try {
     const store = useKnowledgeStore()

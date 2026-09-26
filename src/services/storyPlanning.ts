@@ -44,6 +44,15 @@ interface AiProposal {
   evidence?: string
 }
 
+interface AiStoryPromise {
+  title?: string
+  description?: string
+  evidence?: string
+  characters?: unknown
+  relatedArcIds?: unknown
+  targetChapter?: unknown
+}
+
 interface AiStoryArc {
   title?: string
   description?: string
@@ -67,6 +76,11 @@ function normalizeHorizon(value: unknown): ChapterPlanHorizon {
 
 function compact(value: string, limit: number): string {
   return value.replace(/\s+/g, ' ').trim().slice(0, limit)
+}
+
+export function hasChapterEvidence(content: string, evidence: string): boolean {
+  const quote = compact(evidence, 600)
+  return quote.length >= 4 && content.replace(/\s+/g, ' ').includes(quote)
 }
 
 function stringList(value: unknown, limit = 12): string[] {
@@ -279,7 +293,7 @@ function validStatus(targetType: StoryStateTargetType, value: string): boolean {
     story_arc: ['active', 'paused', 'completed', 'abandoned'],
     arc_node: ['pending', 'completed', 'abandoned'],
     event: ['planted', 'developing', 'resolved', 'abandoned'],
-    chapter_plan: ['planned', 'active', 'completed', 'archived'],
+    chapter_plan: ['planned', 'active', 'awaiting_review', 'completed', 'archived'],
   }
   return allowed[targetType].includes(value)
 }
@@ -292,6 +306,7 @@ export function normalizeStoryStateProposalDrafts(
   return proposals.slice(0, 20).flatMap(raw => {
     const target = currentTargetValue(novel, raw)
     if (!target) return []
+    if (!hasChapterEvidence(chapter.content, String(raw.evidence || ''))) return []
     let newValue = String(raw.newValue ?? '').trim()
     if (target.field === 'status') {
       if (!validStatus(target.targetType, newValue)) return []
@@ -317,20 +332,84 @@ export function normalizeStoryStateProposalDrafts(
   })
 }
 
-function stateTargets(novel: Novel) {
+export function normalizeStoryPromiseDrafts(
+  novel: Novel,
+  chapter: Chapter,
+  promises: AiStoryPromise[],
+): StoryStateProposalDraft[] {
+  const arcIds = new Set((novel.storyArcs || []).map(arc => arc.id))
+  const seen = new Set<string>()
+  return promises.slice(0, 5).flatMap(raw => {
+    const title = compact(String(raw.title || ''), 120)
+    const description = compact(String(raw.description || ''), 600)
+    const evidence = compact(String(raw.evidence || ''), 200)
+    if (!title || !description || !hasChapterEvidence(chapter.content, evidence)) return []
+    const key = title.toLocaleLowerCase()
+    if (seen.has(key) || novel.eventLog.some(event => event.type === '伏笔'
+      && event.status !== 'abandoned' && event.title.trim().toLocaleLowerCase() === key)
+      || novel.storyStateProposals?.some(proposal => proposal.field === 'create' && proposal.status === 'pending'
+        && proposal.eventDraft?.title.trim().toLocaleLowerCase() === key)) return []
+    seen.add(key)
+    const requestedChapter = Number(raw.targetChapter)
+    const targetChapter = Number.isInteger(requestedChapter) && requestedChapter > chapter.chapterIndex + 1
+      ? requestedChapter - 1 : undefined
+    return [{
+      targetType: 'event' as const,
+      targetId: `draft:${chapter.id}:${title}`.slice(0, 200),
+      targetTitle: title,
+      field: 'create' as const,
+      oldValue: '',
+      newValue: 'planted',
+      reason: description,
+      evidence,
+      eventDraft: {
+        title, description, evidence, targetChapter,
+        characters: stringList(raw.characters, 12),
+        relatedArcIds: stringList(raw.relatedArcIds, 8).filter(id => arcIds.has(id)),
+      },
+      chapterIndex: chapter.chapterIndex,
+      source: 'ai' as const,
+    }]
+  })
+}
+
+function stateTargets(novel: Novel, chapter: Chapter) {
+  const relevance = (title: string, targetChapter?: number, importance = 3) => (
+    (title && chapter.content.includes(title) ? 1000 : 0)
+    + (targetChapter === undefined ? 0 : Math.max(0, 80 - Math.abs(targetChapter - chapter.chapterIndex) * 8))
+    + importance * 3
+  )
   return {
-    storyArcs: (novel.storyArcs || []).filter(arc => !['completed', 'abandoned'].includes(arc.status)).map(arc => ({
-      id: arc.id, title: arc.title, status: arc.status,
-      nodes: arc.nodes.filter(node => node.status === 'pending').map(node => ({
-        id: node.id, title: node.title, status: node.status, targetChapter: node.targetChapter + 1,
+    storyArcs: (novel.storyArcs || []).filter(arc => !['completed', 'abandoned'].includes(arc.status))
+      .sort((a, b) => (relevance(b.title, b.nodes.find(node => node.status === 'pending')?.targetChapter, b.importance)
+        + (b.nodes.some(node => chapter.content.includes(node.title)) ? 500 : 0))
+        - (relevance(a.title, a.nodes.find(node => node.status === 'pending')?.targetChapter, a.importance)
+        + (a.nodes.some(node => chapter.content.includes(node.title)) ? 500 : 0)))
+      .slice(0, 25).map(arc => ({
+      id: arc.id, title: arc.title, status: arc.status, description: compact(arc.description, 140),
+      nodes: arc.nodes.filter(node => node.status === 'pending')
+        .sort((a, b) => relevance(b.title, b.targetChapter) - relevance(a.title, a.targetChapter))
+        .slice(0, 8).map(node => ({
+        id: node.id, title: node.title, description: compact(node.description, 100),
+        status: node.status, targetChapter: node.targetChapter + 1,
       })),
     })),
-    events: (novel.eventLog || []).filter(event => !['resolved', 'abandoned'].includes(event.status || '')).map(event => ({
-      id: event.id, title: event.title, status: event.status || 'developing',
+    events: (novel.eventLog || []).filter(event => !['resolved', 'abandoned'].includes(event.status || ''))
+      .sort((a, b) => relevance(b.title, b.targetChapter, b.importance) - relevance(a.title, a.targetChapter, a.importance)
+        || (b.lastProgressChapterIndex ?? b.chapterIndex) - (a.lastProgressChapterIndex ?? a.chapterIndex))
+      .slice(0, 50).map(event => ({
+      id: event.id, title: event.title, description: compact(event.description, 140),
+      status: event.status || 'developing',
       targetChapter: event.targetChapter === undefined ? null : event.targetChapter + 1,
     })),
-    chapterPlans: (novel.chapterPlans || []).filter(plan => !['completed', 'archived'].includes(plan.status)).map(plan => ({
-      id: plan.id, title: plan.title, status: plan.status,
+    chapterPlans: (novel.chapterPlans || []).filter(plan => !['completed', 'archived'].includes(plan.status))
+      .sort((a, b) => (relevance(b.title, b.targetChapterStart, b.status === 'awaiting_review' ? 5 : 3)
+        + (b.targetChapterStart <= chapter.chapterIndex && b.targetChapterEnd >= chapter.chapterIndex ? 500 : 0))
+        - (relevance(a.title, a.targetChapterStart, a.status === 'awaiting_review' ? 5 : 3)
+        + (a.targetChapterStart <= chapter.chapterIndex && a.targetChapterEnd >= chapter.chapterIndex ? 500 : 0)))
+      .slice(0, 20).map(plan => ({
+      id: plan.id, title: plan.title, objective: compact(plan.objective, 180),
+      summary: compact(plan.summary, 140), status: plan.status,
       chapters: [plan.targetChapterStart + 1, plan.targetChapterEnd + 1],
     })),
   }
@@ -342,6 +421,9 @@ export async function generateStoryStateProposalDrafts(
   model: ModelConfig,
   activityParentId?: string,
 ): Promise<StoryStateProposalDraft[]> {
+  const chapterText = chapter.content.length > 12000
+    ? `${chapter.content.slice(0, 7000)}\n\n【中段省略，仅根据展示的正文原句提出提案】\n\n${chapter.content.slice(-5000)}`
+    : chapter.content
   const result = await callAI({
     model,
     skillTask: 'analysis',
@@ -349,37 +431,42 @@ export async function generateStoryStateProposalDrafts(
     maxTokens: 2200,
     messages: [{
       role: 'system',
-      content: '你是小说连续性维护编辑。只根据正文明确证据提出状态变更，不直接修改数据。只输出严格 JSON。',
+      content: '你是小说连续性维护编辑。只根据正文明确证据提出变更，不直接修改数据。只输出严格 JSON。',
     }, {
       role: 'user',
-      content: `检查第 ${chapter.chapterIndex + 1} 章是否完成或推进了已登记目标，并提出最少量的状态变更。
+      content: `检查第 ${chapter.chapterIndex + 1} 章是否完成或推进了已登记目标，并找出首次埋下、需要跨章节兑现的期待。提出最少量的变更。
 
 【正文】
-${chapter.content.slice(0, 10000)}
+${chapterText}
 
 【章节总结】
 ${chapter.summary || '暂无'}
 
 【允许修改的目标；targetId 必须来自这里】
-${JSON.stringify(stateTargets(novel))}
+${JSON.stringify(stateTargets(novel, chapter))}
 
 规则：
 1. field 只允许 status 或 targetChapter。
 2. targetChapter 输出从 1 开始的新章节号；只有原预计章节明显失效时才调整。
-3. arc_node 完成必须有正文已发生的直接证据；event resolved 必须真正解决；chapter_plan completed 必须覆盖目标已完成。
-4. 不确定就不输出。不得创建新目标。
+3. arc_node 完成必须有正文已发生的直接证据；event resolved 必须真正解决；chapter_plan completed 必须覆盖目标已完成。awaiting_review 表示对应章节写完但目标尚未核对，不能仅因章节写完就判定完成。
+4. 不确定就不输出。现有目标只允许状态或预计章节变更。
+5. 每条 evidence 必须是正文连续出现的原句（至少 4 字），不能概括或引用章节总结。没有原句就不要提议。
+6. newPromises 仅记录尚未登记的新长线悬念或承诺，不记录流水事件。relatedArcIds 只能来自已有弧线；无法确定预计章节就省略 targetChapter。
 
 输出：
-{"proposals":[{"targetType":"story_arc|arc_node|event|chapter_plan","targetId":"id","parentId":"弧线id，仅arc_node需要","field":"status|targetChapter","newValue":"新状态或章节号","reason":"为什么要改","evidence":"正文中的简短证据"}]}`,
+{"proposals":[{"targetType":"story_arc|arc_node|event|chapter_plan","targetId":"id","parentId":"弧线id，仅arc_node需要","field":"status|targetChapter","newValue":"新状态或章节号","reason":"为什么要改","evidence":"正文原句"}],"newPromises":[{"title":"期待名称","description":"读者期待什么、以后如何兑现","evidence":"正文原句","characters":["角色名"],"relatedArcIds":["弧线id"],"targetChapter":20}]}`,
     }],
   })
-  const parsed = parseAiJsonObject<{ proposals?: AiProposal[] }>(result.content)
-  return normalizeStoryStateProposalDrafts(novel, chapter, Array.isArray(parsed?.proposals) ? parsed!.proposals! : [])
+  const parsed = parseAiJsonObject<{ proposals?: AiProposal[]; newPromises?: AiStoryPromise[] }>(result.content)
+  return [
+    ...normalizeStoryStateProposalDrafts(novel, chapter, Array.isArray(parsed?.proposals) ? parsed!.proposals! : []),
+    ...normalizeStoryPromiseDrafts(novel, chapter, Array.isArray(parsed?.newPromises) ? parsed!.newPromises! : []),
+  ]
 }
 
 export function formatChapterPlanContext(novel: Novel, chapterIndex: number): string {
   const available = (novel.chapterPlans || [])
-    .filter(plan => !['completed', 'archived'].includes(plan.status))
+    .filter(plan => !['completed', 'archived', 'awaiting_review'].includes(plan.status))
     .sort((a, b) => a.targetChapterStart - b.targetChapterStart || a.targetChapterEnd - b.targetChapterEnd)
   if (!available.length) return ''
   const selected: ChapterPlan[] = []

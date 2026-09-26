@@ -15,7 +15,7 @@ from argon2.exceptions import VerificationError
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-VERSION = "1.0.5"
+VERSION = "1.0.6"
 MAX_BODY = 64 * 1024 * 1024
 MAX_DOCUMENT = 50 * 1024 * 1024
 DEFAULT_QUOTA = 100 * 1024 * 1024
@@ -180,7 +180,7 @@ def create_app(data_dir=None):
     repo = Repository(data_dir or os.environ.get("SYNC_DATA_DIR", "/var/lib/novel-sync"))
     app = FastAPI(title="Novel Writer Sync", version=VERSION, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.repo = repo
-    app.add_middleware(CORSMiddleware, allow_origins=["null", "http://localhost:5173", "http://127.0.0.1:5173"],
+    app.add_middleware(CORSMiddleware, allow_origins=["null", "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://127.0.0.1:5174"],
                        allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type"])
 
     @app.middleware("http")

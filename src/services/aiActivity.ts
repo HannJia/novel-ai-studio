@@ -16,6 +16,8 @@ export interface AiActivity {
 
 const activities = reactive<AiActivity[]>([])
 const MAX_VISIBLE_COMPLETED = 20
+export const COMPLETED_ACTIVITY_TTL_MS = 30_000
+const cleanupTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const activeIds = new Set<string>()
 export const activeAiCount = ref(0)
 
@@ -24,13 +26,59 @@ function currentRoutePath(): string {
   return window.location.hash.replace(/^#/, '') || '/'
 }
 
-function trimActivities() {
-  const completed = activities.filter(item => item.status !== 'running')
-  if (completed.length <= MAX_VISIBLE_COMPLETED) return
-  const keep = new Set(completed.slice(-MAX_VISIBLE_COMPLETED).map(item => item.id))
-  for (let index = activities.length - 1; index >= 0; index--) {
-    if (activities[index].status !== 'running' && !keep.has(activities[index].id)) activities.splice(index, 1)
+function rootOf(activity: AiActivity): AiActivity {
+  let root = activity
+  const seen = new Set([activity.id])
+  while (root.parentId) {
+    const parent = activities.find(item => item.id === root.parentId)
+    if (!parent || seen.has(parent.id)) break
+    root = parent
+    seen.add(parent.id)
   }
+  return root
+}
+
+function groupOf(root: AiActivity): AiActivity[] {
+  return activities.filter(item => rootOf(item).id === root.id)
+}
+
+function groupIsRunning(root: AiActivity): boolean {
+  return groupOf(root).some(item => item.status === 'running')
+}
+
+function groupHasFailure(root: AiActivity): boolean {
+  return groupOf(root).some(item => item.status === 'failed')
+}
+
+export function aiActivityState(activity: AiActivity): AiActivityStatus {
+  const root = rootOf(activity)
+  if (groupIsRunning(root)) return 'running'
+  if (groupHasFailure(root)) return 'failed'
+  return 'completed'
+}
+
+function scheduleCompletedCleanup(root: AiActivity) {
+  const existing = cleanupTimers.get(root.id)
+  if (existing) clearTimeout(existing)
+  cleanupTimers.delete(root.id)
+  if (root.status !== 'completed') return
+  const group = groupOf(root)
+  if (group.some(item => item.status === 'running' || item.status === 'failed')) return
+  const lastFinished = Math.max(...group.map(item => Date.parse(item.finishedAt || '') || 0))
+  const delay = Math.max(0, lastFinished + COMPLETED_ACTIVITY_TTL_MS - Date.now())
+  cleanupTimers.set(root.id, setTimeout(() => {
+    cleanupTimers.delete(root.id)
+    const current = activities.find(item => item.id === root.id)
+    if (current && current.status === 'completed' && !groupIsRunning(current)
+      && !groupHasFailure(current)) {
+      acknowledgeAiActivity(current.id)
+    }
+  }, delay))
+}
+
+function trimActivities() {
+  const completed = activities.filter(item => !item.parentId && aiActivityState(item) === 'completed')
+  for (const item of completed.slice(0, -MAX_VISIBLE_COMPLETED)) acknowledgeAiActivity(item.id)
 }
 
 export function startAiActivity(name: string, parentId?: string): AiActivity {
@@ -39,7 +87,7 @@ export function startAiActivity(name: string, parentId?: string): AiActivity {
   const activity: AiActivity = {
     id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     name,
-    parentId,
+    parentId: parentId && activities.some(item => item.id === parentId) ? parentId : undefined,
     status: 'running',
     route: currentRoutePath(),
     startedAt: new Date().toISOString(),
@@ -57,6 +105,7 @@ export function finishAiActivity(activity: AiActivity, error?: unknown) {
   activity.status = error ? 'failed' : 'completed'
   activity.finishedAt = new Date().toISOString()
   if (error) activity.error = error instanceof Error ? error.message : String(error)
+  scheduleCompletedCleanup(rootOf(activity))
   trimActivities()
 }
 
@@ -75,28 +124,27 @@ export function acknowledgeAiActivity(id: string) {
   for (let index = activities.length - 1; index >= 0; index--) {
     if (removeIds.has(activities[index].id)) activities.splice(index, 1)
   }
+  for (const id of removeIds) {
+    const timer = cleanupTimers.get(id)
+    if (timer) clearTimeout(timer)
+    cleanupTimers.delete(id)
+  }
 }
 
 export function openAiActivity(activity: AiActivity) {
   const target = activity.route
-  let rootId = activity.id
-  let parentId = activity.parentId
-  while (parentId) {
-    const parent = activities.find(item => item.id === parentId)
-    if (!parent) break
-    rootId = parent.id
-    parentId = parent.parentId
-  }
-  acknowledgeAiActivity(rootId)
+  const root = rootOf(activity)
+  if (!groupIsRunning(root)) acknowledgeAiActivity(root.id)
   if (!target || target === currentRoutePath()) return
   void import('@/router').then(({ default: router }) => router.push(target))
 }
 
 export function useAiActivities() {
   const visibleActivities = computed(() => activities.slice())
-  const topLevelActivities = computed(() => visibleActivities.value.filter(item => !item.parentId))
-  const runningActivities = computed(() => topLevelActivities.value.filter(item => item.status === 'running'))
-  const completedActivities = computed(() => topLevelActivities.value.filter(item => item.status !== 'running'))
+  const topLevelActivities = computed(() => visibleActivities.value.filter(item => !item.parentId)
+    .sort((a, b) => Number(aiActivityState(b) === 'running') - Number(aiActivityState(a) === 'running')))
+  const runningActivities = computed(() => topLevelActivities.value.filter(item => aiActivityState(item) === 'running'))
+  const completedActivities = computed(() => topLevelActivities.value.filter(item => aiActivityState(item) !== 'running'))
   const childrenOf = (parentId: string) => visibleActivities.value.filter(item => item.parentId === parentId)
   return {
     activities: topLevelActivities,
@@ -104,5 +152,6 @@ export function useAiActivities() {
     runningActivities,
     completedActivities,
     childrenOf,
+    aiActivityState,
   }
 }

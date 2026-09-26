@@ -3,6 +3,7 @@
 import { useConfigStore, type ModelConfig } from '@/stores/config'
 import type { WritingSkillTask } from '@/types/skill'
 import { finishAiActivity, startAiActivity } from '@/services/aiActivity'
+import { createParser } from 'eventsource-parser'
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
@@ -32,6 +33,7 @@ export interface ChatCompletionOptions {
   onChunk?: (chunk: string) => void // 流式回调
   signal?: AbortSignal
   maxTokens?: number // 覆盖模型默认 maxTokens
+  timeoutMs?: number // 覆盖默认请求超时
   skillTask?: Exclude<WritingSkillTask, 'all'>
   activityParentId?: string
   redactErrors?: boolean
@@ -101,20 +103,25 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 // 合并用户 signal 和超时 signal
-function mergeSignals(userSignal?: AbortSignal, timeoutMs?: number): AbortSignal {
+function mergeSignals(userSignal?: AbortSignal, timeoutMs?: number) {
   const controller = new AbortController()
   const timer = timeoutMs ? setTimeout(() => controller.abort(new Error(`请求超时（${Math.round(timeoutMs / 1000)}秒）`)), timeoutMs) : null
+  const abort = () => controller.abort(userSignal?.reason)
+  const dispose = () => {
+    if (timer) clearTimeout(timer)
+    userSignal?.removeEventListener('abort', abort)
+  }
 
   if (userSignal) {
     if (userSignal.aborted) {
       controller.abort(userSignal.reason)
     } else {
-      userSignal.addEventListener('abort', () => controller.abort(userSignal.reason), { once: true })
+      userSignal.addEventListener('abort', abort, { once: true })
     }
   }
 
-  controller.signal.addEventListener('abort', () => { if (timer) clearTimeout(timer) }, { once: true })
-  return controller.signal
+  controller.signal.addEventListener('abort', dispose, { once: true })
+  return { signal: controller.signal, dispose }
 }
 
 // 非流式调用（带重试）
@@ -131,9 +138,9 @@ async function chatCompletion(options: ChatCompletionOptions): Promise<ChatCompl
       await sleep(delay, signal)
     }
 
+    const request = mergeSignals(signal, options.timeoutMs ?? NON_STREAM_TIMEOUT)
     try {
-      const mergedSignal = mergeSignals(signal, NON_STREAM_TIMEOUT)
-
+      request.signal.throwIfAborted()
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -148,7 +155,7 @@ async function chatCompletion(options: ChatCompletionOptions): Promise<ChatCompl
           top_p: model.topP,
           stream: false,
         }),
-        signal: mergedSignal,
+        signal: request.signal,
       })
 
       if (!response.ok) {
@@ -170,6 +177,8 @@ async function chatCompletion(options: ChatCompletionOptions): Promise<ChatCompl
     } catch (err) {
       lastError = err
       if (!isRetryableError(err)) throw err
+    } finally {
+      request.dispose()
     }
   }
 
@@ -180,70 +189,70 @@ async function chatCompletion(options: ChatCompletionOptions): Promise<ChatCompl
 async function chatCompletionStream(options: ChatCompletionOptions): Promise<ChatCompletionResult> {
   const { model, messages, onChunk, signal, maxTokens, shouldStop } = options
   const url = `${openAiV1BaseUrl(model.baseUrl)}/chat/completions`
+  const request = mergeSignals(signal, options.timeoutMs ?? STREAM_TIMEOUT)
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+  try {
+    request.signal.throwIfAborted()
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${model.apiKey}` },
+      body: JSON.stringify({
+        model: model.modelName, messages: serializeChatMessages(messages),
+        max_tokens: maxTokens || model.maxTokens, temperature: model.temperature,
+        top_p: model.topP, stream: true,
+      }),
+      signal: request.signal,
+    })
+    if (!response.ok) throw new Error(`API 请求失败 (${response.status}): ${await response.text()}`)
+    reader = response.body?.getReader()
+    if (!reader) throw new Error('无法获取响应流')
 
-  const mergedSignal = mergeSignals(signal, STREAM_TIMEOUT)
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${model.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: model.modelName,
-      messages: serializeChatMessages(messages),
-      max_tokens: maxTokens || model.maxTokens,
-      temperature: model.temperature,
-      top_p: model.topP,
-      stream: true,
-    }),
-    signal: mergedSignal,
-  })
-
-  if (!response.ok) {
-    const errorText = await response.text()
-    throw new Error(`API 请求失败 (${response.status}): ${errorText}`)
-  }
-
-  const reader = response.body?.getReader()
-  if (!reader) throw new Error('无法获取响应流')
-
-  const decoder = new TextDecoder()
-  let fullContent = ''
-  let buffer = ''
-
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() || ''
-
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (!trimmed || !trimmed.startsWith('data: ')) continue
-      const data = trimmed.slice(6)
-      if (data === '[DONE]') continue
-
-      try {
-        const parsed = JSON.parse(data)
-        const delta = parsed.choices?.[0]?.delta?.content
-        if (delta) {
+    const decoder = new TextDecoder()
+    let fullContent = ''
+    let finishReason: string | undefined
+    let usage: ChatCompletionResult['usage']
+    let done = false
+    const parser = createParser({
+      maxBufferSize: 8 * 1024 * 1024,
+      onEvent(event) {
+        if (done) return
+        if (event.data.trim() === '[DONE]') { done = true; return }
+        let parsed
+        try { parsed = JSON.parse(event.data) } catch { throw new Error('模型返回了无效的流式数据，未将部分内容视为完整结果') }
+        if (parsed.error) throw new Error('模型接口在输出过程中返回错误，已停止接收')
+        const choice = parsed.choices?.find((item: { index?: number }) => item.index === 0) || parsed.choices?.[0]
+        if (typeof choice?.finish_reason === 'string') finishReason = choice.finish_reason
+        if (parsed.usage) usage = parsed.usage
+        const delta = choice?.delta?.content
+        if (typeof delta === 'string' && delta) {
           fullContent += delta
           onChunk?.(delta)
-          if (shouldStop?.()) {
-            await reader.cancel()
-            return { content: fullContent }
-          }
+          if (shouldStop?.()) { finishReason = 'client_stop'; done = true }
         }
-      } catch (parseErr) {
-        console.warn('SSE 解析失败:', data, parseErr)
+      },
+      onError() { throw new Error('模型返回的事件流格式异常，未将部分内容视为完整结果') },
+    })
+    while (!done) {
+      request.signal.throwIfAborted()
+      const chunk = await reader.read()
+      if (chunk.done) {
+        parser.feed(decoder.decode())
+        // Some relays omit the blank line after their final data event.
+        parser.feed('\n\n')
+        break
       }
+      parser.feed(decoder.decode(chunk.value, { stream: true }))
+    }
+    request.signal.throwIfAborted()
+    if (!done && !finishReason) throw new Error('模型连接提前结束，未收到输出完成标记；已接收内容保留')
+    return { content: fullContent, finishReason: finishReason || 'stop', ...(usage ? { usage } : {}) }
+  } finally {
+    request.dispose()
+    if (reader) {
+      try { await reader.cancel() } catch { /* The stream may already be aborted. */ }
+      reader.releaseLock()
     }
   }
-
-  return { content: fullContent }
 }
 
 /** Fetch the models exposed by an OpenAI-compatible provider. */
@@ -255,20 +264,22 @@ export async function listAvailableModels(
   if (!baseUrl) throw new Error('请先填写 API Base URL')
   if (!model.apiKey.trim()) throw new Error('请先填写 API Key')
 
-  const response = await fetch(`${baseUrl}/models`, {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${model.apiKey.trim()}` },
-    signal: mergeSignals(signal, 30_000),
-  })
-  if (!response.ok) {
-    const detail = (await response.text()).trim().slice(0, 300)
-    throw new Error(`获取模型失败（${response.status}）${detail ? `：${detail}` : ''}`)
-  }
   let payload: unknown
+  const request = mergeSignals(signal, 30_000)
   try {
-    payload = await response.json()
-  } catch {
-    throw new Error('获取模型失败：服务返回的内容不是合法 JSON')
+    request.signal.throwIfAborted()
+    const response = await fetch(`${baseUrl}/models`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${model.apiKey.trim()}` },
+      signal: request.signal,
+    })
+    if (!response.ok) {
+      const detail = (await response.text()).trim().slice(0, 300)
+      throw new Error(`获取模型失败（${response.status}）${detail ? `：${detail}` : ''}`)
+    }
+    try { payload = await response.json() } catch { throw new Error('获取模型失败：服务返回的内容不是合法 JSON') }
+  } finally {
+    request.dispose()
   }
   const rows = Array.isArray(payload)
     ? payload

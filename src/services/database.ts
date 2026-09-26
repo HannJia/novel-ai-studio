@@ -277,6 +277,10 @@ function initializeSchema(database: Database) {
       target_chapter INTEGER,
       importance INTEGER DEFAULT 3,
       source TEXT DEFAULT 'user',
+      related_arc_ids TEXT DEFAULT '[]',
+      evidence TEXT DEFAULT '',
+      last_progress_chapter INTEGER,
+      resolved_chapter INTEGER,
       created_at TEXT,
       updated_at TEXT
     );
@@ -402,8 +406,10 @@ function initializeSchema(database: Database) {
   try { database.run("ALTER TABLE knowledge_bases ADD COLUMN summary_level TEXT DEFAULT 'standard'") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE knowledge_bases ADD COLUMN summary_updated_at TEXT DEFAULT ''") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE novels ADD COLUMN chat_web_search INTEGER DEFAULT 0") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE novels ADD COLUMN chapter_plans TEXT DEFAULT '[]'") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE novels ADD COLUMN chapter_plan_confirmed INTEGER DEFAULT 0") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE novels ADD COLUMN story_clock TEXT DEFAULT '{}'") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE novels ADD COLUMN story_state_proposals TEXT DEFAULT '[]'") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE chat_messages ADD COLUMN search_record TEXT") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE chat_messages ADD COLUMN failed INTEGER DEFAULT 0") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE volumes ADD COLUMN versions TEXT DEFAULT '[]'") } catch { /* already migrated */ }
@@ -412,6 +418,10 @@ function initializeSchema(database: Database) {
   try { database.run("ALTER TABLE chapters ADD COLUMN review_rewrite_blocked_signature TEXT DEFAULT ''") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE chapters ADD COLUMN story_days_elapsed REAL DEFAULT 0") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE chapters ADD COLUMN story_day REAL") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE story_events ADD COLUMN related_arc_ids TEXT DEFAULT '[]'") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE story_events ADD COLUMN evidence TEXT DEFAULT ''") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE story_events ADD COLUMN last_progress_chapter INTEGER") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE story_events ADD COLUMN resolved_chapter INTEGER") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE data_panels ADD COLUMN versions TEXT DEFAULT '[]'") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE data_panels ADD COLUMN owner_item_id TEXT") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE data_panels ADD COLUMN equipment_state TEXT DEFAULT 'stored'") } catch { /* already migrated */ }

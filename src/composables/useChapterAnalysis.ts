@@ -7,6 +7,7 @@ import { buildDataMemoryProposals, DATA_MEMORY_OUTPUT, DATA_MEMORY_RULES } from 
 import { equipmentSnapshot, formatEquipmentTotals } from '@/services/dataPanelEquipment'
 import type { DataPanelItem, Novel } from '@/types/novel'
 import { parseAiJsonArray, parseAiJsonObject } from '@/utils/aiJson'
+import { hasChapterEvidence, normalizeStoryPromiseDrafts, normalizeStoryStateProposalDrafts } from '@/services/storyPlanning'
 
 export interface ChapterStructureAnalysisOptions {
   target?: { novelId: string; chapterId: string }
@@ -15,6 +16,7 @@ export interface ChapterStructureAnalysisOptions {
   includeDataChanges?: boolean
   replaceExistingAiTimeline?: boolean
   activityParentId?: string
+  signal?: AbortSignal
 }
 
 export interface DataPanelScanTarget {
@@ -109,14 +111,14 @@ export function useChapterAnalysis(options: UseChapterAnalysisOptions) {
     const targetChapterId = analysisOptions.target?.chapterId || options.currentChapterId.value
     const targetNovel = novelStore.getNovel(targetNovelId)
     const targetChapter = targetNovel?.chapters.find(item => item.id === targetChapterId)
-    if (!targetNovel || !targetChapter) return
+    if (!targetNovel || !targetChapter) return false
     const includeTimeline = analysisOptions.includeTimeline ?? true
     const includeCharacters = analysisOptions.includeCharacters ?? true
     const includeDataChanges = analysisOptions.includeDataChanges ?? true
     const targetPanels = targetNovel.dataPanels || []
     const sourceContent = targetChapter.content
     let result = ''
-    await callAI({
+    const response = await callAI({
       model,
       skillTask: 'analysis',
       messages: buildChapterAnalysisPrompt(
@@ -125,15 +127,19 @@ export function useChapterAnalysis(options: UseChapterAnalysisOptions) {
         formatActiveGlobalPlanText(targetNovel),
       ),
       stream: true,
+      taskName: '更新章节记忆',
       activityParentId: analysisOptions.activityParentId,
+      signal: analysisOptions.signal,
       onChunk: chunk => { result += chunk },
     })
+    if (response.finishReason && response.finishReason !== 'stop') throw new Error('章节记忆输出未正常完成，未写入不完整结果')
 
     const parsed = parseAiJsonObject<ChapterAnalysisPayload>(result)
-    if (!parsed) return
+    if (!parsed || !Array.isArray(parsed.events) || !Array.isArray(parsed.characters)) return false
+    if (analysisOptions.signal?.aborted) throw analysisOptions.signal.reason
     if (novelStore.getNovel(targetNovelId)?.chapters.find(item => item.id === targetChapterId)?.content !== sourceContent) {
       options.onWarning?.('正文已变化，已跳过旧版本的分析结果')
-      return
+      return false
     }
 
     const elapsedDays = Math.max(0, Number(parsed.timeAdvanceDays) || 0)
@@ -150,10 +156,18 @@ export function useChapterAnalysis(options: UseChapterAnalysisOptions) {
     if (includeTimeline) {
       if (analysisOptions.replaceExistingAiTimeline) {
         targetNovel.eventLog
-          .filter(event => event.chapterIndex === targetChapter.chapterIndex && event.source === 'ai')
+          .filter(event => event.chapterIndex === targetChapter.chapterIndex && event.source === 'ai'
+            && event.type !== '伏笔' && event.scope === 'chapter')
           .forEach(event => novelStore.deleteEvent(targetNovel.id, event.id))
       }
       for (const event of parsed.events || []) {
+        if (event.type === '伏笔') {
+          for (const proposal of normalizeStoryPromiseDrafts(targetNovel, targetChapter, [{
+            title: event.title, description: event.description, evidence: event.evidence,
+            characters: event.characters,
+          }])) novelStore.addStoryStateProposal(targetNovel.id, proposal)
+          continue
+        }
         novelStore.addEvent(targetNovel.id, {
           chapterIndex: targetChapter.chapterIndex,
           title: event.title || '未命名事件',
@@ -165,11 +179,15 @@ export function useChapterAnalysis(options: UseChapterAnalysisOptions) {
           hintCount: event.type === '伏笔' ? (Number(event.hintCount) || 1) : 0,
           importance: event.type === '主线' || event.type === '转折' ? 4 : 3,
           source: 'ai',
+          evidence: hasChapterEvidence(sourceContent, String(event.evidence || '')) ? String(event.evidence) : undefined,
         })
       }
       for (const update of parsed.globalPlans || []) {
         if (!update.id || !['developing', 'resolved'].includes(update.status)) continue
-        novelStore.updateEventStatus(targetNovel.id, update.id, update.status, Number(update.hintCount) || undefined)
+        for (const proposal of normalizeStoryStateProposalDrafts(targetNovel, targetChapter, [{
+          targetType: 'event', targetId: update.id, field: 'status',
+          newValue: update.status, reason: update.note, evidence: update.evidence,
+        }])) novelStore.addStoryStateProposal(targetNovel.id, proposal)
       }
     }
 
@@ -198,6 +216,7 @@ export function useChapterAnalysis(options: UseChapterAnalysisOptions) {
       })
       options.onInfo?.(`检测到 ${dataChangeCount} 条数据变更，请确认`)
     }
+    return true
   }
 
   async function scanDataPanelChanges(modelArg?: ModelConfig, target?: DataPanelScanTarget) {

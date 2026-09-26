@@ -1,4 +1,4 @@
-export interface AppUpdateRelease {
+interface AppUpdateRelease {
   version: string
   url: string
   notes: string

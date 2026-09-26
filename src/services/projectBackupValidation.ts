@@ -11,6 +11,26 @@ const boolean: Check = (value, path) => { if (typeof value !== 'boolean') fail(p
 const date: Check = (value, path) => { text(value, path); if (!Number.isFinite(Date.parse(value as string))) fail(path) }
 const optional = (check: Check): Check => (value, path) => { if (value !== undefined) check(value, path) }
 const oneOf = (...values: unknown[]): Check => (value, path) => { if (!values.includes(value)) fail(path) }
+const supportingCharacter: Check = (value, path) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    fail(`${path}（对象结构错误：${typeof value}）`)
+  }
+  const obj = value as Record<string, unknown>
+
+  // 详细检查每个字段
+  if (obj.name !== undefined && obj.name !== null && typeof obj.name !== 'string') {
+    fail(`${path}.name（类型错误：期望 string 或 null，实际 ${typeof obj.name}，值：${JSON.stringify(obj.name)}）`)
+  }
+  if (obj.relationship !== undefined && obj.relationship !== null && typeof obj.relationship !== 'string') {
+    fail(`${path}.relationship（类型错误：期望 string 或 null，实际 ${typeof obj.relationship}）`)
+  }
+  if (obj.personality !== undefined && obj.personality !== null && typeof obj.personality !== 'string') {
+    fail(`${path}.personality（类型错误：期望 string 或 null，实际 ${typeof obj.personality}）`)
+  }
+  if (obj.role !== undefined && obj.role !== null && typeof obj.role !== 'string') {
+    fail(`${path}.role（类型错误：期望 string 或 null，实际 ${typeof obj.role}）`)
+  }
+}
 const list = (check: Check, max = 100_000): Check => (value, path) => {
   if (!Array.isArray(value) || value.length > max) fail(path)
   ;(value as unknown[]).forEach((item, index) => check(item, `${path}[${index}]`))
@@ -56,7 +76,7 @@ const mutation: Check = (value, path) => {
 }
 const settings = object({
   protagonist: object({ ...strings('name gender age background initialPower cheatDescription romanceTendency'), personality: list(text, 1000) }),
-  supportingCharacters: list(object(strings('name relationship personality role')), 1000),
+  supportingCharacters: list(supportingCharacter, 1000),
   worldBuilding: object(strings('worldType worldScale socialStructure techLevel specialRules')),
   powerSystem: object(strings('systemName levelHierarchy combatStyleDesc auxiliarySystems')),
   coreConflict: object(strings('mainConflict mainVillain factionConflicts coreSuspense')),
@@ -94,6 +114,7 @@ const book = object({
     type: oneOf('主线', '支线', '伏笔', '转折', '战斗', '其他'), scope: optional(oneOf('global', 'volume', 'chapter')),
     status: optional(oneOf('planted', 'developing', 'resolved', 'abandoned')), hintCount: optional(number),
     storyTime: optional(text), location: optional(text), targetChapter: optional(number), importance: optional(number), source: optional(source),
+    relatedArcIds: optional(list(id)), evidence: optional(text), lastProgressChapterIndex: optional(number), resolvedChapterIndex: optional(number),
     timestamp: date, updatedAt: optional(date),
   })),
   storyArcs: optional(list(object({ id, ...strings('title description reactivateAt'),
@@ -104,11 +125,13 @@ const book = object({
   }))),
   chapterPlans: optional(list(object({ id, ...strings('title objective summary'), beats: list(text),
     horizon: oneOf('next', 'near', 'far'), targetChapterStart: integer, targetChapterEnd: integer,
-    relatedArcIds: list(id), relatedEventIds: list(id), status: oneOf('planned', 'active', 'completed', 'archived'), source, versions, ...times,
+    relatedArcIds: list(id), relatedEventIds: list(id), status: oneOf('planned', 'active', 'awaiting_review', 'completed', 'archived'), source, versions, ...times,
   }))),
   storyStateProposals: optional(list(object({ id, targetType: oneOf('story_arc', 'arc_node', 'event', 'chapter_plan'),
     targetId: id, parentId: optional(id), ...strings('targetTitle oldValue newValue reason evidence'),
-    field: oneOf('status', 'targetChapter'), chapterIndex: number, status: oneOf('pending', 'accepted', 'rejected'), source, ...times,
+    field: oneOf('status', 'targetChapter', 'create'), chapterIndex: number, status: oneOf('pending', 'accepted', 'rejected'), source, ...times,
+    eventDraft: optional(object({ title: text, description: text, characters: list(text),
+      relatedArcIds: list(id), targetChapter: optional(number), evidence: text })),
   }))),
   dataPanels: list(object({ id, category: oneOf('角色', '作物', '资源', '建筑', '任务', '装备', '道具', '自定义'), name: text,
     fields: list(field, 1000), relatedKeywords: list(text), ownerItemId: optional(id), equipmentState: optional(oneOf('stored', 'equipped', 'consumed', 'lost')), lastMentionChapterIndex: optional(number), versions, ...times })),
@@ -174,7 +197,7 @@ export function validateProjectBackup(value: unknown): void {
     for (const plan of novel.chapterPlans || []) {
       for (const version of plan.versions || []) object({ ...strings('title objective summary'), beats: list(text),
         horizon: oneOf('next', 'near', 'far'), targetChapterStart: integer, targetChapterEnd: integer,
-        relatedArcIds: list(id), relatedEventIds: list(id), status: oneOf('planned', 'active', 'completed', 'archived'),
+        relatedArcIds: list(id), relatedEventIds: list(id), status: oneOf('planned', 'active', 'awaiting_review', 'completed', 'archived'),
       })(JSON.parse(version.snapshot), `${plan.title}：历史快照`)
     }
     for (const kbId of novel.knowledgeBaseIds) {

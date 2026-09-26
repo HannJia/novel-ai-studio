@@ -27,8 +27,11 @@ export function useChapterEndingCheck() {
       maxTokens: 900,
       signal,
       taskName: '章节结尾检查',
+      noAutomaticRetry: true,
       activityParentId,
     })
+    signal?.throwIfAborted()
+    if (result.finishReason && result.finishReason !== 'stop') throw new Error('结尾检查输出未正常完成，请检查模型输出上限后重试')
     return normalizeChapterEndingCheck(parseAiJsonObject(result.content))
   }
 
@@ -49,8 +52,11 @@ export function useChapterEndingCheck() {
       maxTokens: 1000,
       signal,
       taskName: '补全章节结尾',
+      noAutomaticRetry: true,
       activityParentId,
     })
+    signal?.throwIfAborted()
+    if (result.finishReason && result.finishReason !== 'stop') throw new Error('收尾输出未正常完成，未自动追加半截内容')
     return cleanEndingContinuation(result.content)
   }
 

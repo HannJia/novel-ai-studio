@@ -228,4 +228,23 @@ describe('写作上下文', () => {
     expect(reviewCtx.chapterContent.length).toBeLessThanOrEqual(1000)
     expect(reviewCtx.characters).toContain('林青')
   })
+
+  it('长书上下文保留最近阶段而不是最早阶段，并提示未兑现期待', () => {
+    const novel = createNovel(['林青'])
+    const first = novel.chapters[0]
+    novel.chapters = Array.from({ length: 160 }, (_, index) => ({
+      ...first, id: `chapter-${index}`, chapterIndex: index,
+      title: `第${index + 1}章`, summary: `阶段${index + 1}的经历`,
+    }))
+    novel.eventLog = [{
+      id: 'promise', chapterIndex: 70, title: '密信之谜', description: '找到密信的主人',
+      characters: [], type: '伏笔', status: 'planted', timestamp: novel.createdAt,
+    }]
+    const context = buildWritingContext(novel, novel.chapters[159], 8000)
+    expect(context.previousSummary).toContain('阶段130的经历')
+    expect(context.previousSummary).not.toContain('阶段1的经历')
+    expect(context.previousSummary).toContain('阶段159的经历')
+    expect(context.outlineContext).toContain('尚未兑现的读者期待')
+    expect(context.outlineContext).toContain('密信之谜')
+  })
 })

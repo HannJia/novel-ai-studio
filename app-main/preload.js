@@ -56,4 +56,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('app:before-close', listener)
     return () => ipcRenderer.removeListener('app:before-close', listener)
   },
+  onExitConfirm: (callback) => {
+    const listener = (_event, { errorDetail }) => {
+      callback(errorDetail)
+    }
+    ipcRenderer.on('app:exit-confirm', listener)
+    return () => ipcRenderer.removeListener('app:exit-confirm', listener)
+  },
+  sendExitChoice: (confirmed) => ipcRenderer.send('app:exit-choice', confirmed),
 })

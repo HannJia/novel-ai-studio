@@ -4,12 +4,12 @@ import { createProjectBackup, parseProjectBackup, type ProjectBackup } from './p
 import { latestInspirationSessions, parseInspirationSession, type InspirationSession } from './inspirationSessions'
 
 export const DEFAULT_SYNC_ENDPOINT = 'https://154.94.227.164'
-export const MAX_SYNC_DOCUMENT_BYTES = 50 * 1024 * 1024
+const MAX_SYNC_DOCUMENT_BYTES = 50 * 1024 * 1024
+interface SyncBinding { endpoint: string; userId: string; username: string }
 export interface CloudUser { id: string; username: string; role: 'user' | 'admin'; quotaBytes: number; usedBytes: number }
 export interface CloudSession { endpoint: string; token: string; expiresAt: number; user: CloudUser }
 export interface CloudRecord { key: string; version: number; hash: string | null; bytes: number; updatedAt: number; payload?: string | null }
 export interface SyncBase { version: number; hash: string | null }
-export interface SyncBinding { endpoint: string; userId: string; username: string }
 export interface SyncState { binding: SyncBinding | null; enabled: boolean; bases: Record<string, SyncBase>; lastSync: string }
 export interface SyncConflict {
   id: string; key: string; title: string; local: string | null; remote: string | null

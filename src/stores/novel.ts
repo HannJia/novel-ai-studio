@@ -356,11 +356,19 @@ export const useNovelStore = defineStore('novel', () => {
       throw new Error('The chapter changed after this proposal was created')
     }
 
-    updateChapter(novelId, chapterId, { content: revision.proposedContent })
+    const previous = {
+      content: chapter.content, status: chapter.status,
+      contentReviewSignature: chapter.contentReviewSignature,
+      reviewRewriteBlockedSignature: chapter.reviewRewriteBlockedSignature,
+    }
+    updateChapter(novelId, chapterId, {
+      content: revision.proposedContent, status: 'writing',
+      contentReviewSignature: '', reviewRewriteBlockedSignature: '',
+    })
     try {
       await saveNovelNow(novelId)
     } catch (err) {
-      updateChapter(novelId, chapterId, { content: revision.baseContent })
+      updateChapter(novelId, chapterId, previous)
       throw err
     }
     await updateChapterRevisionStatus(revision.id, 'accepted', new Date().toISOString())
@@ -903,7 +911,7 @@ export const useNovelStore = defineStore('novel', () => {
         && plan.targetChapterStart <= chapterIndex
         && plan.targetChapterEnd >= chapterIndex
       ) {
-        plan.status = 'completed'
+        plan.status = 'awaiting_review'
         plan.updatedAt = now
         completed += 1
       }
@@ -931,7 +939,7 @@ export const useNovelStore = defineStore('novel', () => {
     if (!novel.storyStateProposals) novel.storyStateProposals = []
     const duplicate = novel.storyStateProposals.find(item =>
       item.status === 'pending' && item.targetType === data.targetType && item.targetId === data.targetId
-      && item.field === data.field && item.newValue === data.newValue
+      && item.field === data.field && item.newValue === data.newValue && item.chapterIndex === data.chapterIndex
     )
     if (duplicate) return duplicate
     const now = new Date().toISOString()
@@ -951,6 +959,9 @@ export const useNovelStore = defineStore('novel', () => {
     const novel = getNovel(novelId)
     const proposal = novel?.storyStateProposals?.find(item => item.id === proposalId)
     if (!novel || !proposal || proposal.status !== 'pending') return false
+    const chapter = novel.chapters.find(item => item.chapterIndex === proposal.chapterIndex)
+    if (proposal.source === 'ai' && (!chapter || !proposal.evidence?.trim()
+      || !chapter.content.replace(/\s+/g, ' ').includes(proposal.evidence.replace(/\s+/g, ' ').trim()))) return false
 
     let applied = false
     if (proposal.targetType === 'story_arc') {
@@ -977,8 +988,22 @@ export const useNovelStore = defineStore('novel', () => {
       }
     } else if (proposal.targetType === 'event') {
       const target = novel.eventLog.find(item => item.id === proposal.targetId)
-      if (target && proposal.field === 'status' && (target.status || 'developing') === proposal.oldValue && ['planted', 'developing', 'resolved', 'abandoned'].includes(proposal.newValue)) {
+      if (proposal.field === 'create' && proposal.eventDraft && chapter
+        && !novel.eventLog.some(item => item.type === '伏笔' && item.status !== 'abandoned'
+          && item.title.trim().toLocaleLowerCase() === proposal.eventDraft?.title.trim().toLocaleLowerCase())) {
+        const draft = proposal.eventDraft
+        applied = Boolean(addEvent(novelId, {
+          chapterIndex: proposal.chapterIndex, title: draft.title, description: draft.description,
+          characters: draft.characters, type: '伏笔', scope: 'global', status: 'planted',
+          targetChapter: draft.targetChapter, importance: 3, source: 'ai',
+          relatedArcIds: draft.relatedArcIds.filter(id => novel.storyArcs?.some(arc => arc.id === id)),
+          evidence: draft.evidence, lastProgressChapterIndex: proposal.chapterIndex,
+          hintCount: 1,
+        }))
+      } else if (target && proposal.field === 'status' && (target.status || 'developing') === proposal.oldValue && ['planted', 'developing', 'resolved', 'abandoned'].includes(proposal.newValue)) {
         target.status = proposal.newValue as EventLogEntry['status']
+        target.lastProgressChapterIndex = proposal.chapterIndex
+        if (target.status === 'resolved') target.resolvedChapterIndex = proposal.chapterIndex
         target.updatedAt = new Date().toISOString()
         applied = true
       } else if (target && proposal.field === 'targetChapter' && String(target.targetChapter ?? target.chapterIndex) === proposal.oldValue && Number.isFinite(Number(proposal.newValue))) {
