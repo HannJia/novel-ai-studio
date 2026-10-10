@@ -133,7 +133,7 @@ function createWindow() {
     height: 800,
     minWidth: 1024,
     minHeight: 700,
-    title: 'AI 长篇小说写作软件',
+    title: '墨笺 · AI 小说写作',
     autoHideMenuBar: true,
     show: !isSmokeTest,
     webPreferences: {

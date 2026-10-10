@@ -15,7 +15,7 @@ from argon2.exceptions import VerificationError
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-VERSION = "1.0.6"
+VERSION = "1.0.7"
 MAX_BODY = 64 * 1024 * 1024
 MAX_DOCUMENT = 50 * 1024 * 1024
 DEFAULT_QUOTA = 100 * 1024 * 1024

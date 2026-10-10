@@ -13,7 +13,7 @@
     <!-- 知识库列表 -->
     <div v-if="!selectedKBId" class="kb-list">
       <div v-if="knowledgeBases.length === 0" class="empty-state paper-panel">
-        <div class="empty-icon">📚</div>
+        <div class="empty-icon"><svg class="ink-mountains" viewBox="0 0 220 80" aria-hidden="true"><path fill="currentColor" d="M0 80 L40 38 L62 56 L98 14 L130 50 L150 34 L188 66 L220 46 L220 80 Z" /></svg></div>
         <h3>还没有知识库</h3>
         <p>知识库可以存储世界观、人物、势力等设定信息，在 AI 写作时自动注入</p>
         <n-button type="primary" @click="showCreateModal = true">创建第一个知识库</n-button>
@@ -24,7 +24,7 @@
         class="kb-card paper-panel"
         @click="selectKB(kb.id)"
       >
-        <div class="kb-card-icon">📚</div>
+        <div class="kb-card-icon seal">典</div>
         <div class="kb-card-info">
           <h3>{{ kb.name }}</h3>
           <p>{{ kb.description || '暂无描述' }}</p>
@@ -37,7 +37,7 @@
           :type="isBound(kb.id) ? 'warning' : 'default'"
           @click.stop="toggleBind(kb.id)"
         >
-          {{ isBound(kb.id) ? '✅ 已绑定' : '🔗 绑定小说' }}
+          {{ isBound(kb.id) ? '已绑定' : '绑定小说' }}
         </n-button>
         <n-popconfirm @positive-click.stop="deleteKB(kb.id)">
           <template #trigger>
@@ -54,7 +54,7 @@
         <n-button size="small" text @click="selectedKBId = ''">←  返回列表</n-button>
         <h3>{{ selectedKB?.name }}</h3>
         <div class="detail-actions">
-          <n-button size="small" @click="showImportModal = true">📥 导入</n-button>
+          <n-button size="small" @click="showImportModal = true">导入</n-button>
           <n-button size="small" secondary :loading="summarizingKB" @click="summarizeSelectedKB">整理摘要</n-button>
           <n-button size="small" type="primary" @click="openAddEntry">+ 添加条目</n-button>
         </div>
@@ -73,40 +73,60 @@
         <span v-if="selectedKB?.summaryUpdatedAt" class="kb-summary-time">上次整理：{{ formatDateTime(selectedKB.summaryUpdatedAt) }}</span>
       </section>
 
-      <!-- 筛选栏 -->
-      <div class="filter-bar">
-        <n-input v-model:value="searchQuery" placeholder="搜索条目..." size="small" clearable style="max-width:220px;" />
-        <n-select
-          v-model:value="categoryFilter"
-          :options="categoryOptions"
-          size="small"
-          clearable
-          placeholder="分类"
-          style="width:140px;"
-        />
-        <span class="entry-count">{{ filteredEntries.length }} 条</span>
-      </div>
+      <div class="kb-browser">
+        <!-- 左侧分类列表（仅绑定现有 categoryFilter） -->
+        <nav class="kb-category-rail" aria-label="条目分类">
+          <button
+            type="button"
+            class="kb-category-item"
+            :class="{ active: !categoryFilter }"
+            @click="categoryFilter = null"
+          >
+            <span>全部</span>
+            <span class="kb-category-count">{{ selectedKB?.entries.length ?? 0 }}</span>
+          </button>
+          <button
+            v-for="cat in categoryOptions"
+            :key="cat.value"
+            type="button"
+            class="kb-category-item"
+            :class="{ active: categoryFilter === cat.value }"
+            @click="categoryFilter = cat.value"
+          >
+            <span>{{ cat.label }}</span>
+            <span class="kb-category-count">{{ countByCategory(cat.value) }}</span>
+          </button>
+        </nav>
 
-      <!-- 条目列表 -->
-      <div class="entry-list">
-        <div v-if="filteredEntries.length === 0" class="empty-hint">暂无条目</div>
-        <div
-          v-for="entry in filteredEntries"
-          :key="entry.id"
-          class="entry-card paper-panel"
-        >
-          <div class="entry-header">
-            <span class="entry-cat">{{ getCategoryIcon(entry.category) }} {{ entry.category }}</span>
-            <h4>{{ entry.title }}</h4>
+        <div class="kb-entries">
+          <!-- 筛选栏 -->
+          <div class="filter-bar">
+            <n-input v-model:value="searchQuery" placeholder="搜索条目..." size="small" clearable style="max-width:260px;" />
+            <span class="entry-count">{{ filteredEntries.length }} 条</span>
           </div>
-          <p class="entry-preview">{{ entry.content.substring(0, 120) }}{{ entry.content.length > 120 ? '...' : '' }}</p>
-          <div class="entry-footer">
-            <div class="entry-tags" v-if="entry.tags.length">
-              <span v-for="t in entry.tags" :key="t" class="tag-chip">{{ t }}</span>
-            </div>
-            <div class="entry-actions">
-              <n-button size="tiny" @click="editEntry(entry)">编辑</n-button>
-              <n-button size="tiny" type="error" quaternary @click="removeEntry(entry.id)">删除</n-button>
+
+          <!-- 条目列表 -->
+          <div class="entry-list">
+            <div v-if="filteredEntries.length === 0" class="empty-hint">暂无条目</div>
+            <div
+              v-for="entry in filteredEntries"
+              :key="entry.id"
+              class="entry-card paper-panel"
+            >
+              <div class="entry-header">
+                <h4>{{ entry.title }}</h4>
+                <span class="entry-cat">{{ categoryLabel(entry.category) }}</span>
+              </div>
+              <p class="entry-preview">{{ entry.content.substring(0, 120) }}{{ entry.content.length > 120 ? '...' : '' }}</p>
+              <div class="entry-footer">
+                <div class="entry-tags" v-if="entry.tags.length">
+                  <span v-for="t in entry.tags" :key="t" class="tag-chip">{{ t }}</span>
+                </div>
+                <div class="entry-actions">
+                  <n-button size="tiny" @click="editEntry(entry)">编辑</n-button>
+                  <n-button size="tiny" type="error" quaternary @click="removeEntry(entry.id)">删除</n-button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -182,7 +202,18 @@ const showEntryModal = ref(false)
 const showImportModal = ref(false)
 const editingEntryId = ref('')
 
-const categoryOptions = kbCategories.map(c => ({ label: c.label, value: c.value }))
+// 标签里可能带 emoji 前缀，界面只显示文字
+const categoryOptions = kbCategories.map(c => ({ label: categoryText(c.label), value: c.value }))
+
+function categoryText(label: string) {
+  return label.replace(/^[^\p{L}\p{N}]+/u, '').trim() || label
+}
+
+// 条目分类显示中文名（旧数据可能存的是 value 或中文名）
+function categoryLabel(cat: string) {
+  const match = kbCategories.find(c => c.value === cat || categoryText(c.label) === cat)
+  return match ? categoryText(match.label) : cat
+}
 
 const createForm = ref({ name: '', description: '' })
 const entryForm = ref({ title: '', category: '其他', content: '', tagsText: '' })
@@ -217,8 +248,9 @@ function selectKB(id: string) {
   summaryLevel.value = kbStore.getKB(id)?.summaryLevel || 'standard'
 }
 
-function getCategoryIcon(cat: string) {
-  return kbCategories.find(c => c.value === cat)?.icon || '📝'
+// 分类栏计数，仅用于展示
+function countByCategory(cat: string) {
+  return selectedKB.value?.entries.filter(e => e.category === cat).length ?? 0
 }
 
 function formatDate(iso: string) {
@@ -433,72 +465,166 @@ function toggleBind(kbId: string) {
   align-items: center;
   justify-content: space-between;
   margin-bottom: var(--space-lg);
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--border-color);
 }
+.kb-header .page-title { font-family: var(--font-family-serif); font-weight: 700; letter-spacing: 0.04em; margin: 0; }
 .header-actions { display: flex; gap: 8px; }
 
 .empty-state {
   display: flex; flex-direction: column; align-items: center;
   justify-content: center; min-height: 40vh; gap: 12px; text-align: center;
 }
-.empty-icon { font-size: 48px; }
-.empty-state h3 { font-size: 18px; color: var(--text-color-primary); }
+.empty-icon { width: 220px; color: var(--border-color); }
+.empty-state h3 { font-family: var(--font-family-serif); font-size: 18px; color: var(--text-color-primary); }
 .empty-state p { font-size: 14px; color: var(--text-color-tertiary); max-width: 360px; }
 
 /* 知识库卡片 */
-.kb-list { display: flex; flex-direction: column; gap: var(--space-md); }
+.kb-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--space-md);
+}
+.kb-list > .empty-state { grid-column: 1 / -1; }
 
 .kb-card {
-  display: flex; align-items: center; gap: 16px;
-  padding: 16px; cursor: pointer;
-  transition: all var(--transition-fast);
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 16px 18px; cursor: pointer;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
 }
-.kb-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.kb-card:hover { transform: translateY(-1px); border-color: var(--border-color-hover); box-shadow: var(--shadow-hover); }
 
-.kb-card-icon { font-size: 32px; }
-.kb-card-info { flex: 1; }
-.kb-card-info h3 { font-size: 16px; font-weight: 600; color: var(--text-color-primary); margin-bottom: 2px; }
-.kb-card-info p { font-size: 13px; color: var(--text-color-tertiary); margin: 0; }
-.kb-summary-preview { color: var(--text-color-secondary) !important; line-height: 1.5; }
-.kb-card-meta { font-size: 11px; color: var(--text-color-disabled); }
+.kb-card-icon {
+  flex-shrink: 0;
+  width: 36px; height: 36px;
+  display: grid; place-items: center;
+  font-family: var(--font-family-serif); font-size: 18px;
+  color: var(--text-color-inverse); background: var(--color-primary);
+  border-radius: var(--radius-sm);
+}
+.kb-card-info { flex: 1; min-width: 0; }
+.kb-card-info h3 {
+  font-family: var(--font-family-serif); font-size: 17px; font-weight: 700;
+  color: var(--text-color-primary); margin: 0 0 4px;
+}
+.kb-card-info p { font-size: 13px; color: var(--text-color-tertiary); margin: 0; line-height: 1.6; }
+.kb-summary-preview {
+  color: var(--text-color-secondary) !important; line-height: 1.6;
+  margin-top: 6px !important;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.kb-card-meta {
+  display: inline-block; margin-top: 8px;
+  font-size: 12px; color: var(--text-color-tertiary);
+  font-variant-numeric: tabular-nums;
+}
 
 /* 知识库详情 */
 .kb-detail-header {
   display: flex; align-items: center; gap: 12px;
   margin-bottom: var(--space-md);
 }
-.kb-detail-header h3 { flex: 1; font-size: 18px; }
+.kb-detail-header h3 {
+  flex: 1; margin: 0;
+  font-family: var(--font-family-serif); font-size: 24px; font-weight: 700;
+  color: var(--text-color-primary); letter-spacing: 0.03em;
+}
 .detail-actions { display: flex; gap: 8px; }
+
+/* 左侧分类 + 右侧卡片 */
+.kb-browser {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: var(--space-lg);
+  align-items: start;
+}
+.kb-category-rail {
+  position: sticky; top: 0;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px;
+  background: var(--bg-color-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+.kb-category-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 10px;
+  font: inherit; font-size: 13px; text-align: left;
+  color: var(--text-color-secondary);
+  background: transparent;
+  border: none; border-left: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.kb-category-item:hover { background: var(--bg-color-hover); color: var(--text-color-primary); }
+.kb-category-item.active {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  border-left-color: var(--color-primary);
+  font-weight: 600;
+}
+.kb-category-item:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; }
+.kb-category-count { font-size: 12px; color: var(--text-color-tertiary); font-variant-numeric: tabular-nums; }
+.kb-category-item.active .kb-category-count { color: var(--color-primary); }
+.kb-entries { min-width: 0; }
 
 .filter-bar {
   display: flex; gap: 12px; margin-bottom: var(--space-md); align-items: center;
 }
-.entry-count { font-size: 12px; color: var(--text-color-tertiary); margin-left: auto; }
+.entry-count { font-size: 12px; color: var(--text-color-tertiary); margin-left: auto; font-variant-numeric: tabular-nums; }
 
 /* 条目列表 */
-.entry-list { display: flex; flex-direction: column; gap: var(--space-sm); }
+.entry-list { display: flex; flex-direction: column; gap: 10px; }
 
-.entry-card { padding: 12px 16px; }
-.entry-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.entry-cat {
-  font-size: 11px; padding: 2px 8px; border-radius: 100px;
-  background: var(--bg-color-secondary); color: var(--text-color-tertiary);
+.entry-card {
+  padding: 14px 18px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  transition: border-color var(--transition-fast);
 }
-.entry-header h4 { font-size: 14px; font-weight: 600; color: var(--text-color-primary); margin: 0; }
-.entry-preview { font-size: 13px; color: var(--text-color-secondary); line-height: 1.6; margin: 0 0 8px; }
+.entry-card:hover { border-color: var(--border-color-hover); }
+.entry-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.entry-cat {
+  flex-shrink: 0;
+  font-size: 11px; padding: 1px 8px; border-radius: var(--radius-sm);
+  background: var(--color-accent-light); color: var(--color-accent);
+}
+.entry-header h4 {
+  font-family: var(--font-family-serif); font-size: 16px; font-weight: 700;
+  color: var(--text-color-primary); margin: 0;
+}
+.entry-preview { font-size: 13px; color: var(--text-color-secondary); line-height: 1.7; margin: 0 0 8px; }
 
-.entry-footer { display: flex; align-items: center; justify-content: space-between; }
+.entry-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .entry-tags { display: flex; gap: 4px; flex-wrap: wrap; }
 .tag-chip {
-  font-size: 10px; padding: 1px 6px; border-radius: 4px;
+  font-size: 11px; padding: 1px 6px; border-radius: var(--radius-sm);
   background: var(--color-primary-light); color: var(--color-primary);
 }
-.entry-actions { display: flex; gap: 4px; }
+.entry-actions { display: flex; gap: 4px; margin-left: auto; }
 
 .empty-hint { text-align: center; color: var(--text-color-tertiary); padding: 40px; font-size: 14px; }
 
-.kb-summary-panel { margin-bottom: var(--space-md); padding: 16px; }
+.kb-summary-panel {
+  margin-bottom: var(--space-lg); padding: 16px 18px;
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
 .kb-summary-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.kb-summary-toolbar h4 { margin: 0 0 4px; font-size: 15px; color: var(--text-color-primary); }
+.kb-summary-toolbar h4 { margin: 0 0 4px; font-family: var(--font-family-serif); font-size: 16px; color: var(--text-color-primary); }
+
+@media (max-width: 860px) {
+  .kb-browser { grid-template-columns: 1fr; }
+  .kb-category-rail { position: static; flex-direction: row; flex-wrap: wrap; }
+}
 .kb-summary-toolbar p { margin: 0; color: var(--text-color-tertiary); font-size: 12px; line-height: 1.6; }
 .kb-summary-content { margin: 14px 0 0; white-space: pre-wrap; color: var(--text-color-secondary); line-height: 1.7; font-size: 13px; }
 .kb-summary-time { display: block; margin-top: 10px; color: var(--text-color-disabled); font-size: 11px; }

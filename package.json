@@ -1,7 +1,7 @@
 {
   "name": "ai-novel-writer",
-  "version": "1.0.6",
-  "description": "本地优先的 AI 长篇小说写作软件，支持作者主笔、AI 写作、知识库与剧情数据记忆",
+  "version": "1.0.7",
+  "description": "墨笺：本地优先的 AI 长篇小说写作软件，支持作者主笔、AI 写作、知识库与剧情数据记忆",
   "author": "HannJia",
   "repository": {
     "type": "git",

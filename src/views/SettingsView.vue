@@ -8,12 +8,23 @@
       <h1 class="page-title">设置</h1>
     </div>
 
-    <div class="settings-content">
+    <div class="settings-layout">
+    <nav v-if="sectionIndex.length > 1" class="settings-index" aria-label="设置分区">
+      <button
+        v-for="(item, index) in sectionIndex"
+        :key="item"
+        type="button"
+        class="settings-index-item"
+        :class="{ 'settings-index-item--active': activeSection === index }"
+        @click="scrollToSection(index)"
+      >{{ item }}</button>
+    </nav>
+    <div ref="settingsContentRef" class="settings-content">
       <CloudSyncPanel />
       <!-- 模型配置 -->
       <section class="settings-section paper-panel">
         <div class="section-header">
-          <h3>🤖 AI 模型配置</h3>
+          <h3>模型配置</h3>
           <n-button type="primary" size="small" @click="openAddModel" id="add-model-btn">
             + 添加模型
           </n-button>
@@ -57,7 +68,7 @@
 
       <!-- 模型用途分配 -->
       <section v-if="configStore.models.length > 0" class="settings-section paper-panel">
-        <h3>🎯 模型用途分配</h3>
+        <h3>任务分配</h3>
         <p class="section-desc">为不同 AI 任务指定使用的模型</p>
         <div class="assignment-grid">
           <div class="assignment-item">
@@ -204,10 +215,11 @@
 
       <!-- 关于 -->
       <section class="settings-section paper-panel about-section">
-        <h3>📖 关于</h3>
-        <p>AI 长篇小说写作软件 v{{ appVersion }}</p>
+        <h3>关于</h3>
+        <p>墨笺 · AI 小说写作 v{{ appVersion }}</p>
         <p class="hint">使用 Electron + Vue 3 + TypeScript 构建</p>
       </section>
+    </div>
     </div>
 
     <!-- 添加/编辑模型弹窗 -->
@@ -368,7 +380,7 @@
 import CloudSyncPanel from '@/components/CloudSyncPanel.vue'
 import AppUpdatePanel from '@/components/AppUpdatePanel.vue'
 import ModelSearchTest from '@/components/ModelSearchTest.vue'
-import { ref, computed, reactive } from 'vue'
+import { ref, computed, reactive, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NIcon, NInput, NInputNumber, NSelect, NModal, NSwitch, NTag, useMessage, useDialog } from 'naive-ui'
 import { ArrowBackOutline, GlobeOutline, CreateOutline } from '@vicons/ionicons5'
@@ -388,6 +400,37 @@ const dialog = useDialog()
 const route = useRoute()
 const router = useRouter()
 const props = defineProps<{ overlay?: boolean }>()
+
+// 右侧分区索引：读取实际渲染的分区标题，分区增减时自动同步
+const settingsContentRef = ref<HTMLElement | null>(null)
+const sectionIndex = ref<string[]>([])
+const activeSection = ref(0)
+let sectionObserver: IntersectionObserver | null = null
+
+function sectionElements(): HTMLElement[] {
+  return Array.from(settingsContentRef.value?.children || []).filter((el): el is HTMLElement => el instanceof HTMLElement)
+}
+
+function refreshSectionIndex() {
+  sectionIndex.value = sectionElements().map(el => el.querySelector('h3')?.textContent?.trim() || '').filter(Boolean)
+  sectionObserver?.disconnect()
+  if (typeof IntersectionObserver === 'undefined') return
+  sectionObserver = new IntersectionObserver(entries => {
+    const visible = entries.filter(entry => entry.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0]
+    if (visible) activeSection.value = sectionElements().indexOf(visible.target as HTMLElement)
+  }, { rootMargin: '-10% 0px -70% 0px' })
+  sectionElements().forEach(el => sectionObserver?.observe(el))
+}
+
+function scrollToSection(index: number) {
+  activeSection.value = index
+  sectionElements()[index]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+onMounted(() => nextTick(refreshSectionIndex))
+onBeforeUnmount(() => sectionObserver?.disconnect())
+// “任务分配”分区在有模型时才渲染
+watch(() => configStore.models.length > 0, () => nextTick(refreshSectionIndex))
 const emit = defineEmits<{
   close: []
 }>()
@@ -814,11 +857,81 @@ function handleDeleteSkill(id: string) {
   background: var(--bg-color-hover);
 }
 
+.settings-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 36px;
+  max-width: 1080px;
+}
+
 .settings-content {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-lg);
-  max-width: 800px;
+  max-width: 820px;
+}
+
+.settings-content > * {
+  scroll-margin-top: 16px;
+}
+
+/* 分区索引 */
+.settings-index {
+  position: sticky;
+  top: 0;
+  order: 2;
+  flex-shrink: 0;
+  width: 168px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 14px;
+  border-left: 1px solid var(--border-color);
+}
+
+.settings-index-item {
+  position: relative;
+  padding: 7px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-color-secondary);
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.settings-index-item:hover {
+  color: var(--text-color-primary);
+  background: var(--bg-color-hover);
+}
+
+.settings-index-item--active {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.settings-index-item--active::before {
+  content: '';
+  position: absolute;
+  left: -15px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: var(--color-primary);
+}
+
+.settings-index-item:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+@media (max-width: 1100px) {
+  .settings-index { display: none; }
 }
 
 .settings-section {
@@ -934,17 +1047,17 @@ function handleDeleteSkill(id: string) {
 
 .badge-outline {
   background: rgba(32, 128, 240, 0.1);
-  color: #2080F0;
+  color: var(--color-info);
 }
 
 .badge-writing {
   background: rgba(24, 160, 88, 0.1);
-  color: #18A058;
+  color: var(--color-success);
 }
 
 .badge-review {
   background: rgba(240, 160, 32, 0.1);
-  color: #F0A020;
+  color: var(--color-warning);
 }
 
 .model-actions {

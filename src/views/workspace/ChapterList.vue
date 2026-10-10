@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="chapter-list page-container fade-in" id="chapter-list-view">
     <div class="list-header">
       <h2 class="page-title">章节列表</h2>
@@ -26,10 +26,10 @@
 
     <!-- 空状态 -->
     <div v-if="!novel?.chapters?.length" class="empty-chapters paper-panel">
-      <div class="empty-icon">📝</div>
+      <div class="empty-icon"><svg class="ink-mountains" viewBox="0 0 220 80" aria-hidden="true"><path fill="currentColor" d="M0 80 L40 38 L62 56 L98 14 L130 50 L150 34 L188 66 L220 46 L220 80 Z" /></svg></div>
       <h3>还没有章节</h3>
       <p>创建第一个章节，开始你的写作之旅</p>
-      <n-button type="primary" @click="addNewChapter">✨ 创建第一章</n-button>
+      <n-button type="primary" @click="addNewChapter">创建第一章</n-button>
     </div>
 
     <!-- 按卷分组章节列表 -->
@@ -82,8 +82,8 @@
 
             <!-- 单章总结展开/收起 -->
             <div class="summary-toggle" @click.stop="toggleSummary(chapter.id)">
-              <span v-if="chapter.summary" class="summary-indicator has-summary">📋 总结</span>
-              <span v-else class="summary-indicator no-summary">📋 无总结</span>
+              <span v-if="chapter.summary" class="summary-indicator has-summary">已总结</span>
+              <span v-else class="summary-indicator no-summary">无总结</span>
               <span class="summary-arrow">{{ expandedSummaries.has(chapter.id) ? '▲' : '▼' }}</span>
             </div>
 
@@ -366,6 +366,15 @@ function batchReviewChapters() {
   align-items: center;
   justify-content: space-between;
   margin-bottom: var(--space-lg);
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.list-header .page-title {
+  margin: 0;
+  font-family: var(--font-family-serif);
+  font-weight: 700;
+  letter-spacing: 0.04em;
 }
 
 .header-actions {
@@ -384,9 +393,10 @@ function batchReviewChapters() {
   text-align: center;
 }
 
-.empty-icon { font-size: 48px; }
+.empty-icon { width: 220px; color: var(--border-color); }
 
 .empty-chapters h3 {
+  font-family: var(--font-family-serif);
   font-size: 18px;
   color: var(--text-color-primary);
 }
@@ -408,11 +418,13 @@ function batchReviewChapters() {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 8px 12px 8px 10px;
   cursor: pointer;
-  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--color-primary);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--bg-color-secondary);
   transition: background var(--transition-fast);
-  margin-bottom: 6px;
+  margin-bottom: 10px;
 }
 
 .volume-group-header:hover {
@@ -425,47 +437,60 @@ function batchReviewChapters() {
 }
 
 .volume-group-title {
-  font-size: 15px;
-  font-weight: 600;
+  font-family: var(--font-family-serif);
+  font-size: 16px;
+  font-weight: 700;
   color: var(--text-color-primary);
+  letter-spacing: 0.03em;
 }
 
 .volume-group-count {
   font-size: 12px;
   color: var(--text-color-tertiary);
   margin-left: auto;
+  font-variant-numeric: tabular-nums;
 }
 
 /* 章节网格 */
 .chapters-grid {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 10px;
+  align-items: start;
 }
 
 .chapter-card {
   display: flex;
   flex-direction: column;
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  padding: 12px 14px 4px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.chapter-card:hover {
+  border-color: var(--border-color-hover);
+  box-shadow: var(--shadow-hover);
 }
 
 .chapter-main {
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
-.chapter-main:hover {
-  opacity: 0.85;
+.chapter-main:hover .chapter-title {
+  color: var(--color-primary);
 }
 
 .chapter-number {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-primary);
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
 }
 
 .chapter-header-row {
@@ -484,9 +509,15 @@ function batchReviewChapters() {
 }
 
 .chapter-title {
+  margin: 0;
+  font-family: var(--font-family-serif);
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text-color-primary);
+  transition: color var(--transition-fast);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chapter-meta {
@@ -495,6 +526,7 @@ function batchReviewChapters() {
   gap: 6px;
   font-size: 12px;
   color: var(--text-color-tertiary);
+  font-variant-numeric: tabular-nums;
 }
 
 .status-dot {
@@ -506,17 +538,21 @@ function batchReviewChapters() {
 .status-dot.draft { background: var(--text-color-disabled); }
 .status-dot.writing { background: var(--color-warning); }
 .status-dot.completed { background: var(--color-success); }
-.status-dot.reviewed { background: var(--color-info, #409eff); }
+.status-dot.reviewed { background: var(--color-accent); }
 .status-dot.finalized { background: var(--color-primary); }
-.status-dot.locked { background: #7c3aed; }
+.status-dot.locked { background: var(--text-color-secondary); }
 
 .meta-sep { color: var(--border-color); }
 
 .chapter-preview {
+  margin: 4px 0 0;
   font-size: 13px;
   color: var(--text-color-tertiary);
-  line-height: 1.5;
-  margin-top: 4px;
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 /* 单章总结切换 */
@@ -525,8 +561,8 @@ function batchReviewChapters() {
   align-items: center;
   justify-content: space-between;
   padding: 6px 0;
-  margin-top: 6px;
-  border-top: 1px dashed var(--border-color-light);
+  margin-top: 8px;
+  border-top: 1px solid var(--border-color-light);
   cursor: pointer;
   font-size: 12px;
 }
@@ -536,7 +572,7 @@ function batchReviewChapters() {
 }
 
 .summary-indicator.has-summary {
-  color: var(--color-primary);
+  color: var(--color-accent);
 }
 
 .summary-arrow {

@@ -10,18 +10,18 @@
           预览
         </n-button>
         <n-button size="small" type="primary" @click="regenerate" :loading="regenerating">
-          🔄 重新生成
+          重新生成
         </n-button>
       </div>
     </div>
 
     <!-- 无大纲 -->
     <div v-if="!novel?.outline" class="empty-outline paper-panel">
-      <div class="empty-icon">📋</div>
+      <div class="empty-icon"><svg class="ink-mountains" viewBox="0 0 220 80" aria-hidden="true"><path fill="currentColor" d="M0 80 L40 38 L62 56 L98 14 L130 50 L150 34 L188 66 L220 46 L220 80 Z" /></svg></div>
       <h3>还没有大纲</h3>
       <p>前往大纲生成页面，让 AI 为你构思整本小说的大纲</p>
       <n-button type="primary" @click="$router.push(`/generate/${novelId}`)">
-        ✨ 生成大纲
+        生成大纲
       </n-button>
     </div>
 
@@ -48,7 +48,7 @@
       <!-- AI 局部修改面板 -->
       <div v-if="novel?.outline" class="ai-modify-panel paper-panel">
         <div class="modify-header">
-          <span>✨ AI 局部修改</span>
+          <span>AI 局部修改</span>
         </div>
         <n-input
           v-model:value="modifyInstruction"

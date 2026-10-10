@@ -8,8 +8,8 @@
     <!-- 顶部导航 -->
     <div class="editor-topbar">
       <div class="topbar-left">
-        <span class="breadcrumb">{{ novel?.title }}</span>
-        <span class="breadcrumb-sep">›</span>
+        <span class="breadcrumb">《{{ novel?.title }}》</span>
+        <span class="breadcrumb-sep">/</span>
         <span class="breadcrumb-current">第 {{ chapter.chapterIndex + 1 }} 章</span>
       </div>
       <div class="topbar-center">
@@ -121,38 +121,41 @@
 
       <!-- 右侧工具栏 -->
       <div class="side-toolbar">
-        <button v-if="writingMode === 'ai'" class="tool-btn" title="AI 生成正文" @click="aiContinue" :disabled="isChapterLocked || aiWriting || completing">
-          ✏️
+        <button v-if="writingMode === 'ai'" class="tool-btn" title="AI 生成正文" aria-label="AI 生成正文" @click="aiContinue" :disabled="isChapterLocked || aiWriting || completing">
+          <n-icon :size="18"><sparkles-outline /></n-icon>
         </button>
-        <button class="tool-btn" title="违禁检测" @click="checkBannedWords" :disabled="isChapterLocked || aiWriting || completing || !content">
-          ⚠️
+        <button class="tool-btn" title="违禁检测" aria-label="违禁检测" @click="checkBannedWords" :disabled="isChapterLocked || aiWriting || completing || !content">
+          <n-icon :size="18"><warning-outline /></n-icon>
         </button>
-        <button class="tool-btn" title="内容审查（6维度）" @click="contentReview" :disabled="isChapterLocked || aiWriting || completing || !content">
-          🔎
+        <button class="tool-btn" title="内容审查（6维度）" aria-label="内容审查" @click="contentReview" :disabled="isChapterLocked || aiWriting || completing || !content">
+          <n-icon :size="18"><shield-checkmark-outline /></n-icon>
         </button>
         <button
           class="tool-btn"
           :class="{ 'tool-btn--active': highlightEnabled }"
           title="违禁词高亮"
+          aria-label="违禁词高亮"
           @click="toggleHighlight"
         >
-          🔍
+          <n-icon :size="18"><color-wand-outline /></n-icon>
         </button>
         <button
           class="tool-btn"
           :class="{ 'tool-btn--active': showBannedPanel }"
           title="违禁词面板"
+          aria-label="违禁词面板"
           @click="showBannedPanel = !showBannedPanel"
         >
-          📝
+          <n-icon :size="18"><list-outline /></n-icon>
         </button>
         <button
           class="tool-btn"
           :class="{ 'tool-btn--active': dataPanelOpen }"
           title="数据面板"
+          aria-label="数据面板"
           @click="dataPanelOpen = !dataPanelOpen"
         >
-          📊
+          <n-icon :size="18"><stats-chart-outline /></n-icon>
         </button>
       </div>
 
@@ -165,7 +168,7 @@
         <div class="panel-list">
           <div v-for="item in liveScanResults" :key="item.word.word" class="panel-item">
             <span class="panel-word" :class="item.word.level">
-              {{ item.word.level === 'must' ? '🔴' : '🟡' }} {{ item.word.word }}
+              <span class="banned-level" :class="item.word.level === 'must' ? 'banned-level--must' : 'banned-level--warn'" aria-hidden="true" /> {{ item.word.word }}
             </span>
             <span class="panel-count-num">×{{ item.count }}</span>
             <n-button
@@ -176,7 +179,7 @@
               → {{ item.word.suggestion }}
             </n-button>
           </div>
-          <div v-if="liveScanResults.length === 0" class="panel-empty">✅ 无违禁词</div>
+          <div v-if="liveScanResults.length === 0" class="panel-empty">无违禁词</div>
         </div>
       </div>
     </div>
@@ -326,8 +329,8 @@
     <!-- 底部工具栏 -->
     <div class="editor-bottombar">
       <div class="bottom-tools">
-        <button class="bottom-btn" @click="undo" title="撤销">↩️</button>
-        <button class="bottom-btn" @click="redo" title="重做">↪️</button>
+        <button class="bottom-btn" @click="undo" title="撤销" aria-label="撤销"><n-icon :size="16"><arrow-undo-outline /></n-icon></button>
+        <button class="bottom-btn" @click="redo" title="重做" aria-label="重做"><n-icon :size="16"><arrow-redo-outline /></n-icon></button>
         <div class="bottom-sep"></div>
         <button class="bottom-btn" @click="changeFontSize(-1)" title="缩小字体">A-</button>
         <span class="font-size-label">{{ fontSize }}px</span>
@@ -368,7 +371,8 @@
 import { registerDraftSaver } from '@/services/appLifecycle'
 import { ref, computed, onActivated, onDeactivated, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NInput, NInputNumber, NModal, NSelect, useDialog, useMessage } from 'naive-ui'
+import { NButton, NIcon, NInput, NInputNumber, NModal, NSelect, useDialog, useMessage } from 'naive-ui'
+import { SparklesOutline, WarningOutline, ShieldCheckmarkOutline, ColorWandOutline, ListOutline, StatsChartOutline, ArrowUndoOutline, ArrowRedoOutline } from '@vicons/ionicons5'
 import { useNovelStore } from '@/stores/novel'
 import { useConfigStore } from '@/stores/config'
 import { useKnowledgeStore } from '@/stores/knowledge'
@@ -536,7 +540,7 @@ const expandedSections = ref({
   aiReview: true,
   continuity: true,
 })
-const fontSize = ref(16)
+const fontSize = ref(17)
 let autoSaveTimer: ReturnType<typeof setInterval> | null = null
 
 // 是否有审查内容
@@ -2419,9 +2423,10 @@ function redo() {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-height: 52px;
   padding: 8px 20px;
-  background: var(--bg-color-card);
-  border-bottom: 1px solid var(--border-color-light);
+  background: var(--bg-color-header);
+  border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
   transition: background-color var(--transition-normal);
 }
@@ -2461,8 +2466,9 @@ function redo() {
 
 .chapter-title-input :deep(input) {
   text-align: center;
-  font-weight: 600;
-  font-size: 15px;
+  font-family: var(--font-family-serif);
+  font-weight: 700;
+  font-size: 16px;
   border: none !important;
   background: transparent !important;
 }
@@ -2474,11 +2480,11 @@ function redo() {
 }
 
 .writing-mode-badge {
-  padding: 3px 7px;
-  border: 1px solid var(--color-primary-light);
+  padding: 3px 9px;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: var(--color-primary-light);
-  color: var(--color-primary);
+  background: var(--color-accent-light);
+  color: var(--color-accent);
   font: inherit;
   font-size: 11px;
   white-space: nowrap;
@@ -2495,9 +2501,9 @@ function redo() {
 }
 
 .writing-mode-badge--ai {
-  border-color: var(--color-warning);
-  background: color-mix(in srgb, var(--color-warning) 14%, transparent);
-  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
 }
 
 .word-count {
@@ -2529,23 +2535,23 @@ function redo() {
   display: flex;
   justify-content: center;
   position: relative;
-  padding: 32px 24px;
+  padding: 36px 24px;
   overflow-y: auto;
-  background: var(--bg-color);
 }
 
 .editor-textarea {
   width: 100%;
-  max-width: 720px;
+  max-width: 760px;
   min-height: 100%;
-  padding: 40px 48px;
+  padding: 48px 56px;
   background: var(--bg-color-paper);
-  border: none;
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
-  font-family: var(--font-family);
-  font-size: 16px;
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-paper);
+  font-family: var(--font-family-serif);
+  font-size: 17px;
   line-height: 2;
+  letter-spacing: 0.02em;
   color: var(--text-color-primary);
   resize: none;
   outline: none;
@@ -2608,9 +2614,21 @@ function redo() {
   gap: 4px;
   padding: 6px;
   background: var(--bg-color-card);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
   z-index: 10;
+}
+
+/* The persistent advisor is fixed on the right; reserve its width so the paper stays fully visible. */
+@media (min-width: 1100px) {
+  .editor-view--advisor-open .editor-body {
+    padding-right: min(440px, 94vw);
+  }
+
+  .editor-view--advisor-open .side-toolbar {
+    right: calc(min(440px, 94vw) + 16px) !important;
+  }
 }
 
 /* Keep the floating tools in the editor area when the fixed advisor is visible. */
@@ -2641,15 +2659,22 @@ function redo() {
   justify-content: center;
   font-size: 16px;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: transparent;
+  color: var(--text-color-secondary);
   cursor: pointer;
   transition: all var(--transition-fast);
 }
 
 .tool-btn:hover:not(:disabled) {
   background: var(--bg-color-hover);
-  transform: scale(1.1);
+  color: var(--color-primary);
+}
+
+.tool-btn:focus-visible,
+.bottom-btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
 }
 
 .tool-btn:disabled {
@@ -2664,8 +2689,8 @@ function redo() {
   justify-content: center;
   gap: 10px;
   padding: 8px;
-  background: var(--color-primary-light);
-  color: var(--color-primary);
+  background: var(--color-accent-light);
+  color: var(--color-accent);
   font-size: 13px;
   font-weight: 500;
 }
@@ -2688,8 +2713,8 @@ function redo() {
   display: flex;
   align-items: center;
   padding: 6px 20px;
-  background: var(--bg-color-card);
-  border-top: 1px solid var(--border-color-light);
+  background: var(--bg-color-header);
+  border-top: 1px solid var(--border-color);
   flex-shrink: 0;
 }
 
@@ -2705,10 +2730,12 @@ function redo() {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: 13px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
+  color: var(--text-color-secondary);
+  font-family: inherit;
   cursor: pointer;
   transition: background-color var(--transition-fast);
 }
@@ -2755,7 +2782,7 @@ function redo() {
 .progress-fill-mini {
   height: 100%;
   border-radius: 2px;
-  background: var(--color-primary);
+  background: var(--progress-fill);
   transition: width 0.3s;
 }
 
@@ -2896,9 +2923,10 @@ function redo() {
   right: 0;
   bottom: 0;
   padding: 32px 40px;
-  font-family: 'Source Han Serif SC', 'Noto Serif SC', serif;
-  font-size: 16px;
+  font-family: var(--font-family-serif);
+  font-size: 17px;
   line-height: 2;
+  letter-spacing: 0.02em;
   color: transparent;
   white-space: pre-wrap;
   word-wrap: break-word;

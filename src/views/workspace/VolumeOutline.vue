@@ -7,7 +7,7 @@
       </div>
       <div class="header-actions" v-if="novel">
         <n-button size="small" @click="generateVolumes" :loading="generating" :disabled="!novel.outline">
-          ✨ AI 生成分卷规划
+          AI 生成分卷规划
         </n-button>
         <n-button v-if="props.embedded && volumes.length" size="small" type="primary" :disabled="generating || props.chapterPlanConfirmed" @click="emit('confirmed')">
           {{ props.chapterPlanConfirmed ? '已确认并生成章节计划' : '确认分卷并生成章节计划' }}
@@ -17,7 +17,7 @@
 
     <!-- 无总大纲提示 -->
     <div v-if="novel && !novel.outline" class="empty-state paper-panel">
-      <div class="empty-icon">📋</div>
+      <div class="empty-icon"><svg class="ink-mountains" viewBox="0 0 220 80" aria-hidden="true"><path fill="currentColor" d="M0 80 L40 38 L62 56 L98 14 L130 50 L150 34 L188 66 L220 46 L220 80 Z" /></svg></div>
       <h3>请先生成总大纲</h3>
       <p>分卷规划需要基于总大纲生成</p>
       <n-button type="primary" @click="$router.push(`/workspace/${novelId}/outline`)">
@@ -27,17 +27,17 @@
 
     <!-- 无分卷 -->
     <div v-else-if="!volumes.length && !generating" class="empty-state paper-panel">
-      <div class="empty-icon">📚</div>
+      <div class="empty-icon"><svg class="ink-mountains" viewBox="0 0 220 80" aria-hidden="true"><path fill="currentColor" d="M0 80 L40 38 L62 56 L98 14 L130 50 L150 34 L188 66 L220 46 L220 80 Z" /></svg></div>
       <h3>还没有分卷规划</h3>
       <p>AI 将根据总大纲自动规划每卷的剧情走向、章节数和字数</p>
       <n-button type="primary" @click="generateVolumes" :loading="generating">
-        ✨ AI 生成分卷规划
+        AI 生成分卷规划
       </n-button>
     </div>
 
     <!-- 生成中 -->
     <div v-if="generating" class="generating-hint paper-panel">
-      <div class="typing-anim">🤖 AI 正在规划分卷结构...</div>
+      <div class="typing-anim">AI 正在规划分卷结构…</div>
       <div v-if="streamContent" class="stream-preview" v-html="renderMd(streamContent)"></div>
       <div class="typing-cursor">▌</div>
     </div>
@@ -90,15 +90,15 @@
           <!-- 展示模式 -->
           <template v-else>
             <div class="detail-section" v-if="vol.summary">
-              <h4>📖 剧情概要</h4>
+              <h4>剧情概要</h4>
               <div class="volume-summary" v-html="renderMd(vol.summary)"></div>
             </div>
             <div class="detail-section" v-if="vol.keyTurningPoints">
-              <h4>⚡ 关键转折点</h4>
+              <h4>关键转折点</h4>
               <p>{{ vol.keyTurningPoints }}</p>
             </div>
             <div class="detail-section" v-if="vol.characterChanges">
-              <h4>👤 角色变化</h4>
+              <h4>角色变化</h4>
               <p>{{ vol.characterChanges }}</p>
             </div>
             <div class="volume-actions">

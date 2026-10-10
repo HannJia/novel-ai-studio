@@ -1,54 +1,61 @@
 /* ========================================
-   AI 小说写作软件 — 主题变量系统
-   三套主题：番茄风格 / 护眼模式 / 深色模式
+   墨笺 — 主题变量系统
+   三套主题：宣纸（默认）/ 护眼 / 夜墨
+   主题键名沿用 fanqie / eyecare / dark，兼容已保存的偏好
    ======================================== */
 
-/* 番茄风格（默认主题）
-   暖白色背景 + 纸张式编辑区 + 橙红色强调色 */
+/* 宣纸（默认主题）
+   米白宣纸底 + 墨黑文字 + 朱砂红点缀 + 黛青辅助 */
 [data-theme="fanqie"],
 :root {
-  /* 主色调 */
-  --color-primary: #FF4D2E;
-  --color-primary-hover: #FF6B4F;
-  --color-primary-pressed: #E04428;
-  --color-primary-light: rgba(255, 77, 46, 0.08);
-  --color-primary-suppl: #FF8A73;
+  /* 主色调：朱砂 */
+  --color-primary: #B83A2E;
+  --color-primary-hover: #C94C3F;
+  --color-primary-pressed: #9E3026;
+  --color-primary-light: rgba(184, 58, 46, 0.08);
+  --color-primary-suppl: #D4705F;
+
+  /* 辅助色：黛青（AI、信息类元素） */
+  --color-accent: #3E5C6B;
+  --color-accent-hover: #4D6E7E;
+  --color-accent-light: rgba(62, 92, 107, 0.09);
 
   /* 背景色 */
-  --bg-color: #F8F7F5;
-  --bg-color-secondary: #F0EFED;
-  --bg-color-card: #FFFFFF;
-  --bg-color-paper: #FFFFFF;
-  --bg-color-sidebar: #FAF9F7;
-  --bg-color-header: rgba(255, 255, 255, 0.92);
-  --bg-color-modal: #FFFFFF;
-  --bg-color-hover: rgba(0, 0, 0, 0.04);
-  --bg-color-tag: #FFF5F2;
+  --bg-color: #F6F1E7;
+  --bg-color-secondary: #EFE8DA;
+  --bg-color-card: #FBF8F2;
+  --bg-color-paper: #FFFDF8;
+  --bg-color-sidebar: #F1EBDF;
+  --bg-color-header: rgba(246, 241, 231, 0.94);
+  --bg-color-modal: #FBF8F2;
+  --bg-color-hover: rgba(60, 45, 20, 0.05);
+  --bg-color-tag: #F3ECDF;
 
-  /* 文字色 */
-  --text-color-primary: #1F1F1F;
-  --text-color-secondary: #666666;
-  --text-color-tertiary: #999999;
-  --text-color-disabled: #BFBFBF;
-  --text-color-inverse: #FFFFFF;
+  /* 文字色：墨色 */
+  --text-color-primary: #2B2A28;
+  --text-color-secondary: #5F5A52;
+  --text-color-tertiary: #8E877C;
+  --text-color-disabled: #BEB6A8;
+  --text-color-inverse: #FFFDF8;
 
   /* 边框 */
-  --border-color: #E8E6E3;
-  --border-color-light: #F0EFED;
-  --border-color-hover: #D9D7D4;
+  --border-color: #E3DACB;
+  --border-color-light: #EAE2D4;
+  --border-color-hover: #D2C6B3;
 
-  /* 阴影 */
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.1);
-  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.06);
-  --shadow-hover: 0 6px 20px rgba(0, 0, 0, 0.1);
+  /* 阴影：低而柔 */
+  --shadow-sm: 0 1px 2px rgba(70, 50, 20, 0.05);
+  --shadow-md: 0 4px 12px rgba(70, 50, 20, 0.07);
+  --shadow-lg: 0 10px 28px rgba(70, 50, 20, 0.10);
+  --shadow-card: 0 1px 3px rgba(70, 50, 20, 0.05), 0 0 0 1px rgba(70, 50, 20, 0.035);
+  --shadow-hover: 0 6px 18px rgba(70, 50, 20, 0.09), 0 0 0 1px rgba(70, 50, 20, 0.05);
+  --shadow-paper: 0 2px 14px rgba(70, 50, 20, 0.07);
 
   /* 圆角 */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
 
   /* 间距 */
   --space-xs: 4px;
@@ -63,113 +70,141 @@
   --transition-normal: 0.25s ease;
   --transition-slow: 0.35s ease;
 
-  /* 字体 */
-  --font-family: 'Microsoft YaHei', 'PingFang SC', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-family-mono: 'Fira Code', 'Source Code Pro', Consolas, monospace;
+  /* 字体：界面黑体、标题与正文宋体 */
+  --font-family: 'Source Han Sans SC', 'Noto Sans SC', 'Microsoft YaHei', 'PingFang SC', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-family-serif: 'Source Han Serif SC', 'Noto Serif SC', 'Songti SC', 'STSong', 'SimSun', serif;
+  --font-family-mono: 'Cascadia Mono', 'Fira Code', 'Source Code Pro', Consolas, monospace;
 
   /* 状态色 */
-  --color-success: #18A058;
-  --color-warning: #F0A020;
-  --color-error: #D03050;
-  --color-info: #2080F0;
+  --color-success: #5E8C6A;
+  --color-warning: #B7832F;
+  --color-error: #B83A2E;
+  --color-info: #3E5C6B;
 
   /* 进度条 */
-  --progress-track: #F0EFED;
-  --progress-fill: #FF4D2E;
+  --progress-track: #E8DFCF;
+  --progress-fill: #3E5C6B;
 
   /* 滚动条 */
-  --scrollbar-thumb: rgba(0, 0, 0, 0.15);
-  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.25);
+  --scrollbar-thumb: rgba(70, 50, 20, 0.16);
+  --scrollbar-thumb-hover: rgba(70, 50, 20, 0.28);
   --scrollbar-track: transparent;
+
+  /* 装饰：宣纸纤维（仅用于大背景） */
+  --paper-texture:
+    radial-gradient(rgba(120, 95, 55, 0.035) 1px, transparent 1px),
+    radial-gradient(rgba(120, 95, 55, 0.025) 1px, transparent 1px);
+  --paper-texture-size: 7px 7px, 13px 13px;
 }
 
-/* 护眼模式
-   淡黄/豆绿背景，降低蓝光 */
+/* 护眼
+   豆青纸色，降低亮度与蓝光 */
 [data-theme="eyecare"] {
-  --color-primary: #E68A3C;
-  --color-primary-hover: #F09A4E;
-  --color-primary-pressed: #D07830;
-  --color-primary-light: rgba(230, 138, 60, 0.08);
-  --color-primary-suppl: #F0B87A;
+  --color-primary: #A8432F;
+  --color-primary-hover: #B85540;
+  --color-primary-pressed: #8E3726;
+  --color-primary-light: rgba(168, 67, 47, 0.08);
+  --color-primary-suppl: #C77A63;
 
-  --bg-color: #F5F0E0;
-  --bg-color-secondary: #ECE7D5;
-  --bg-color-card: #FAF6E8;
-  --bg-color-paper: #FAF6E8;
-  --bg-color-sidebar: #F0EBD8;
-  --bg-color-header: rgba(245, 240, 224, 0.95);
-  --bg-color-modal: #FAF6E8;
-  --bg-color-hover: rgba(0, 0, 0, 0.04);
-  --bg-color-tag: #FDF6E3;
+  --color-accent: #47695A;
+  --color-accent-hover: #557A69;
+  --color-accent-light: rgba(71, 105, 90, 0.10);
 
-  --text-color-primary: #3B3628;
-  --text-color-secondary: #6B6450;
-  --text-color-tertiary: #9A9280;
-  --text-color-disabled: #C4BCA8;
-  --text-color-inverse: #FFFFFF;
+  --bg-color: #E9EEDD;
+  --bg-color-secondary: #DFE6D1;
+  --bg-color-card: #F1F4E8;
+  --bg-color-paper: #F4F6EC;
+  --bg-color-sidebar: #E2E9D5;
+  --bg-color-header: rgba(233, 238, 221, 0.95);
+  --bg-color-modal: #F1F4E8;
+  --bg-color-hover: rgba(40, 60, 30, 0.05);
+  --bg-color-tag: #E3EAD6;
 
-  --border-color: #DDD7C4;
-  --border-color-light: #E8E2D0;
-  --border-color-hover: #CFC8B4;
+  --text-color-primary: #2D3328;
+  --text-color-secondary: #56604D;
+  --text-color-tertiary: #84907A;
+  --text-color-disabled: #B4BDA8;
+  --text-color-inverse: #F7F9F1;
 
-  --shadow-sm: 0 1px 3px rgba(60, 50, 20, 0.06);
-  --shadow-md: 0 4px 12px rgba(60, 50, 20, 0.08);
-  --shadow-lg: 0 8px 24px rgba(60, 50, 20, 0.10);
-  --shadow-card: 0 2px 8px rgba(60, 50, 20, 0.06);
-  --shadow-hover: 0 6px 20px rgba(60, 50, 20, 0.10);
+  --border-color: #CFD8C0;
+  --border-color-light: #D9E1CB;
+  --border-color-hover: #BCC8AA;
 
-  --scrollbar-thumb: rgba(60, 50, 20, 0.15);
-  --scrollbar-thumb-hover: rgba(60, 50, 20, 0.25);
+  --shadow-sm: 0 1px 2px rgba(40, 60, 30, 0.05);
+  --shadow-md: 0 4px 12px rgba(40, 60, 30, 0.07);
+  --shadow-lg: 0 10px 28px rgba(40, 60, 30, 0.10);
+  --shadow-card: 0 1px 3px rgba(40, 60, 30, 0.05), 0 0 0 1px rgba(40, 60, 30, 0.04);
+  --shadow-hover: 0 6px 18px rgba(40, 60, 30, 0.09), 0 0 0 1px rgba(40, 60, 30, 0.05);
+  --shadow-paper: 0 2px 14px rgba(40, 60, 30, 0.07);
 
-  --progress-track: #E5DFC8;
-  --progress-fill: #E68A3C;
+  --color-success: #4F7D5B;
+  --color-warning: #A57A2E;
+  --color-error: #A8432F;
+  --color-info: #47695A;
+
+  --scrollbar-thumb: rgba(40, 60, 30, 0.16);
+  --scrollbar-thumb-hover: rgba(40, 60, 30, 0.28);
+
+  --progress-track: #D5DDC6;
+  --progress-fill: #47695A;
+
+  --paper-texture:
+    radial-gradient(rgba(60, 90, 50, 0.035) 1px, transparent 1px),
+    radial-gradient(rgba(60, 90, 50, 0.025) 1px, transparent 1px);
 }
 
-/* 深色模式
-   暗色背景，适合夜间写作 */
+/* 夜墨
+   深青墨底，适合夜间写作 */
 [data-theme="dark"] {
-  --color-primary: #FF6B4F;
-  --color-primary-hover: #FF8A73;
-  --color-primary-pressed: #E05540;
-  --color-primary-light: rgba(255, 107, 79, 0.12);
-  --color-primary-suppl: #FF9E8A;
+  --color-primary: #D86A5C;
+  --color-primary-hover: #E47F72;
+  --color-primary-pressed: #C2594C;
+  --color-primary-light: rgba(216, 106, 92, 0.13);
+  --color-primary-suppl: #E99A8F;
 
-  --bg-color: #1A1A1E;
-  --bg-color-secondary: #222226;
-  --bg-color-card: #2A2A2E;
-  --bg-color-paper: #2E2E32;
-  --bg-color-sidebar: #202024;
-  --bg-color-header: rgba(26, 26, 30, 0.95);
-  --bg-color-modal: #2A2A2E;
-  --bg-color-hover: rgba(255, 255, 255, 0.06);
-  --bg-color-tag: rgba(255, 107, 79, 0.1);
+  --color-accent: #7FA3B4;
+  --color-accent-hover: #93B4C3;
+  --color-accent-light: rgba(127, 163, 180, 0.13);
 
-  --text-color-primary: #E8E8EC;
-  --text-color-secondary: #A0A0A8;
-  --text-color-tertiary: #707078;
-  --text-color-disabled: #505058;
-  --text-color-inverse: #1A1A1E;
+  --bg-color: #191C20;
+  --bg-color-secondary: #20242A;
+  --bg-color-card: #22262C;
+  --bg-color-paper: #24282E;
+  --bg-color-sidebar: #1C1F24;
+  --bg-color-header: rgba(25, 28, 32, 0.95);
+  --bg-color-modal: #24282E;
+  --bg-color-hover: rgba(230, 220, 200, 0.06);
+  --bg-color-tag: rgba(230, 220, 200, 0.07);
 
-  --border-color: #3A3A3E;
-  --border-color-light: #333336;
-  --border-color-hover: #4A4A4E;
+  --text-color-primary: #E6E0D4;
+  --text-color-secondary: #ABA496;
+  --text-color-tertiary: #7C766B;
+  --text-color-disabled: #565249;
+  --text-color-inverse: #191C20;
 
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.2);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.4);
-  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.25);
-  --shadow-hover: 0 6px 20px rgba(0, 0, 0, 0.35);
+  --border-color: #343941;
+  --border-color-light: #2C3037;
+  --border-color-hover: #454B54;
 
-  --color-success: #63E2B7;
-  --color-warning: #F2C97D;
-  --color-error: #E88080;
-  --color-info: #70C0E8;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.32);
+  --shadow-lg: 0 10px 28px rgba(0, 0, 0, 0.42);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.03);
+  --shadow-hover: 0 6px 18px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-paper: 0 2px 16px rgba(0, 0, 0, 0.35);
 
-  --scrollbar-thumb: rgba(255, 255, 255, 0.12);
-  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.22);
+  --color-success: #8DBB98;
+  --color-warning: #D8B26A;
+  --color-error: #E0837A;
+  --color-info: #7FA3B4;
 
-  --progress-track: #3A3A3E;
-  --progress-fill: #FF6B4F;
+  --scrollbar-thumb: rgba(230, 220, 200, 0.13);
+  --scrollbar-thumb-hover: rgba(230, 220, 200, 0.24);
+
+  --progress-track: #343941;
+  --progress-fill: #7FA3B4;
+
+  --paper-texture: none;
 }
 
 /* 响应式布局 */

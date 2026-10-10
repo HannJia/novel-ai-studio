@@ -938,19 +938,47 @@ function removeEvent(eventId: string) { novelStore.deleteEvent(novelId.value, ev
 
 <style scoped>
 .story-planner { max-width: 1180px; margin: 0 auto; padding-bottom: 56px; }
-.planner-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.planner-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.planner-header .page-title { margin: 0; font-family: var(--font-family-serif); font-weight: 700; letter-spacing: 0.04em; }
 .header-actions { display: flex; gap: 8px; }
-.page-subtitle { margin-top: 5px; color: var(--text-color-tertiary); font-size: 13px; }
-.planner-summary { display: flex; flex-wrap: wrap; gap: 22px; padding: 12px 0 16px; border-bottom: 1px solid var(--border-color-light); color: var(--text-color-secondary); font-size: 13px; }
-.planner-summary strong { margin-right: 4px; color: var(--text-color-primary); font-size: 16px; }
+.page-subtitle { margin-top: 6px; color: var(--text-color-tertiary); font-size: 13px; }
+.planner-summary {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 8px;
+  margin-bottom: 8px; color: var(--text-color-tertiary); font-size: 12px;
+}
+.planner-summary span {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 10px 12px;
+  background: var(--bg-color-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+.planner-summary strong {
+  color: var(--text-color-primary); font-size: 20px; font-weight: 600; line-height: 1.2;
+  font-family: var(--font-family-serif); font-variant-numeric: tabular-nums;
+}
+.planner-summary span:nth-child(5) strong,
+.planner-summary span:nth-child(7) strong { color: var(--color-primary); }
 .plan-board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding-top: 10px; }
-.plan-lane { min-width: 0; }
-.plan-lane-header { display: flex; min-height: 52px; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 0 2px 10px; border-bottom: 2px solid var(--border-color-light); }
+.plan-lane {
+  min-width: 0; padding: 12px;
+  background: var(--bg-color-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+}
+.plan-lane-header { display: flex; min-height: 48px; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 2px 4px 10px; border-bottom: 1px solid var(--border-color); }
 .plan-lane-header div { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
-.plan-lane-header strong { color: var(--text-color-primary); font-size: 15px; }
+.plan-lane-header strong { color: var(--text-color-primary); font-family: var(--font-family-serif); font-size: 16px; font-weight: 700; }
 .plan-lane-header span { color: var(--text-color-tertiary); font-size: 11px; }
 .plan-list { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; }
-.plan-card { min-width: 0; padding: 14px; border: 1px solid var(--border-color-light); border-radius: var(--radius-md); background: var(--bg-color); }
+.plan-card {
+  min-width: 0; padding: 12px 14px;
+  border: 1px solid var(--border-color); border-radius: var(--radius-lg);
+  background: var(--bg-color-card); box-shadow: var(--shadow-card);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.plan-card:hover { border-color: var(--color-primary); box-shadow: var(--shadow-hover); }
 .version-dialog { display: grid; gap: 12px; }
 .version-current { margin: 0; color: var(--text-color-secondary); }
 .version-diff-list { display: grid; gap: 8px; max-height: 360px; overflow: auto; }
@@ -958,17 +986,22 @@ function removeEvent(eventId: string) { novelStore.deleteEvent(novelId.value, ev
 .version-diff-row span { overflow-wrap: anywhere; }
 .plan-card-header, .plan-card-header > div, .proposal-header, .proposal-header > div { display: flex; align-items: center; gap: 7px; }
 .plan-card-header, .proposal-header { justify-content: space-between; }
-.plan-card h3 { margin: 10px 0 7px; color: var(--text-color-primary); font-size: 15px; }
-.plan-card p { margin: 7px 0; color: var(--text-color-secondary); font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
-.plan-card small { color: var(--text-color-tertiary); }
-.plan-range { color: var(--text-color-tertiary); font-size: 11px; }
-.plan-objective { display: block; color: var(--color-primary); font-size: 12px; line-height: 1.5; }
+.plan-card h3 { margin: 8px 0 6px; color: var(--text-color-primary); font-family: var(--font-family-serif); font-size: 15px; font-weight: 700; }
+.plan-card p { margin: 6px 0; color: var(--text-color-secondary); font-size: 12px; line-height: 1.65; white-space: pre-wrap; }
+.plan-card small { color: var(--text-color-tertiary); font-size: 11px; }
+.plan-range { color: var(--color-primary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.plan-objective { display: block; color: var(--color-accent); font-size: 12px; font-weight: 500; line-height: 1.5; }
 .plan-beats { margin: 8px 0 10px; padding-left: 18px; color: var(--text-color-secondary); font-size: 12px; line-height: 1.6; }
 .empty-plan { display: flex; min-height: 96px; align-items: center; justify-content: center; flex-direction: column; gap: 6px; border: 1px dashed var(--border-color); border-radius: var(--radius-md); background: transparent; color: var(--text-color-tertiary); cursor: pointer; }
 .empty-plan:hover { border-color: var(--color-primary); color: var(--color-primary); }
-.relay-section { padding: 18px 0; border-bottom: 1px solid var(--border-color-light); }
+.relay-section {
+  margin-top: 14px; padding: 14px 18px 6px;
+  background: var(--bg-color-card);
+  border: 1px solid var(--border-color); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
 .relay-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
-.relay-heading h3 { margin: 0; color: var(--text-color-primary); font-size: 15px; }
+.relay-heading h3 { margin: 0; color: var(--text-color-primary); font-family: var(--font-family-serif); font-size: 16px; font-weight: 700; }
 .relay-list { display: grid; }
 .relay-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; padding: 12px 0; border-top: 1px solid var(--border-color-light); }
 .relay-main { display: grid; gap: 4px; min-width: 0; }
@@ -988,20 +1021,24 @@ function removeEvent(eventId: string) { novelStore.deleteEvent(novelId.value, ev
 .proposal-card blockquote { margin: 8px 0; padding-left: 10px; border-left: 2px solid var(--border-color); color: var(--text-color-tertiary); }
 .proposal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 .arc-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 14px; padding-top: 8px; }
-.arc-card { min-width: 0; padding: 18px; border: 1px solid var(--border-color-light); border-radius: var(--radius-md); background: var(--bg-color); }
+.arc-card {
+  min-width: 0; padding: 18px;
+  border: 1px solid var(--border-color); border-radius: var(--radius-lg);
+  background: var(--bg-color-card); box-shadow: var(--shadow-card);
+}
 .arc-card-header, .arc-title-row, .timeline-heading, .timeline-heading > div, .memory-result-header { display: flex; align-items: center; gap: 8px; }
 .arc-card-header, .timeline-heading { justify-content: space-between; }
 .arc-title-row { min-width: 0; flex-wrap: wrap; }
-.arc-title-row h3 { margin: 0; font-size: 16px; color: var(--text-color-primary); }
+.arc-title-row h3 { margin: 0; font-family: var(--font-family-serif); font-size: 17px; font-weight: 700; color: var(--text-color-primary); }
 .icon-actions { display: flex; flex-shrink: 0; }
 .arc-description { min-height: 42px; margin: 12px 0; color: var(--text-color-secondary); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
-.arc-meta, .timeline-meta { display: flex; flex-wrap: wrap; gap: 10px 16px; color: var(--text-color-tertiary); font-size: 12px; }
+.arc-meta, .timeline-meta { display: flex; flex-wrap: wrap; gap: 10px 16px; color: var(--text-color-tertiary); font-size: 12px; font-variant-numeric: tabular-nums; }
 .progress-track { height: 4px; margin: 10px 0 14px; overflow: hidden; background: var(--progress-track); border-radius: 2px; }
 .progress-value { height: 100%; background: var(--color-primary); transition: width .2s ease; }
 .node-list { border-top: 1px solid var(--border-color-light); }
 .node-row { display: grid; grid-template-columns: 24px 64px minmax(0, 1fr) 28px; align-items: center; gap: 8px; min-height: 48px; border-bottom: 1px solid var(--border-color-light); }
 .node-toggle { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; background: transparent; color: var(--color-primary); cursor: pointer; }
-.node-chapter { color: var(--text-color-tertiary); font-size: 12px; }
+.node-chapter { color: var(--color-primary); font-size: 12px; font-variant-numeric: tabular-nums; }
 .node-content { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
 .node-content strong { color: var(--text-color-primary); font-size: 13px; }
 .node-content span { overflow: hidden; color: var(--text-color-tertiary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
@@ -1014,11 +1051,11 @@ function removeEvent(eventId: string) { novelStore.deleteEvent(novelId.value, ev
 .index-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0 4px; color: var(--text-color-tertiary); font-size: 12px; }
 .timeline-list { position: relative; }
 .timeline-row { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 18px; }
-.timeline-marker { position: relative; padding-top: 18px; color: var(--text-color-tertiary); font-size: 12px; text-align: right; }
+.timeline-marker { position: relative; padding-top: 18px; color: var(--color-primary); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
 .timeline-marker::after { position: absolute; top: 0; right: -14px; width: 1px; height: 100%; background: var(--border-color-light); content: ''; }
-.timeline-marker i { position: absolute; z-index: 1; top: 22px; right: -18px; width: 9px; height: 9px; border: 2px solid var(--color-primary); border-radius: 50%; background: var(--bg-color); }
+.timeline-marker i { position: absolute; z-index: 1; top: 22px; right: -18px; width: 9px; height: 9px; border: 2px solid var(--bg-color); border-radius: 50%; background: var(--color-primary); box-shadow: 0 0 0 1px var(--color-primary); }
 .timeline-content { min-width: 0; padding: 14px 0 20px; border-bottom: 1px solid var(--border-color-light); }
-.timeline-heading strong { font-size: 14px; }
+.timeline-heading strong { font-family: var(--font-family-serif); font-size: 15px; }
 .timeline-content p { margin: 8px 0; color: var(--text-color-secondary); font-size: 13px; line-height: 1.65; white-space: pre-wrap; }
 .timeline-evidence { margin: 8px 0; padding-left: 10px; border-left: 2px solid var(--border-color); color: var(--text-color-tertiary); font-size: 12px; }
 .character-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
@@ -1026,7 +1063,7 @@ function removeEvent(eventId: string) { novelStore.deleteEvent(novelId.value, ev
 .memory-result { padding: 15px 0; border-bottom: 1px solid var(--border-color-light); }
 .memory-result-header { flex-wrap: wrap; }
 .memory-result-header strong { font-size: 14px; }
-.memory-result-header span { margin-left: auto; color: var(--text-color-tertiary); font-size: 12px; }
+.memory-result-header span { margin-left: auto; color: var(--color-accent); font-size: 12px; font-variant-numeric: tabular-nums; }
 .memory-result p { margin: 8px 0; color: var(--text-color-secondary); font-size: 13px; line-height: 1.65; }
 .memory-result small { color: var(--text-color-tertiary); }
 .memory-placeholder { display: flex; min-height: 280px; align-items: center; justify-content: center; flex-direction: column; gap: 8px; color: var(--text-color-tertiary); text-align: center; }

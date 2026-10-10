@@ -5,7 +5,7 @@
       <div class="generate-animation" :class="{ 'animation-done': isDone }">
         <div class="pulse-ring"></div>
         <div class="pulse-ring delay-1"></div>
-        <div class="ai-icon">{{ isDone ? '✅' : '🤖' }}</div>
+        <div class="ai-icon seal">{{ isDone ? '成' : '墨' }}</div>
       </div>
       <h2>{{ isDone ? '大纲生成完成！' : 'AI 正在构思大纲...' }}</h2>
       <p v-if="!isDone && !hasError" class="generate-hint">
@@ -55,8 +55,8 @@
         </div>
         <n-input v-model:value="selectedTitle" placeholder="输入最终书名" />
       </div>
-      <n-button @click="regenerate" size="large" :disabled="acceptingOutline || editingOutline">🔄 重新生成</n-button>
-      <n-button type="primary" size="large" :loading="acceptingOutline" :disabled="acceptingOutline || editingOutline || !visibleOutlineContent" @click="acceptOutline">✨ 确认并规划分卷</n-button>
+      <n-button @click="regenerate" size="large" :disabled="acceptingOutline || editingOutline">重新生成</n-button>
+      <n-button type="primary" size="large" :loading="acceptingOutline" :disabled="acceptingOutline || editingOutline || !visibleOutlineContent" @click="acceptOutline">确认并规划分卷</n-button>
     </div>
 
     <div class="generate-actions" v-if="hasError">

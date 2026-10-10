@@ -1,57 +1,74 @@
 <template>
   <header class="app-header" id="app-header">
     <div class="header-left">
-      <div class="app-logo" @click="goHome">
-        <span class="logo-icon">✒️</span>
-        <span class="logo-text">AI 写作</span>
+      <div class="app-logo" title="返回书架" @click="goHome">
+        <span class="seal logo-seal" aria-hidden="true">墨</span>
+        <span class="logo-text">墨笺</span>
+        <span class="logo-sub">AI 小说写作</span>
       </div>
-      <nav class="header-nav">
-        <router-link to="/" class="nav-item" active-class="nav-item--active">
-          <span class="nav-icon">📚</span>
-          我的书架
+      <nav class="header-nav" aria-label="主导航">
+        <router-link to="/" class="nav-item" :class="{ 'nav-item--active': isShelf }">
+          <n-icon :size="17"><library-outline /></n-icon>
+          书架
+        </router-link>
+        <router-link to="/knowledge" class="nav-item" active-class="nav-item--active">
+          <n-icon :size="17"><layers-outline /></n-icon>
+          知识库
         </router-link>
       </nav>
     </div>
     <div class="header-right">
-      <button class="header-icon-btn cloud-header-btn" :title="cloud.statusText" :aria-label="cloud.statusText" @click="openCloud">
-        <n-icon :size="20"><cloud-outline /></n-icon>
+      <button class="header-pill cloud-header-btn" :title="cloud.statusText" :aria-label="cloud.statusText" @click="openCloud">
+        <span class="cloud-dot" :class="cloudDotClass" aria-hidden="true" />
         <span class="cloud-header-label">{{ cloud.session ? cloud.statusText : '云同步' }}</span>
-        <span v-if="cloud.pendingConflicts.length || cloud.error" class="cloud-header-dot" />
       </button>
       <!-- 主题切换 -->
-      <div class="theme-switcher" id="theme-switcher">
+      <div class="theme-switcher" id="theme-switcher" role="group" aria-label="外观主题">
         <button
           v-for="opt in themeOptions"
           :key="opt.name"
           class="theme-btn"
           :class="{ 'theme-btn--active': themeStore.currentTheme === opt.name }"
-          :title="opt.label"
+          :title="`${opt.label}：${opt.description}`"
+          :aria-label="opt.label"
+          :aria-pressed="themeStore.currentTheme === opt.name"
           @click="themeStore.switchTheme(opt.name)"
         >
-          {{ opt.icon }}
+          <span class="theme-swatch" :style="{ background: opt.swatch[0], borderColor: opt.swatch[1] }" />
         </button>
       </div>
       <!-- 设置 -->
-      <button class="header-icon-btn" title="设置" @click="goSettings" id="settings-btn">
-        <n-icon :size="20"><settings-outline /></n-icon>
+      <button class="header-icon-btn" title="设置" aria-label="设置" @click="goSettings" id="settings-btn">
+        <n-icon :size="19"><settings-outline /></n-icon>
       </button>
     </div>
   </header>
 </template>
 
 <script setup lang="ts">
-import { useRouter } from 'vue-router'
+import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { NIcon } from 'naive-ui'
-import { SettingsOutline, CloudOutline } from '@vicons/ionicons5'
+import { SettingsOutline, LibraryOutline, LayersOutline } from '@vicons/ionicons5'
 import { useCloudSyncStore } from '@/stores/cloudSync'
 import { useThemeStore, themeOptions } from '@/stores/theme'
 
 const router = useRouter()
+const route = useRoute()
 const emit = defineEmits<{
   'open-settings': []
 }>()
 const themeStore = useThemeStore()
 const cloud = useCloudSyncStore()
+
+// 书架、创建向导和书内工作台都归在“书架”下
+const isShelf = computed(() => !route.path.startsWith('/knowledge') && route.path !== '/settings')
+
+const cloudDotClass = computed(() => {
+  if (cloud.pendingConflicts.length || cloud.error) return 'cloud-dot--error'
+  return cloud.session ? 'cloud-dot--on' : 'cloud-dot--off'
+})
+
 function openCloud() {
   if (router.currentRoute.value.path === '/settings') return
   emit('open-settings')
@@ -68,18 +85,14 @@ function goSettings() {
 </script>
 
 <style scoped>
-.header-icon-btn.cloud-header-btn { position:relative; display:flex; align-items:center; gap:6px; width:144px; min-width:32px; padding:0 8px; }
-.cloud-header-label { font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
-.cloud-header-dot { position:absolute; right:3px; top:3px; width:6px; height:6px; border-radius:50%; background:var(--color-error); }
-@media (max-width:850px) { .cloud-header-label { display:none; } .header-icon-btn.cloud-header-btn { width:32px; } }
 .app-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   height: 52px;
-  padding: 0 20px;
+  padding: 0 18px;
   background: var(--bg-color-header);
-  border-bottom: 1px solid var(--border-color-light);
+  border-bottom: 1px solid var(--border-color);
   backdrop-filter: blur(12px);
   -webkit-app-region: drag;
   user-select: none;
@@ -91,23 +104,24 @@ function goSettings() {
 .header-left {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 28px;
+  min-width: 0;
   -webkit-app-region: no-drag;
 }
 
 .header-right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   -webkit-app-region: no-drag;
 }
 
 .app-logo {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   cursor: pointer;
-  padding: 4px 8px;
+  padding: 4px 6px;
   border-radius: var(--radius-sm);
   transition: background-color var(--transition-fast);
 }
@@ -116,50 +130,108 @@ function goSettings() {
   background: var(--bg-color-hover);
 }
 
-.logo-icon {
-  font-size: 22px;
+.logo-seal {
+  width: 28px;
+  height: 28px;
+  font-size: 17px;
 }
 
 .logo-text {
-  font-size: 16px;
+  font-family: var(--font-family-serif);
+  font-size: 19px;
   font-weight: 700;
-  color: var(--color-primary);
-  letter-spacing: 0;
+  letter-spacing: 0.12em;
+  color: var(--text-color-primary);
+  white-space: nowrap;
+}
+
+.logo-sub {
+  padding-left: 10px;
+  border-left: 1px solid var(--border-color);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: var(--text-color-tertiary);
   white-space: nowrap;
 }
 
 .header-nav {
   display: flex;
-  align-items: center;
+  align-items: stretch;
+  align-self: stretch;
   gap: 4px;
 }
 
 .nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 14px;
+  padding: 0 12px;
   font-size: 14px;
   color: var(--text-color-secondary);
-  border-radius: var(--radius-sm);
-  transition: all var(--transition-fast);
   text-decoration: none;
+  transition: color var(--transition-fast);
 }
 
 .nav-item:hover {
   color: var(--text-color-primary);
-  background: var(--bg-color-hover);
 }
 
 .nav-item--active {
   color: var(--color-primary) !important;
-  background: var(--color-primary-light) !important;
   font-weight: 600;
 }
 
-.nav-icon {
-  font-size: 16px;
+.nav-item--active::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--color-primary);
 }
+
+.header-pill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 180px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 100px;
+  background: var(--bg-color-card);
+  color: var(--text-color-secondary);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.header-pill:hover {
+  border-color: var(--border-color-hover);
+  color: var(--text-color-primary);
+}
+
+.cloud-header-label {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.cloud-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.cloud-dot--on { background: var(--color-success); }
+.cloud-dot--off { background: var(--text-color-disabled); }
+.cloud-dot--error { background: var(--color-error); }
 
 /* 主题切换按钮组 */
 .theme-switcher {
@@ -167,45 +239,48 @@ function goSettings() {
   align-items: center;
   gap: 2px;
   padding: 3px;
-  background: var(--bg-color-secondary);
+  border: 1px solid var(--border-color);
   border-radius: 100px;
-  transition: background-color var(--transition-normal);
+  background: var(--bg-color-card);
 }
 
 .theme-btn {
-  width: 30px;
-  height: 30px;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
   border: none;
   border-radius: 100px;
   background: transparent;
   cursor: pointer;
-  transition: all var(--transition-fast);
-  position: relative;
+  transition: background-color var(--transition-fast);
 }
 
 .theme-btn:hover {
   background: var(--bg-color-hover);
-  transform: scale(1.1);
+}
+
+.theme-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid;
+  box-sizing: border-box;
 }
 
 .theme-btn--active {
-  background: var(--bg-color-card) !important;
-  box-shadow: var(--shadow-sm);
-  transform: scale(1.05);
+  box-shadow: 0 0 0 1.5px var(--color-primary);
 }
 
 .header-icon-btn {
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   display: flex;
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--text-color-secondary);
   cursor: pointer;
@@ -213,14 +288,31 @@ function goSettings() {
 }
 
 .header-icon-btn:hover {
-  color: var(--text-color-primary);
+  color: var(--color-primary);
   background: var(--bg-color-hover);
 }
-@media (max-width:600px) {
-  .app-header { padding:0 10px; }
-  .header-nav { display:none; }
-  .header-left,.header-right { gap:6px; }
-  .app-logo { padding:4px; }
-  .header-icon-btn { flex-shrink:0; }
+
+.header-icon-btn:focus-visible,
+.theme-btn:focus-visible,
+.header-pill:focus-visible,
+.nav-item:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+@media (max-width: 960px) {
+  .logo-sub { display: none; }
+}
+
+@media (max-width: 850px) {
+  .cloud-header-label { display: none; }
+  .header-pill { padding: 0 10px; }
+}
+
+@media (max-width: 600px) {
+  .app-header { padding: 0 10px; }
+  .header-nav { display: none; }
+  .header-left, .header-right { gap: 6px; }
+  .logo-text { display: none; }
 }
 </style>

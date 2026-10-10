@@ -29,7 +29,7 @@
           }"
         >
           <div class="step-dot">
-            <span v-if="currentStep > index">✓</span>
+            <n-icon v-if="currentStep > index" :size="15" aria-hidden="true"><checkmark-outline /></n-icon>
             <span v-else>{{ index + 1 }}</span>
           </div>
           <span class="step-label">{{ step }}</span>
@@ -55,7 +55,7 @@
       <section class="reference-import-panel paper-panel">
         <div class="reference-import-header">
           <div>
-            <h3 class="section-title">📋 参考小说设定</h3>
+            <h3 class="section-title">参考小说设定</h3>
             <p class="import-hint">复制提示词给其他 AI 分析参考小说，再把返回的 JSON 粘贴回来一键填充设定。</p>
           </div>
           <div class="reference-import-actions">
@@ -128,7 +128,7 @@
       <div class="form-sections">
         <!-- 小说类型 -->
         <section class="form-section paper-panel">
-          <h3 class="section-title">📚 小说类型</h3>
+          <h3 class="section-title">小说类型</h3>
           <div class="genre-grid">
             <button
               v-for="genre in genres"
@@ -176,7 +176,7 @@
 
         <!-- 目标字数 -->
         <section class="form-section paper-panel">
-          <h3 class="section-title">📊 目标字数（万字）</h3>
+          <h3 class="section-title">目标字数（万字）</h3>
           <div class="word-count-row">
             <n-input-number
               v-model:value="form.targetWordCountMin"
@@ -199,7 +199,7 @@
 
         <!-- 写作风格 -->
         <section class="form-section paper-panel">
-          <h3 class="section-title">🎨 写作风格</h3>
+          <h3 class="section-title">写作风格</h3>
           <div class="style-dimensions">
             <div
               v-for="dim in styleDimensions"
@@ -229,7 +229,7 @@
       <div class="form-sections">
         <!-- 主角设定 -->
         <section class="form-section paper-panel">
-          <h3 class="section-title">🦸 主角设定</h3>
+          <h3 class="section-title">主角设定</h3>
           <p class="section-hint">所有项均为可选，填写越详细 AI 生成质量越高</p>
           <div class="form-grid">
             <div class="form-item">
@@ -289,7 +289,7 @@
 
         <!-- 世界观设定 -->
         <section class="form-section paper-panel">
-          <h3 class="section-title">🌍 世界观设定</h3>
+          <h3 class="section-title">世界观设定</h3>
           <div class="form-grid">
             <div class="form-item">
               <label>世界类型</label>
@@ -337,7 +337,7 @@
 
         <!-- 力量体系 -->
         <section class="form-section paper-panel">
-          <h3 class="section-title">⚔️ 力量体系</h3>
+          <h3 class="section-title">力量体系</h3>
           <div class="form-grid">
             <div class="form-item">
               <label>体系名称</label>
@@ -357,7 +357,7 @@
 
         <!-- 核心冲突 -->
         <section class="form-section paper-panel">
-          <h3 class="section-title">💥 核心冲突</h3>
+          <h3 class="section-title">核心冲突</h3>
           <div class="form-grid">
             <div class="form-item">
               <label>主线矛盾</label>
@@ -381,7 +381,7 @@
 
         <!-- 感情线 -->
         <section class="form-section paper-panel">
-          <h3 class="section-title">💕 感情线</h3>
+          <h3 class="section-title">感情线</h3>
           <div class="form-grid">
             <div class="form-item">
               <label>感情类型</label>
@@ -420,7 +420,7 @@
 
         <!-- 爽点设计 -->
         <section class="form-section paper-panel">
-          <h3 class="section-title">🔥 爽点设计</h3>
+          <h3 class="section-title">爽点设计</h3>
           <div class="form-grid">
             <div class="form-item">
               <label>打脸频率</label>
@@ -465,7 +465,7 @@
 
         <!-- 结构设计 -->
         <section class="form-section paper-panel">
-          <h3 class="section-title">🏗️ 结构设计</h3>
+          <h3 class="section-title">结构设计</h3>
           <div class="form-grid">
             <div class="form-item">
               <label>伏笔密度</label>
@@ -485,7 +485,7 @@
 
         <!-- 其他设定 -->
         <section class="form-section paper-panel">
-          <h3 class="section-title">📝 其他设定</h3>
+          <h3 class="section-title">其他设定</h3>
           <n-input
             v-model:value="form.settings.otherSettings"
             type="textarea"
@@ -500,7 +500,7 @@
         <section class="form-section paper-panel knowledge-mount-section">
           <div class="knowledge-mount-header">
             <div>
-              <h3 class="section-title">📚 挂载知识库</h3>
+              <h3 class="section-title">挂载知识库</h3>
               <p class="section-hint">只读取本书勾选的资料，AI 自动写作和辅助写作都可以使用。每本小说的挂载关系独立保存。</p>
             </div>
             <n-switch v-model:value="form.knowledgeEnabled" />
@@ -545,7 +545,7 @@
         @click="handleCreate"
         id="wizard-create-btn"
       >
-        ✨ 生成大纲
+        生成大纲
       </n-button>
       </div><!-- /wizard-footer -->
     </div><!-- /wizard-body -->
@@ -558,7 +558,7 @@ import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import {
   NButton, NIcon, NInput, NInputNumber, NSelect, NModal, NRadioButton, NRadioGroup, NSwitch, NCheckbox, NCheckboxGroup, useDialog, useMessage
 } from 'naive-ui'
-import { ArrowBackOutline } from '@vicons/ionicons5'
+import { ArrowBackOutline, CheckmarkOutline } from '@vicons/ionicons5'
 import { genres, themeTags } from '@/data/genres'
 import { styleDimensions, personalityTags, payoffPatterns } from '@/data/styles'
 import { useNovelStore } from '@/stores/novel'
@@ -1143,6 +1143,7 @@ async function handleCreate() {
 }
 
 .preview-section h4 {
+  font-family: var(--font-family-serif);
   margin-bottom: 10px;
   font-size: 15px;
   color: var(--text-color-primary);
@@ -1221,8 +1222,8 @@ async function handleCreate() {
   gap: 40px;
   padding: 16px 24px;
   background: var(--bg-color-card);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
   margin-bottom: var(--space-xl);
   position: relative;
   overflow: hidden;
@@ -1233,8 +1234,8 @@ async function handleCreate() {
   position: absolute;
   bottom: 0;
   left: 0;
-  height: 3px;
-  background: linear-gradient(90deg, var(--color-primary), var(--color-primary-suppl));
+  height: 2px;
+  background: var(--color-primary);
   border-radius: 100px;
   transition: width 0.4s ease;
 }
@@ -1253,22 +1254,26 @@ async function handleCreate() {
   align-items: center;
   justify-content: center;
   border-radius: 50%;
+  border: 1px solid var(--border-color);
   font-size: 13px;
   font-weight: 600;
-  background: var(--bg-color-secondary);
+  font-family: var(--font-family-serif);
+  background: var(--bg-color-paper);
   color: var(--text-color-tertiary);
   transition: all var(--transition-normal);
 }
 
 .step-active .step-dot {
   background: var(--color-primary);
+  border-color: var(--color-primary);
   color: var(--text-color-inverse);
-  box-shadow: 0 2px 8px rgba(255, 77, 46, 0.3);
+  box-shadow: 0 0 0 4px var(--color-primary-light);
 }
 
 .step-completed .step-dot {
-  background: var(--color-success);
-  color: white;
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--text-color-inverse);
 }
 
 .step-label {
@@ -1284,7 +1289,7 @@ async function handleCreate() {
 }
 
 .step-completed .step-label {
-  color: var(--color-success);
+  color: var(--color-accent);
 }
 
 /* 表单区域 */
@@ -1304,7 +1309,8 @@ async function handleCreate() {
 }
 
 .section-title {
-  font-size: 17px;
+  font-family: var(--font-family-serif);
+  font-size: 18px;
   font-weight: 700;
   color: var(--text-color-primary);
   margin-bottom: var(--space-md);
@@ -1349,8 +1355,8 @@ async function handleCreate() {
 }
 
 .genre-btn--active {
-  background: var(--color-primary) !important;
-  color: var(--text-color-inverse) !important;
+  background: var(--color-primary-light) !important;
+  color: var(--color-primary) !important;
   border-color: var(--color-primary) !important;
   font-weight: 600;
 }
@@ -1445,8 +1451,8 @@ async function handleCreate() {
 }
 
 .dim-btn--active {
-  background: var(--color-primary) !important;
-  color: var(--text-color-inverse) !important;
+  background: var(--color-primary-light) !important;
+  color: var(--color-primary) !important;
   border-color: var(--color-primary) !important;
   font-weight: 500;
 }

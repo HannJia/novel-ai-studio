@@ -3,99 +3,38 @@
     <!-- 侧边栏 -->
     <aside class="workspace-sidebar">
       <div class="sidebar-header">
-        <button class="back-btn" @click="$router.push('/')" title="返回书架">
-          <n-icon :size="18"><arrow-back-outline /></n-icon>
+        <button class="back-btn" @click="$router.push('/')" title="返回书架" aria-label="返回书架">
+          <n-icon :size="17"><arrow-back-outline /></n-icon>
         </button>
         <div class="novel-info">
-          <h3 class="novel-title" title="点击修改书名" @click="openRename">{{ novel.title }}</h3>
+          <h3 class="novel-title" title="点击修改书名" @click="openRename">《{{ novel.title }}》</h3>
           <span class="novel-meta">{{ novel.genreLabel }} · {{ novel.subGenreLabel }}</span>
         </div>
       </div>
 
-      <nav class="sidebar-nav">
+      <nav class="sidebar-nav" aria-label="作品导航">
         <router-link
-          :to="`/workspace/${novelId}/chapters`"
+          v-for="item in navItems"
+          :key="item.path"
+          :to="`/workspace/${novelId}/${item.path}`"
           class="nav-link"
+          :class="{ 'nav-link--active': item.path === 'chapters' && isEditorRoute }"
           active-class="nav-link--active"
-          title="章节列表"
-          aria-label="章节列表"
+          :title="item.label"
+          :aria-label="item.label"
         >
-          <span class="nav-link-icon">📝</span>
-          <span>章节列表</span>
-          <span class="nav-badge" v-if="novel.chapters.length > 0">{{ novel.chapters.length }}</span>
-        </router-link>
-        <router-link
-          :to="`/workspace/${novelId}/outline`"
-          class="nav-link"
-          active-class="nav-link--active"
-          title="大纲"
-          aria-label="大纲"
-        >
-          <span class="nav-link-icon">📋</span>
-          <span>大纲</span>
-        </router-link>
-        <router-link
-          :to="`/workspace/${novelId}/characters`"
-          class="nav-link"
-          active-class="nav-link--active"
-          title="角色库"
-          aria-label="角色库"
-        >
-          <span class="nav-link-icon">👤</span>
-          <span>角色库</span>
-          <span class="nav-badge" v-if="novel.characters && novel.characters.length > 0">{{ novel.characters.length }}</span>
-        </router-link>
-        <router-link
-          :to="`/workspace/${novelId}/knowledge`"
-          class="nav-link"
-          active-class="nav-link--active"
-          title="知识库"
-          aria-label="知识库"
-        >
-          <span class="nav-link-icon">📚</span>
-          <span>知识库</span>
-        </router-link>
-        <router-link
-          :to="`/workspace/${novelId}/planning`"
-          class="nav-link"
-          active-class="nav-link--active"
-          title="剧情规划"
-          aria-label="剧情规划"
-        >
-          <span class="nav-link-icon">🧭</span>
-          <span>剧情规划</span>
-          <span class="nav-badge" v-if="novel.storyArcs?.length">{{ novel.storyArcs.length }}</span>
-        </router-link>
-        <router-link
-          :to="`/workspace/${novelId}/data`"
-          class="nav-link"
-          active-class="nav-link--active"
-          title="数据面板"
-          aria-label="数据面板"
-        >
-          <span class="nav-link-icon">🔢</span>
-          <span>数据面板</span>
-          <span class="nav-badge" v-if="novel.dataPanels?.length">{{ novel.dataPanels.length }}</span>
-        </router-link>
-
-        <router-link
-          :to="`/workspace/${novelId}/inspiration`"
-          class="nav-link"
-          active-class="nav-link--active"
-          title="灵感记录"
-          aria-label="灵感记录"
-        >
-          <span class="nav-link-icon">💡</span>
-          <span>灵感记录</span>
+          <n-icon class="nav-link-icon" :size="18"><component :is="item.icon" /></n-icon>
+          <span class="nav-link-label">{{ item.label }}</span>
+          <span class="nav-badge" v-if="item.badge">{{ item.badge }}</span>
         </router-link>
 
         <div class="nav-divider"></div>
 
         <!-- 导出下拉 -->
         <n-dropdown :options="exportOptions" @select="handleExport" placement="right-start">
-          <button class="nav-link" title="导出小说" aria-label="导出小说" style="border:none;background:none;width:100%;cursor:pointer;text-align:left;">
-            <span class="nav-link-icon">📤</span>
-            <span>导出小说</span>
+          <button class="nav-link nav-button" title="导出小说" aria-label="导出小说">
+            <n-icon class="nav-link-icon" :size="18"><share-outline /></n-icon>
+            <span class="nav-link-label">导出小说</span>
           </button>
         </n-dropdown>
 
@@ -112,7 +51,10 @@
               :title="aiActivityState(activity) === 'running' ? '点击返回任务位置' : '点击返回任务位置并标记已读'"
               @click="openAiActivity(activity)"
             >
-              <span class="ai-task-indicator" :class="{ 'ai-task-indicator-done': aiActivityState(activity) === 'completed' }"></span>
+              <span class="ai-task-indicator" :class="{
+                'ai-task-indicator-done': aiActivityState(activity) === 'completed',
+                'ai-task-indicator-running': aiActivityState(activity) === 'running',
+              }"></span>
               <span class="ai-task-name">{{ activity.name }}</span>
               <span class="ai-task-state">
                 {{ aiActivityState(activity) === 'running' ? '进行中' : aiActivityState(activity) === 'completed' ? '已完成' : '失败' }}
@@ -138,20 +80,16 @@
 
       <!-- 统计信息 -->
       <div class="sidebar-stats">
-        <div class="stat-row">
-          <span>总字数</span>
-          <span class="stat-num">{{ formatWordCount(novel.currentWordCount, '') }}</span>
+        <div class="stat-main">
+          <span class="stat-big">{{ formatWordCount(novel.currentWordCount, '') }}</span>
+          <span class="stat-unit">字 · {{ novel.chapters.length }} 章</span>
         </div>
-        <div class="stat-row">
-          <span>章节</span>
-          <span class="stat-num">{{ novel.chapters.length }} 章</span>
-        </div>
-        <div class="stat-row">
-          <span>目标</span>
-          <span class="stat-num">{{ novel.targetWordCountMin }}~{{ novel.targetWordCountMax }} 万</span>
-        </div>
-        <div class="progress-bar-mini">
+        <div class="progress-bar-mini" role="progressbar" :aria-valuenow="Math.round(getProgress)" aria-valuemin="0" aria-valuemax="100" aria-label="目标字数进度">
           <div class="progress-fill-mini" :style="{ width: getProgress + '%' }"></div>
+        </div>
+        <div class="stat-row">
+          <span>目标 {{ novel.targetWordCountMin }}~{{ novel.targetWordCountMax }} 万字</span>
+          <span>{{ Math.round(getProgress) }}%</span>
         </div>
       </div>
     </aside>
@@ -180,10 +118,10 @@
   </div>
 
   <!-- 找不到小说 -->
-  <div v-else class="page-container fade-in" style="display:flex;align-items:center;justify-content:center;min-height:60vh;">
-    <div style="text-align:center;">
-      <div style="font-size:64px;">📖</div>
-      <h2 style="margin:16px 0 8px;">找不到这本小说</h2>
+  <div v-else class="page-container fade-in workspace-missing">
+    <div class="workspace-missing-inner">
+      <svg class="ink-mountains" viewBox="0 0 220 80" aria-hidden="true"><path fill="currentColor" d="M0 80 L40 38 L62 56 L98 14 L130 50 L150 34 L188 66 L220 46 L220 80 Z" /></svg>
+      <h2>找不到这本小说</h2>
       <n-button type="primary" @click="$router.push('/')">返回书架</n-button>
     </div>
   </div>
@@ -192,10 +130,13 @@
 <script setup lang="ts">
 defineOptions({ name: 'Workspace' })
 
-import { computed, ref } from 'vue'
+import { computed, ref, type Component } from 'vue'
 import { useRoute } from 'vue-router'
 import { NIcon, NButton, NDropdown, NModal, NInput, useMessage } from 'naive-ui'
-import { ArrowBackOutline } from '@vicons/ionicons5'
+import {
+  ArrowBackOutline, DocumentTextOutline, ListOutline, PeopleOutline, LayersOutline,
+  TrendingUpOutline, StatsChartOutline, BulbOutline, ShareOutline,
+} from '@vicons/ionicons5'
 import { useNovelStore } from '@/stores/novel'
 import { exportToTXT, exportToWordHtml, exportToEpub } from '@/services/export'
 import AiChatAssistant from '@/components/AiChatAssistant.vue'
@@ -216,13 +157,28 @@ const {
 
 const novelId = ref(route.params.novelId as string)
 const novel = computed(() => novelStore.getNovel(novelId.value))
+// 编辑器属于“章节”分组，导航高亮保持在章节上
+const isEditorRoute = computed(() => route.name === 'WorkspaceEditor')
+
+const navItems = computed<Array<{ path: string; label: string; icon: Component; badge?: number }>>(() => {
+  const book = novel.value
+  return [
+    { path: 'chapters', label: '章节', icon: DocumentTextOutline, badge: book?.chapters.length || undefined },
+    { path: 'outline', label: '大纲', icon: ListOutline },
+    { path: 'planning', label: '剧情规划', icon: TrendingUpOutline, badge: book?.storyArcs?.length || undefined },
+    { path: 'characters', label: '角色库', icon: PeopleOutline, badge: book?.characters?.length || undefined },
+    { path: 'knowledge', label: '知识库', icon: LayersOutline },
+    { path: 'data', label: '数据面板', icon: StatsChartOutline, badge: book?.dataPanels?.length || undefined },
+    { path: 'inspiration', label: '灵感记录', icon: BulbOutline },
+  ]
+})
 
 const exportOptions = [
-  { label: '📄 导出为 TXT', key: 'txt' },
-  { label: '📄 只导出正文 TXT（不含大纲）', key: 'txt-body' },
-  { label: '📘 导出为 Word 兼容 HTML (.doc)', key: 'word' },
-  { label: '📘 只导出正文 Word（不含大纲）', key: 'word-body' },
-  { label: '📖 导出为 EPUB', key: 'epub' },
+  { label: '导出为 TXT', key: 'txt' },
+  { label: '只导出正文 TXT（不含大纲）', key: 'txt-body' },
+  { label: '导出为 Word 兼容 HTML (.doc)', key: 'word' },
+  { label: '只导出正文 Word（不含大纲）', key: 'word-body' },
+  { label: '导出为 EPUB', key: 'epub' },
 ]
 
 async function handleExport(key: string) {
@@ -280,32 +236,32 @@ const getProgress = computed(() => {
 
 /* 侧边栏 */
 .workspace-sidebar {
-  width: 220px;
+  width: 212px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   background: var(--bg-color-sidebar);
-  border-right: 1px solid var(--border-color-light);
+  border-right: 1px solid var(--border-color);
   transition: background-color var(--transition-normal);
 }
 
 .sidebar-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 16px;
+  gap: 8px;
+  padding: 16px 12px 14px;
   border-bottom: 1px solid var(--border-color-light);
 }
 
 .back-btn {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-color-card);
   color: var(--text-color-secondary);
   cursor: pointer;
   flex-shrink: 0;
@@ -313,16 +269,17 @@ const getProgress = computed(() => {
 }
 
 .back-btn:hover {
-  background: var(--bg-color-hover);
-  color: var(--text-color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
 }
 
 .novel-info {
+  min-width: 0;
   overflow: hidden;
 }
 
 .novel-title {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text-color-primary);
   white-space: nowrap;
@@ -342,6 +299,8 @@ const getProgress = computed(() => {
 }
 
 .novel-meta {
+  display: block;
+  margin-top: 2px;
   font-size: 11px;
   color: var(--text-color-tertiary);
 }
@@ -349,27 +308,45 @@ const getProgress = computed(() => {
 /* 导航链接 */
 .sidebar-nav {
   flex: 1;
-  padding: 8px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 8px;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
 .nav-link {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: var(--radius-sm);
+  gap: 11px;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: var(--radius-md);
   font-size: 14px;
   color: var(--text-color-secondary);
   text-decoration: none;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.nav-button {
+  width: 100%;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .nav-link:hover {
   background: var(--bg-color-hover);
   color: var(--text-color-primary);
+}
+
+.nav-link:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
 }
 
 .nav-link--active {
@@ -378,18 +355,37 @@ const getProgress = computed(() => {
   font-weight: 600;
 }
 
+.nav-link--active::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--color-primary);
+}
+
 .nav-link-icon {
-  font-size: 16px;
+  flex-shrink: 0;
 }
 
 .nav-badge {
   margin-left: auto;
-  padding: 1px 7px;
+  min-width: 22px;
+  padding: 0 6px;
   border-radius: 100px;
   background: var(--bg-color-secondary);
   font-size: 11px;
   font-weight: 600;
+  line-height: 18px;
+  text-align: center;
   color: var(--text-color-tertiary);
+}
+
+.nav-link--active .nav-badge {
+  background: var(--bg-color-card);
+  color: var(--color-primary);
 }
 
 .ai-task-panel {
@@ -405,14 +401,15 @@ const getProgress = computed(() => {
   padding: 0 12px 5px;
   color: var(--text-color-tertiary);
   font-size: 11px;
+  letter-spacing: 0.1em;
 }
 
 .ai-task-count {
   min-width: 16px;
   padding: 1px 5px;
   border-radius: 8px;
-  background: var(--color-primary-light);
-  color: var(--color-primary);
+  background: var(--color-accent-light);
+  color: var(--color-accent);
   text-align: center;
 }
 
@@ -425,6 +422,7 @@ const getProgress = computed(() => {
   min-height: 30px;
   padding: 5px 12px;
   border: 0;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-color-secondary);
   cursor: pointer;
@@ -463,14 +461,14 @@ const getProgress = computed(() => {
 .ai-task-indicator {
   width: 7px;
   height: 7px;
-  border: 1px solid var(--color-primary);
+  border: 1px solid var(--color-accent);
   border-radius: 50%;
   background: transparent;
 }
 
 .ai-task-indicator-done {
-  border-color: #35a854;
-  background: #35a854;
+  border-color: var(--color-success);
+  background: var(--color-success);
 }
 
 .ai-task-failed .ai-task-indicator {
@@ -479,13 +477,22 @@ const getProgress = computed(() => {
 }
 
 .ai-task-indicator-running {
-  border-color: var(--color-warning);
-  background: var(--color-warning);
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  animation: ai-pulse 1.4s ease-in-out infinite;
 }
 
 .ai-task-indicator-failed {
   border-color: var(--color-error);
   background: var(--color-error);
+}
+
+@keyframes ai-pulse {
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-task-indicator-running { animation: none; }
 }
 
 .ai-task-name {
@@ -504,36 +511,52 @@ const getProgress = computed(() => {
 
 /* 统计信息 */
 .sidebar-stats {
-  padding: 16px;
-  border-top: 1px solid var(--border-color-light);
+  margin: 0 10px 12px;
+  padding: 12px;
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-lg);
+  background: var(--bg-color-card);
   display: flex;
   flex-direction: column;
+  gap: 7px;
+}
+
+.stat-main {
+  display: flex;
+  align-items: baseline;
   gap: 6px;
+}
+
+.stat-big {
+  font-family: var(--font-family-serif);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-color-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-unit {
+  font-size: 12px;
+  color: var(--text-color-tertiary);
 }
 
 .stat-row {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-color-tertiary);
 }
 
-.stat-num {
-  font-weight: 600;
-  color: var(--text-color-secondary);
-}
-
 .progress-bar-mini {
-  height: 3px;
+  height: 4px;
   background: var(--progress-track);
   border-radius: 100px;
-  margin-top: 4px;
   overflow: hidden;
 }
 
 .progress-fill-mini {
   height: 100%;
-  background: linear-gradient(90deg, var(--color-primary), var(--color-primary-suppl));
+  background: var(--progress-fill);
   border-radius: 100px;
   transition: width 0.5s ease;
 }
@@ -551,7 +574,21 @@ const getProgress = computed(() => {
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  background: var(--bg-color);
+}
+
+.workspace-missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+}
+
+.workspace-missing-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  text-align: center;
 }
 
 @media (max-width: 768px) {
@@ -576,27 +613,24 @@ const getProgress = computed(() => {
   .novel-info,
   .sidebar-stats,
   .nav-badge,
-  .nav-link > span:not(.nav-link-icon) {
+  .nav-link-label,
+  .ai-task-panel {
     display: none;
   }
 
   .sidebar-nav {
     padding: 8px 6px;
-    overflow-y: auto;
     overflow-x: hidden;
   }
 
   .nav-link {
     justify-content: center;
     gap: 0;
-    min-height: 40px;
     padding: 10px;
   }
 
-  .nav-link-icon {
-    flex-shrink: 0;
-    font-size: 18px;
-    line-height: 1;
+  .nav-link--active::before {
+    left: -6px;
   }
 
   .nav-divider {

@@ -7,7 +7,7 @@
       :class="{ 'fab-active': showChat, 'fab-busy': thinking && !showChat }"
       :title="thinking && !showChat ? 'AI 对话助手：后台处理中，点击展开' : unread ? 'AI 对话助手：有新回复' : 'AI 对话助手'"
     >
-      {{ showChat ? '−' : thinking ? '⏳' : unread ? '💬•' : '💬' }}
+      {{ showChat ? '−' : thinking ? '…' : '笺' }}<span v-if="!showChat && unread" class="chat-unread-dot" aria-hidden="true" />
     </button>
 
     <!-- 聊天窗口 -->
@@ -18,10 +18,10 @@
           <div class="chat-header-actions">
             <button class="chat-search-btn" :class="{ enabled: webSearch }" :aria-pressed="webSearch"
               :title="webSearch ? '关闭联网搜索（下条消息生效）' : '开启联网搜索（下条消息生效）'"
-              @click="toggleSearch">🌐 联网{{ webSearch ? '开' : '关' }}</button>
+              @click="toggleSearch">联网{{ webSearch ? '开' : '关' }}</button>
             <button class="chat-icon-btn" @click="expanded = !expanded" :title="expanded ? '还原窗口' : '放大窗口'" :aria-label="expanded ? '还原窗口' : '放大窗口'">{{ expanded ? '❐' : '⛶' }}</button>
             <button class="chat-icon-btn" @click="toggleChat" title="收起窗口（继续后台运行）" aria-label="收起窗口">−</button>
-            <button class="chat-icon-btn" :disabled="thinking" @click="clearHistory" :title="thinking ? '请先停止请求再清空记录' : '清空记录'">🗑️</button>
+            <button class="chat-icon-btn" :disabled="thinking" @click="clearHistory" :title="thinking ? '请先停止请求再清空记录' : '清空记录'">清空</button>
           </div>
         </div>
 
@@ -31,16 +31,16 @@
         <div class="chat-messages" ref="messagesRef">
           <!-- 欢迎消息 -->
           <div v-if="messages.length === 0" class="chat-welcome">
-            <p>👋 我是你的 AI 写作助手</p>
+            <p>我是本书的写作助手</p>
             <p class="chat-hint">这里是独立的书内对话。创建前的讨论保存在侧栏「灵感记录」，已确认设定仍会作为参考。</p>
             <p class="chat-hint">你可以问我关于小说的任何问题，比如：</p>
             <div class="quick-actions">
-              <button @click="quickAsk('帮我分析一下当前的剧情走向')">📊 分析剧情</button>
-              <button @click="quickAsk('给我一些关于下一章的写作建议')">💡 写作建议</button>
-              <button @click="quickAsk('帮我检查人物性格是否一致')">👤 角色一致性</button>
-              <button @click="quickAsk('当前有哪些全书规划需要推进或收束')">🧭 全书规划</button>
-              <button @click="crossChapterAnalysis">📄 跨章节分析</button>
-              <button @click="wholeBookAnalysis">📖 全书评估</button>
+              <button @click="quickAsk('帮我分析一下当前的剧情走向')">分析剧情</button>
+              <button @click="quickAsk('给我一些关于下一章的写作建议')">写作建议</button>
+              <button @click="quickAsk('帮我检查人物性格是否一致')">角色一致性</button>
+              <button @click="quickAsk('当前有哪些全书规划需要推进或收束')">全书规划</button>
+              <button @click="crossChapterAnalysis">跨章节分析</button>
+              <button @click="wholeBookAnalysis">全书评估</button>
             </div>
           </div>
 
@@ -51,13 +51,13 @@
             class="chat-msg"
             :class="msg.role"
           >
-            <div class="msg-avatar">{{ msg.role === 'user' ? '👤' : '🤖' }}</div>
+            <div class="msg-avatar">{{ msg.role === 'user' ? '我' : 'AI' }}</div>
             <div class="msg-bubble">
               <div class="msg-content" v-html="renderMd(msg.role === 'assistant' ? formatChatReply(msg.content, msg.search) : msg.content)"></div>
               <ChatSearchEvidence :record="msg.search" />
               <div v-if="msg.role === 'assistant' && !msg.failed" class="msg-actions">
                 <button class="action-btn" @click="copyContent(formatChatReply(msg.content, msg.search))" title="复制内容">
-                  📋 复制
+                  复制
                 </button>
                 <n-button size="tiny" quaternary :disabled="thinking" @click="openKnowledgeDraft(msg.content, msg.search)">
                   <template #icon><n-icon><save-outline /></n-icon></template>存入知识库
@@ -68,7 +68,7 @@
 
           <!-- AI 正在思考 -->
           <div v-if="thinking" class="chat-msg assistant">
-            <div class="msg-avatar">🤖</div>
+            <div class="msg-avatar">AI</div>
             <div v-if="streamText" class="msg-content" v-html="renderMd(streamText)"></div>
             <div v-else class="msg-content thinking-dots" :aria-label="webSearch ? '正在请求联网回复' : '正在回复'">
               <span></span><span></span><span></span>
@@ -219,24 +219,32 @@ function wholeBookAnalysis() {
 
 /* 浮动按钮 */
 .chat-fab {
+  position: relative;
   width: 52px;
   height: 52px;
-  border-radius: 50%;
+  border-radius: 12px;
   border: none;
   background: var(--color-primary);
-  color: #fff;
-  font-size: 24px;
+  color: var(--text-color-inverse);
+  font-family: var(--font-family-serif);
+  font-size: 22px;
+  font-weight: 700;
   cursor: pointer;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
-  transition: all 0.3s ease;
+  box-shadow: inset 0 0 0 3px rgba(255, 253, 248, 0.28), var(--shadow-lg);
+  transition: all 0.25s ease;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .chat-fab:hover {
-  transform: scale(1.1);
-  box-shadow: 0 6px 24px rgba(0,0,0,0.3);
+  transform: translateY(-2px);
+  box-shadow: inset 0 0 0 3px rgba(255, 253, 248, 0.28), 0 10px 26px rgba(70, 30, 20, 0.28);
+}
+
+.chat-fab:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 3px;
 }
 
 .fab-active {

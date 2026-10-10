@@ -5,14 +5,14 @@
     title="打开写作辅助"
     @click="emit('open')"
   >
-    💡<span>写作辅助</span>
+    <span>写作辅助</span>
   </button>
 
   <transition name="slide-right">
     <aside v-if="open || persistent" class="advisor-sidebar">
       <header class="advisor-header">
         <div>
-          <div class="advisor-title"><span class="advisor-icon">💡</span><strong>写作辅助</strong></div>
+          <div class="advisor-title"><span class="advisor-icon seal">笺</span><strong>写作辅助</strong></div>
           <p>AI 提供思路和资料提醒，不修改正文。</p>
         </div>
         <button v-if="!persistent" class="close-btn" title="关闭写作辅助" @click="emit('close')">✕</button>

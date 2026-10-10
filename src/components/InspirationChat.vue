@@ -2,7 +2,7 @@
   <section class="inspiration-chat">
     <div class="inspiration-search-toolbar">
       <button class="inspiration-search-toggle" :class="{ enabled: webSearch }" :aria-pressed="webSearch"
-        title="开启或关闭联网搜索，下条灵感消息生效" @click="webSearch = !webSearch">🌐 联网{{ webSearch ? '开' : '关' }}</button>
+        title="开启或关闭联网搜索，下条灵感消息生效" @click="webSearch = !webSearch">联网{{ webSearch ? '开' : '关' }}</button>
       <span>{{ webSearch ? '允许按需搜索近期事件和背景；查询词可能外发并额外计费。' : '未启用网页搜索；灵感对话仍需调用已配置 API。' }}</span>
       <n-select
         class="inspiration-session-select"
@@ -433,12 +433,13 @@ onBeforeUnmount(() => { persistCurrentHistory(); stop() })
 .inspiration-knowledge-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-bottom: 8px; flex-shrink: 0; }
 .inspiration-knowledge-toolbar label { font-size: 12px; color: var(--text-color-secondary); }
 .inspiration-knowledge-toolbar :deep(.n-select) { flex: 1 1 220px; min-width: 0; }
-.inspiration-search-toggle { cursor: pointer; flex-shrink: 0; border: 1px solid var(--border-color); border-radius: 12px; padding: 4px 10px; background: var(--bg-color); color: var(--text-color-secondary); }
-.inspiration-search-toggle.enabled { color: var(--color-primary); border-color: var(--color-primary); background: var(--color-primary-light); }
+.inspiration-search-toggle { cursor: pointer; flex-shrink: 0; border: 1px solid var(--border-color); border-radius: 100px; padding: 4px 12px; background: var(--bg-color-paper); color: var(--text-color-secondary); transition: all var(--transition-fast); }
+.inspiration-search-toggle:hover { border-color: var(--color-accent); color: var(--color-accent); }
+.inspiration-search-toggle.enabled { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-light); }
 .inspiration-progress { color: var(--text-color-tertiary); font-size: 12px; line-height: 1.6; }
 .inspiration-history { flex: 1; min-height: 80px; overflow-y: auto; padding: 12px 4px; overscroll-behavior: contain; overflow-anchor: none; }
 .inspiration-sticky-prompt { flex: 0 0 auto; margin-bottom: 8px; padding: 8px 12px;
-  border: 1px solid var(--border-color); border-left: 3px solid var(--color-primary); border-radius: 10px;
+  border: 1px solid var(--border-color); border-left: 3px solid var(--color-primary); border-radius: var(--radius-lg);
   background: var(--bg-color-card); color: var(--text-color-primary); }
 .inspiration-sticky-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 4px; font-size: 12px; }
 .inspiration-sticky-header strong { color: var(--color-primary); }
@@ -447,17 +448,24 @@ onBeforeUnmount(() => { persistCurrentHistory(); stop() })
 .inspiration-sticky-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
   overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.6; }
 .inspiration-sticky-text.expanded { display: block; max-height: min(100px, 12vh); overflow-y: auto; overscroll-behavior: contain; }
-.inspiration-message { width: fit-content; min-width: 0; max-width: 88%; padding: 14px 16px; margin: 10px 0;
-  border: 1px solid var(--border-color-light); border-radius: 14px; overflow-wrap: anywhere; }
-.inspiration-message > strong { display: block; margin-bottom: 4px; color: var(--text-color-secondary); font-size: 12px; }
-.inspiration-message > div { line-height: 1.8; font-size: 14px; overflow-x: auto; }
-.inspiration-message.user { margin-left: auto; background: var(--color-primary-light); border-color: color-mix(in srgb, var(--color-primary) 35%, var(--border-color-light)); }
+.inspiration-message { width: fit-content; min-width: 0; max-width: 88%; padding: 14px 16px; margin: 12px 0;
+  border: 1px solid var(--border-color); border-radius: var(--radius-lg); overflow-wrap: anywhere; }
+.inspiration-message > strong { display: block; margin-bottom: 4px; color: var(--text-color-secondary); font-size: 12px; letter-spacing: 0.04em; }
+.inspiration-message > div { line-height: 1.85; font-size: 14px; overflow-x: auto; }
+/* 用户侧：淡朱砂底 */
+.inspiration-message.user { margin-left: auto; background: var(--color-primary-light);
+  border-color: color-mix(in srgb, var(--color-primary) 28%, var(--border-color)); }
 .inspiration-message.user > strong { color: var(--color-primary); text-align: right; }
 .inspiration-message.user > div { text-align: left; }
-.inspiration-message.assistant { margin-right: auto; max-width: 94%; background: var(--bg-color-card); }
+/* AI 侧：宣纸卡片 + 黛青左线 */
+.inspiration-message.assistant { margin-right: auto; max-width: 94%; background: var(--bg-color-paper);
+  border-left: 3px solid var(--color-accent); box-shadow: var(--shadow-sm); }
+.inspiration-message.assistant > strong { color: var(--color-accent); font-family: var(--font-family-serif); }
 .inspiration-message :deep(p + p) { margin-top: 10px; }
 .inspiration-message :deep(ul), .inspiration-message :deep(ol) { padding-left: 22px; }
-.inspiration-composer { flex: 0 0 auto; padding: 12px 0; border-top: 1px solid var(--border-color-light); }
+.inspiration-composer { flex: 0 0 auto; margin: 4px 0 12px; padding: 12px 14px; border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg); background: var(--bg-color-paper); }
+.inspiration-progress { padding-left: 4px; color: var(--color-accent); }
 .inspiration-input-hint { margin: 6px 0 0; color: var(--text-color-tertiary); font-size: 12px; line-height: 1.5; }
 .inspiration-send-group { display: inline-flex; align-items: center; gap: 8px; }
 .inspiration-context-status { position: relative; display: inline-flex; align-items: center; color: var(--text-color-tertiary); font-size: 11px; line-height: 1; }
@@ -468,10 +476,10 @@ onBeforeUnmount(() => { persistCurrentHistory(); stop() })
 .inspiration-context-ring::after { content: ''; position: absolute; inset: 4px; border-radius: 50%; background: var(--bg-color-card); }
 .inspiration-context-tooltip { position: absolute; z-index: 5; bottom: calc(100% + 8px); left: 0; display: flex; flex-direction: column; gap: 3px;
   width: max-content; max-width: min(280px, calc(100vw - 32px)); padding: 9px 11px; border-radius: 9px;
-  background: #1c1c1e; color: #f5f5f7; box-shadow: 0 7px 20px rgba(0, 0, 0, 0.22);
+  background: var(--text-color-primary); color: var(--bg-color-paper); box-shadow: var(--shadow-md);
   font-size: 11px; line-height: 1.45; opacity: 0; pointer-events: none; transform: translateY(3px);
   transition: opacity 120ms ease, transform 120ms ease; white-space: nowrap; }
-.inspiration-context-tooltip strong { color: #fff; font-weight: 600; }
+.inspiration-context-tooltip strong { color: inherit; font-weight: 600; }
 .inspiration-context-status:hover .inspiration-context-tooltip,
 .inspiration-context-summary:focus + .inspiration-context-tooltip { opacity: 1; transform: translateY(0); }
 .inspiration-context-progress-native { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; clip-path: inset(50%); }

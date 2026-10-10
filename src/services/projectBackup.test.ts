@@ -58,7 +58,7 @@ describe('项目备份格式', () => {
   })
 
   it('拒绝格式或必需数组不正确的文件', () => {
-    expect(() => parseProjectBackup('{}')).toThrow('不是有效的 AI Novel Writer 备份文件')
+    expect(() => parseProjectBackup('{}')).toThrow('不是有效的墨笺项目备份文件')
     expect(() => parseProjectBackup(JSON.stringify({ format: 'ai-novel-writer-backup', version: 1, novels: [{ id: 'x' }], knowledgeBases: [] }))).toThrow('备份数据不完整')
   })
 

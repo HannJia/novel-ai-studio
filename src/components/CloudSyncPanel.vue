@@ -197,7 +197,7 @@ async function copy(value: string) {
   catch { feedback.value = '无法访问剪贴板，请选中文字手动复制。' }
 }
 function downloadRecovery() {
-  const blob = new Blob([`AI 写作云同步账号：${username.value.trim()}\n恢复码：${recoveryCode.value}\n请勿向他人提供恢复码。\n`], { type: 'text/plain;charset=utf-8' })
+  const blob = new Blob([`墨笺云同步账号：${username.value.trim()}\n恢复码：${recoveryCode.value}\n请勿向他人提供恢复码。\n`], { type: 'text/plain;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url

@@ -59,7 +59,7 @@ describe('chat window background behavior', () => {
     expect(wrapper.find('.chat-window.expanded').exists()).toBe(true)
     await wrapper.find('[aria-label="收起窗口"]').trigger('click')
     expect(wrapper.find('.chat-window').exists()).toBe(false)
-    expect(wrapper.find('.chat-fab').text()).toBe('⏳')
+    expect(wrapper.find('.chat-fab').text()).toBe('…')
     expect(signal.aborted).toBe(false)
     finish({ content: '后台返回的建议' })
     await flushPromises()

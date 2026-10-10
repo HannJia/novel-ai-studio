@@ -31,7 +31,7 @@ export function parseProjectBackup(raw: string): ProjectBackup {
   if (raw.length > MAX_PROJECT_BACKUP_BYTES || new Blob([raw]).size > MAX_PROJECT_BACKUP_BYTES) throw new Error('备份文件超过 256 MB 安全上限')
   const value = JSON.parse(raw) as Partial<ProjectBackup>
   if (value.format !== 'ai-novel-writer-backup' || value.version !== 1 || !Array.isArray(value.novels) || !Array.isArray(value.knowledgeBases)) {
-    throw new Error('不是有效的 AI Novel Writer 备份文件')
+    throw new Error('不是有效的墨笺项目备份文件')
   }
   validateProjectBackup(value)
   return value as ProjectBackup

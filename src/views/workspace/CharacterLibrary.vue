@@ -4,17 +4,17 @@
       <h2 class="page-title">角色库</h2>
       <div class="header-actions">
         <n-button-group size="small">
-          <n-button :type="viewMode === 'grid' ? 'primary' : 'default'" @click="viewMode = 'grid'">📋 列表</n-button>
-          <n-button :type="viewMode === 'graph' ? 'primary' : 'default'" @click="viewMode = 'graph'">🕸️ 关系图</n-button>
+          <n-button :type="viewMode === 'grid' ? 'primary' : 'default'" @click="viewMode = 'grid'">列表</n-button>
+          <n-button :type="viewMode === 'graph' ? 'primary' : 'default'" @click="viewMode = 'graph'">关系图</n-button>
         </n-button-group>
         <n-button size="small" @click="resetForm(); showAddModal = true">+ 手动添加</n-button>
         <n-button size="small" type="primary" @click="aiScanCharacters" :loading="scanning" :disabled="relationshipScanning">
-          🤖 AI 扫描角色
+          AI 扫描角色
         </n-button>
         <n-button v-if="scanning || relationshipScanning" size="small" @click="cancelAnalysis">停止</n-button>
         <n-button size="small" @click="aiScanRelationships" :loading="relationshipScanning"
           :disabled="characters.length < 2 || scanning">
-          🔗 补全关系
+          补全关系
         </n-button>
       </div>
     </div>
@@ -27,7 +27,7 @@
 
     <!-- 空状态 -->
     <div v-if="!characters.length && !scanning" class="empty-state paper-panel">
-      <div class="empty-icon">👤</div>
+      <div class="empty-icon"><svg class="ink-mountains" viewBox="0 0 220 80" aria-hidden="true"><path fill="currentColor" d="M0 80 L40 38 L62 56 L98 14 L130 50 L150 34 L188 66 L220 46 L220 80 Z" /></svg></div>
       <h3>还没有角色</h3>
       <p>手动添加角色，或让 AI 从已有章节中自动扫描提取角色信息</p>
     </div>
@@ -133,7 +133,7 @@
 
             <!-- 出场章节追踪 -->
             <div class="detail-field">
-              <label>📍 出场章节</label>
+              <label>出场章节</label>
               <div v-if="getAppearances(selectedChar).length > 0" class="appearance-list">
                 <span
                   v-for="ch in getAppearances(selectedChar)" :key="ch.id"
@@ -712,64 +712,91 @@ watch(() => themeStore.currentTheme, () => { if (viewMode.value === 'graph') nex
   justify-content: center; min-height: 40vh; gap: 12px; text-align: center;
 }
 .empty-icon { font-size: 48px; }
-.empty-state h3 { font-size: 18px; color: var(--text-color-primary); }
+.empty-icon { color: var(--border-color-hover); width: 220px; }
+.empty-state h3 { font-family: var(--font-family-serif); font-size: 18px; color: var(--text-color-primary); }
 .empty-state p { font-size: 14px; color: var(--text-color-tertiary); }
 
 .scanning-hint {
   display: flex; align-items: center; justify-content: center; gap: 12px;
-  padding: 40px; font-size: 14px; color: var(--text-color-secondary);
+  padding: 40px; font-size: 14px; color: var(--color-accent);
+  border: 1px solid var(--border-color); border-left: 3px solid var(--color-accent);
 }
 
 /* 角色网格 */
 .char-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: var(--space-md);
 }
 
 .char-card {
   cursor: pointer;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 14px;
+  align-items: start;
   padding: 16px;
-  transition: all var(--transition-fast);
-  border: 2px solid transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background-color var(--transition-fast);
 }
-.char-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
-.char-card--selected { border-color: var(--color-primary); }
+.char-card:hover { border-color: var(--border-color-hover); box-shadow: var(--shadow-md); }
+.char-card--selected {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+  box-shadow: inset 3px 0 0 var(--color-primary);
+}
 
-.char-avatar {
-  width: 48px; height: 48px; border-radius: 50%;
+/* 印章风格头像：首字 + 圆角方块 + 内框 */
+.char-avatar,
+.detail-avatar {
   display: flex; align-items: center; justify-content: center;
-  font-size: 20px; font-weight: 700; color: #fff;
-  margin-bottom: 10px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-family-serif);
+  font-weight: 700;
+  color: var(--text-color-inverse);
+  box-shadow: inset 0 0 0 2px var(--bg-color-paper), inset 0 0 0 3px currentColor;
+  flex-shrink: 0;
+}
+.char-avatar {
+  grid-row: span 2;
+  width: 48px; height: 48px;
+  font-size: 22px;
 }
 
-.char-info { margin-bottom: 8px; }
-.char-name { font-size: 15px; font-weight: 600; color: var(--text-color-primary); margin-bottom: 2px; }
-.char-identity { font-size: 12px; color: var(--text-color-tertiary); display: block; margin-bottom: 4px; }
+.char-info { margin-bottom: 8px; min-width: 0; }
+.char-name { font-family: var(--font-family-serif); font-size: 16px; font-weight: 700; color: var(--text-color-primary); margin-bottom: 2px; }
+.char-identity { font-size: 12px; color: var(--text-color-tertiary); display: block; margin-bottom: 6px; }
 .char-status {
-  font-size: 11px; padding: 1px 6px; border-radius: 100px;
+  font-size: 11px; padding: 1px 8px; border-radius: 100px;
   display: inline-block;
+  border: 1px solid currentColor;
 }
-.status-活跃 { background: #e8f5e9; color: #2e7d32; }
-.status-退场 { background: #fff3e0; color: #e65100; }
-.status-死亡 { background: #fce4ec; color: #c62828; }
-.status-失踪 { background: #e3f2fd; color: #1565c0; }
+.status-活跃 { color: var(--color-success); background: color-mix(in srgb, var(--color-success) 9%, transparent); }
+.status-退场 { color: var(--color-warning); background: color-mix(in srgb, var(--color-warning) 9%, transparent); }
+.status-死亡 { color: var(--color-error); background: color-mix(in srgb, var(--color-error) 9%, transparent); }
+.status-失踪 { color: var(--color-accent); background: var(--color-accent-light); }
 
-.char-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+.char-tags { grid-column: 2; display: flex; gap: 4px; flex-wrap: wrap; }
 .char-tag {
-  font-size: 11px; padding: 1px 6px; border-radius: 4px;
-  background: var(--bg-color-secondary); color: var(--text-color-tertiary);
+  font-size: 11px; padding: 1px 8px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-color-tag); color: var(--text-color-secondary);
 }
 
 /* 详情面板 */
 .detail-panel { display: flex; flex-direction: column; gap: 14px; }
 .detail-avatar {
-  width: 64px; height: 64px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 28px; font-weight: 700; color: #fff;
+  width: 72px; height: 72px;
+  font-size: 32px;
   margin: 0 auto 8px;
 }
-.detail-field label { font-size: 12px; font-weight: 600; color: var(--text-color-tertiary); display: block; margin-bottom: 2px; }
+.detail-field {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-color-light);
+}
+.detail-field:last-of-type { border-bottom: 0; }
+.detail-field label { font-family: var(--font-family-serif); font-size: 13px; font-weight: 700; color: var(--text-color-primary); display: block; margin-bottom: 4px; }
 .detail-field p { font-size: 13px; color: var(--text-color-secondary); line-height: 1.6; margin: 0; }
 .relation-item { font-size: 13px; margin-bottom: 4px; }
 .detail-field ul { margin: 0; padding-left: 16px; font-size: 13px; color: var(--text-color-secondary); }
@@ -799,8 +826,9 @@ watch(() => themeStore.currentTheme, () => { if (viewMode.value === 'graph') nex
   display: block;
   margin: 0 auto;
   height: auto;
-  border-radius: var(--radius-md);
-  background: var(--bg-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--bg-color-paper);
 }
 .graph-legend, .graph-node-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; font-size: 12px; }
 .relationship-form-row { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(100px, 1fr) auto; gap: 6px; }

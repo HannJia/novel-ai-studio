@@ -21,7 +21,7 @@ import type { ChatSearchRecord } from '@/types/chat'
 
 const props = defineProps<{ record?: ChatSearchRecord }>()
 const statusLabel = computed(() => {
-  if (props.record?.status === 'searched') return props.record.sources.length ? '🌐 接口已返回搜索来源' : '🌐 搜索已执行，未提供可引用来源'
+  if (props.record?.status === 'searched') return props.record.sources.length ? '接口已返回搜索来源' : '搜索已执行，未提供可引用来源'
   return props.record?.status === 'not-used'
     ? '本轮未执行搜索；此回答并非实时核实结果'
     : '未收到可验证的搜索证据；接口可能忽略了联网参数'

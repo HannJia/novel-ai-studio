@@ -1,7 +1,7 @@
 <template>
   <div v-if="visible" class="exit-dialog-overlay" @click.self="handleCancel">
     <div class="exit-dialog" role="dialog" aria-labelledby="exit-title" aria-describedby="exit-detail">
-      <div class="exit-dialog-icon">⚠️</div>
+      <div class="exit-dialog-icon seal">退</div>
       <h2 id="exit-title" class="exit-dialog-title">保存未完成</h2>
       <p class="exit-dialog-message">关闭前保存未完成，是否仍然退出？</p>
       <p id="exit-detail" class="exit-dialog-detail">{{ errorDetail }}</p>

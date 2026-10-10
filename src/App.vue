@@ -39,7 +39,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { NConfigProvider, NMessageProvider, NDialogProvider, NIcon, darkTheme, zhCN, dateZhCN } from 'naive-ui'
 import { CloseOutline } from '@vicons/ionicons5'
 import AppHeader from '@/components/AppHeader.vue'
@@ -52,7 +52,7 @@ import { projectTransferBusy } from '@/services/projectTransfer'
 import { useThemeStore } from '@/stores/theme'
 
 const themeStore = useThemeStore()
-const isDark = themeStore.isDark
+const isDark = computed(() => themeStore.isDark)
 const settingsOpen = ref(false)
 
 onMounted(() => {
