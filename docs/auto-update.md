@@ -12,6 +12,8 @@ Windows 安装版从 1.0.2 开始支持自动检查和手动检查。1.0.0 / 1.0
 
 ## 维护者发布
 
+日常源码同步和自动备份使用私有开发仓库 `HannJia/novel-ai-studio-dev`（本地远程名 `origin`）；正式版本继续发布到公开仓库 `HannJia/novel-ai-studio`（本地远程名 `public`）。创建 Release 时显式指定公开仓库；不要根据默认远程推断发布目标。安装包的 `build.publish` 和客户端更新 URL 保持原有公开仓库不变。跨电脑设置见 [开发同步与自动备份](development-sync.md)。
+
 项目约定：用户说“更新 / 上传到 GitHub”时，默认包括源码、Windows 安装包、更新说明及校验文件，并将规范版本号的补丁位增加一（例如 `1.0.4` → `1.0.5`）。用户明确要求仅上传源码、不打包或指定其他版本号时，以该次说明为准；普通开发任务不自动打包发布。
 
 1. 使用标准版本号，例如 `1.0.3`。同步 `package.json`、`package-lock.json` 顶层及根包版本，更新 `CHANGELOG.md`、首页版本和对应发布说明。
@@ -27,7 +29,7 @@ npm run test:electron:packaged
 node scripts/audit-release.cjs
 ```
 
-3. 将源码提交上传到本仓库，为该提交创建对应 `v1.0.3` 标签。
+3. 将正式版本源码提交显式推送到 `public` 远程（`git push public main`），为该提交创建对应 `v1.0.3` 标签并单独推送该标签（`git push public v1.0.3`）。不要把开发快照分支上传到公开仓库。
 4. 先创建 GitHub Release 草稿，上传同一次构建产生的文件：
 
 | 文件 | 用途 |

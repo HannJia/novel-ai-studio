@@ -1,5 +1,17 @@
 # Release Preferences
 
+- Daily development, cross-computer sync, and automatic backups use the private
+  `HannJia/novel-ai-studio-dev` repository (`origin`). These requests are source-only
+  and do not authorize a version bump, packaging, or public release.
+- The existing public `HannJia/novel-ai-studio` repository is named `public` locally
+  and remains the destination for formal releases and application updates.
+  Keep `build.publish` and client update URLs pointed at that public repository.
+- Explicitly select `public` when pushing formal release commits/tags and
+  `HannJia/novel-ai-studio` when creating GitHub Releases. Never publish backup
+  branches or use `--all` / `--mirror` when pushing to the public repository.
+- Cross-computer setup and backup behavior are documented in
+  `docs/development-sync.md`.
+
 - When the user asks to update or upload this project to GitHub, default to a
   complete release: commit and push the source, increment the semantic patch
   version by one (for example, 1.0.4 to 1.0.5), build the Windows x64 installer,
