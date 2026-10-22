@@ -17,6 +17,7 @@ export interface ModelConfig {
   topP: number
   contextWindow?: number // 模型上下文窗口大小（token 数），用于动态分配上下文
   chatSearchProtocol?: ChatSearchProtocol // 仅影响书内/灵感对话的联网请求
+  kind?: 'chat' | 'embedding' // 模型用途类型；省略时默认为 chat
 }
 
 // 模型用途映射
@@ -25,6 +26,7 @@ export interface ModelAssignments {
   writing: string    // 写作模型 ID
   review: string     // 审查模型 ID
   chat: string       // 对话 / 联网模型 ID；空值动态跟随大纲模型
+  embedding?: string // 向量模型 ID；可选，向后兼容
 }
 
 export interface EmbeddingConfig {
@@ -35,7 +37,7 @@ export interface EmbeddingConfig {
   batchSize: number
 }
 
-interface ConfigData {
+export interface ConfigData {
   models: ModelConfig[]
   assignments: Partial<ModelAssignments>
   embedding?: Partial<EmbeddingConfig>
@@ -159,6 +161,24 @@ const DEFAULT_EMBEDDING_CONFIG: EmbeddingConfig = {
   batchSize: 16,
 }
 
+function migrateLegacyEmbedding(data: ConfigData): ConfigData {
+  // An explicitly cleared assignment must stay cleared; only old files lack this field.
+  if (Object.prototype.hasOwnProperty.call(data.assignments || {}, 'embedding')) return data
+  const e = data.embedding
+  const explicit = e && (e.enabled || e.apiKey?.trim()
+    || (e.baseUrl && e.baseUrl !== DEFAULT_EMBEDDING_CONFIG.baseUrl)
+    || (e.modelName && e.modelName !== DEFAULT_EMBEDDING_CONFIG.modelName))
+  if (!explicit) return data
+  const baseUrl = e.baseUrl || DEFAULT_EMBEDDING_CONFIG.baseUrl
+  const modelName = e.modelName || DEFAULT_EMBEDDING_CONFIG.modelName
+  const match = data.models.find(m => m.kind === 'embedding' && m.baseUrl === baseUrl && m.modelName === modelName && m.apiKey === (e.apiKey || ''))
+  if (match) return { ...data, assignments: { ...data.assignments, embedding: match.id } }
+  let id = 'embedding-legacy'
+  for (let suffix = 1; data.models.some(m => m.id === id); suffix++) id = 'embedding-legacy-' + suffix
+  const model: ModelConfig = { id, name: '资料检索', kind: 'embedding', baseUrl, modelName, apiKey: e.apiKey || '', maxTokens: 8192, temperature: 0, topP: 1 }
+  return { ...data, models: [...data.models, model], assignments: { ...data.assignments, embedding: id } }
+}
+
 function mergeSkills(saved: WritingSkill[] | undefined): WritingSkill[] {
   const builtIns = createBuiltInSkills()
   const savedById = new Map((saved || []).map(skill => [skill.id, skill]))
@@ -177,6 +197,7 @@ export const useConfigStore = defineStore('config', () => {
     writing: '',
     review: '',
     chat: '',
+    embedding: '',
   })
   const embedding = reactive<EmbeddingConfig>({ ...DEFAULT_EMBEDDING_CONFIG })
   const skills = ref<WritingSkill[]>(createBuiltInSkills())
@@ -193,21 +214,29 @@ export const useConfigStore = defineStore('config', () => {
   const isInitialized = ref(false)
   let saveQueue: Promise<void> = Promise.resolve()
 
-  function applyConfig(data: ConfigData | null) {
+  function applyConfig(input: ConfigData | null) {
+    const data = input ? migrateLegacyEmbedding(input) : null
     models.value = data?.models || []
-    Object.assign(assignments, {
-      outline: '',
-      writing: '',
-      review: '',
-      chat: '',
-      ...(data?.assignments || {}),
-    })
-    if (!models.value.some(model => model.id === assignments.chat)) assignments.chat = ''
+    Object.assign(assignments, { outline: '', writing: '', review: '', chat: '', embedding: '', ...(data?.assignments || {}) })
+    for (const task of ['outline', 'writing', 'review', 'chat'] as const) {
+      if (assignments[task] && !models.value.some(m => m.id === assignments[task] && m.kind !== 'embedding')) assignments[task] = ''
+    }
     Object.assign(embedding, DEFAULT_EMBEDDING_CONFIG, data?.embedding || {})
+    syncEmbeddingConnection()
     skills.value = mergeSkills(data?.skills)
     aiWorkflowMode.value = normalizeAiWorkflowMode(data?.aiWorkflowMode)
     pdfVisionEnabled.value = data?.pdfVisionEnabled === true
-    isConfigured.value = models.value.length > 0
+    isConfigured.value = models.value.some(m => m.kind !== 'embedding')
+  }
+
+  function syncEmbeddingConnection() {
+    const model = models.value.find(m => m.id === assignments.embedding && m.kind === 'embedding')
+    if (model) {
+      Object.assign(embedding, { baseUrl: model.baseUrl, apiKey: model.apiKey, modelName: model.modelName })
+    } else {
+      assignments.embedding = ''
+      Object.assign(embedding, { enabled: false, baseUrl: DEFAULT_EMBEDDING_CONFIG.baseUrl, apiKey: '', modelName: DEFAULT_EMBEDDING_CONFIG.modelName })
+    }
   }
 
   function readLocalConfig(): ConfigData | null {
@@ -278,8 +307,8 @@ export const useConfigStore = defineStore('config', () => {
     }
   }
 
-  async function saveConfig() {
-    const data: ConfigData = {
+  function exportConfig(): ConfigData {
+    return {
       models: JSON.parse(JSON.stringify(models.value)),
       assignments: { ...assignments },
       embedding: { ...embedding },
@@ -287,7 +316,9 @@ export const useConfigStore = defineStore('config', () => {
       aiWorkflowMode: aiWorkflowMode.value,
       pdfVisionEnabled: pdfVisionEnabled.value,
     }
-    const write = async () => {
+  }
+
+  async function persistConfig(data: ConfigData) {
       if (hasElectronConfig()) {
         if (securityStatus.encryptionAvailable) {
           await window.electronAPI!.configWrite(JSON.stringify(await encryptConfig(data)))
@@ -302,11 +333,40 @@ export const useConfigStore = defineStore('config', () => {
         writeSessionSecrets(data)
         localStorage.setItem(STORAGE_KEY, JSON.stringify(redactConfigSecrets(data)))
       }
+  }
+
+  async function saveConfig() {
+    const data = exportConfig()
+    const write = () => persistConfig(data)
+    const next = saveQueue.then(write, write)
+    saveQueue = next.catch(() => undefined)
+    await next
+    isConfigured.value = models.value.some(model => model.kind !== 'embedding')
+  }
+
+  // Persist before exposing restored settings to running UI/tasks. Existing save
+  // operations and imports share one queue, so a pending save cannot undo import.
+  async function importConfig(data: ConfigData, stillCurrent: () => boolean) {
+    const candidate = JSON.parse(JSON.stringify(data)) as ConfigData
+    const before = JSON.stringify(exportConfig())
+    const write = async () => {
+      if (!stillCurrent() || JSON.stringify(exportConfig()) !== before) throw new Error('本机配置已变化，请重新比较后恢复。')
+      try { await persistConfig(candidate) }
+      catch (cause) {
+        // A write can fail after an OS-config write but before local migration
+        // cleanup. Restore the current snapshot where storage still permits it.
+        try { await persistConfig(exportConfig()) } catch { /* In-memory original remains available. */ }
+        throw cause
+      }
+      if (!stillCurrent() || JSON.stringify(exportConfig()) !== before) {
+        await persistConfig(exportConfig())
+        throw new Error('恢复期间本机配置或账号已变化，已保留本机配置。')
+      }
+      applyConfig(candidate)
     }
     const next = saveQueue.then(write, write)
     saveQueue = next.catch(() => undefined)
     await next
-    isConfigured.value = models.value.length > 0
   }
 
   // 添加模型配置
@@ -317,11 +377,22 @@ export const useConfigStore = defineStore('config', () => {
     }
     models.value.push(model)
 
-    // 首个模型分配给原有用途；对话保持空值，以后仍动态跟随大纲
-    if (models.value.length === 1) {
-      assignments.outline = model.id
-      assignments.writing = model.id
-      assignments.review = model.id
+    const kind = model.kind || 'chat'
+    if (kind === 'chat') {
+      const firstChat = models.value.filter(m => (m.kind || 'chat') === 'chat').length === 1
+      if (firstChat) {
+        assignments.outline = model.id
+        assignments.writing = model.id
+        assignments.review = model.id
+      }
+    } else if (kind === 'embedding') {
+      const firstEmbedding = models.value.filter(m => m.kind === 'embedding').length === 1
+      if (firstEmbedding && !assignments.embedding) {
+        assignments.embedding = model.id
+        embedding.baseUrl = model.baseUrl
+        embedding.apiKey = model.apiKey
+        embedding.modelName = model.modelName
+      }
     }
 
     saveConfig()
@@ -332,19 +403,48 @@ export const useConfigStore = defineStore('config', () => {
   function updateModel(id: string, updates: Partial<ModelConfig>) {
     const model = models.value.find(m => m.id === id)
     if (model) {
+      const kindChanged = updates.kind !== undefined && updates.kind !== model.kind
       Object.assign(model, updates)
+      if (kindChanged) {
+        const newKind = model.kind || 'chat'
+        if (newKind === 'chat' && assignments.embedding === id) {
+          assignments.embedding = ''
+          embedding.enabled = false
+          embedding.baseUrl = DEFAULT_EMBEDDING_CONFIG.baseUrl
+          embedding.apiKey = ''
+          embedding.modelName = DEFAULT_EMBEDDING_CONFIG.modelName
+        } else if (newKind === 'embedding') {
+          if (assignments.outline === id) assignments.outline = models.value.find(m => m.id !== id && (m.kind || 'chat') === 'chat')?.id || ''
+          if (assignments.writing === id) assignments.writing = models.value.find(m => m.id !== id && (m.kind || 'chat') === 'chat')?.id || ''
+          if (assignments.review === id) assignments.review = models.value.find(m => m.id !== id && (m.kind || 'chat') === 'chat')?.id || ''
+          if (assignments.chat === id) assignments.chat = ''
+        }
+      }
+      if (assignments.embedding === id && (model.kind || 'chat') === 'embedding') {
+        embedding.baseUrl = model.baseUrl
+        embedding.apiKey = model.apiKey
+        embedding.modelName = model.modelName
+      }
       saveConfig()
     }
   }
 
   // 删除模型配置
   function deleteModel(id: string) {
+    const wasEmbedding = assignments.embedding === id
     models.value = models.value.filter(m => m.id !== id)
-    // 清理分配引用
-    if (assignments.outline === id) assignments.outline = models.value[0]?.id || ''
-    if (assignments.writing === id) assignments.writing = models.value[0]?.id || ''
-    if (assignments.review === id) assignments.review = models.value[0]?.id || ''
+    const firstChat = models.value.find(m => (m.kind || 'chat') === 'chat')
+    if (assignments.outline === id) assignments.outline = firstChat?.id || ''
+    if (assignments.writing === id) assignments.writing = firstChat?.id || ''
+    if (assignments.review === id) assignments.review = firstChat?.id || ''
     if (assignments.chat === id) assignments.chat = ''
+    if (wasEmbedding) {
+      assignments.embedding = ''
+      embedding.enabled = false
+      embedding.baseUrl = DEFAULT_EMBEDDING_CONFIG.baseUrl
+      embedding.apiKey = ''
+      embedding.modelName = DEFAULT_EMBEDDING_CONFIG.modelName
+    }
     saveConfig()
   }
 
@@ -352,19 +452,54 @@ export const useConfigStore = defineStore('config', () => {
   function getModelForTask(task: keyof ModelAssignments): ModelConfig | null {
     const modelId = assignments[task]
     if (task === 'chat') {
-      return models.value.find(m => m.id === modelId) || getModelForTask('outline')
+      return models.value.find(m => m.id === modelId && m.kind !== 'embedding') || getModelForTask('outline')
     }
-    return models.value.find(m => m.id === modelId) || models.value[0] || null
+    if (task === 'embedding') {
+      const model = models.value.find(m => m.id === modelId)
+      return model && model.kind === 'embedding' ? model : null
+    }
+    const candidate = models.value.find(m => m.id === modelId)
+    if (candidate && candidate.kind !== 'embedding') return candidate
+    return models.value.find(m => (m.kind || 'chat') === 'chat') || null
   }
 
   // 更新模型分配
   function setAssignment(task: keyof ModelAssignments, modelId: string) {
-    assignments[task] = modelId
+    const model = models.value.find(m => m.id === modelId)
+    if (modelId && !model) return
+    const kind = model?.kind || 'chat'
+    if (task === 'embedding') {
+      if (modelId && kind !== 'embedding') return
+      assignments.embedding = modelId
+      if (model && kind === 'embedding') {
+        embedding.baseUrl = model.baseUrl
+        embedding.apiKey = model.apiKey
+        embedding.modelName = model.modelName
+      } else {
+        embedding.enabled = false
+        embedding.baseUrl = DEFAULT_EMBEDDING_CONFIG.baseUrl
+        embedding.apiKey = ''
+        embedding.modelName = DEFAULT_EMBEDDING_CONFIG.modelName
+      }
+    } else {
+      if (modelId && kind === 'embedding') return
+      assignments[task] = modelId
+    }
     saveConfig()
   }
 
   function updateEmbeddingConfig(updates: Partial<EmbeddingConfig>) {
     Object.assign(embedding, updates)
+    const selected = getModelForTask('embedding')
+    const hasConnectionUpdate = ['baseUrl', 'modelName', 'apiKey'].some(key => Object.prototype.hasOwnProperty.call(updates, key))
+    if (selected && hasConnectionUpdate) {
+      Object.assign(selected, { baseUrl: embedding.baseUrl, apiKey: embedding.apiKey, modelName: embedding.modelName })
+    } else if (!selected && hasConnectionUpdate) {
+      const data = exportConfig()
+      delete data.assignments.embedding
+      applyConfig(data)
+    }
+    syncEmbeddingConnection()
     void saveConfig()
   }
 
@@ -431,6 +566,8 @@ export const useConfigStore = defineStore('config', () => {
     isInitialized,
     loadConfig,
     saveConfig,
+    exportConfig,
+    importConfig,
     addModel,
     updateModel,
     deleteModel,

@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { shallowMount, flushPromises } from '@vue/test-utils'
 import AppUpdatePanel from './AppUpdatePanel.vue'
+import AppUpdateNotice from './AppUpdateNotice.vue'
+import type { Component } from 'vue'
+import { NSwitch } from 'naive-ui'
 import { useAppUpdateStore } from '@/stores/appUpdate'
 import { appUpdateInstalling } from '@/services/appLifecycle'
 import type { AppUpdateState } from '@/types/update'
@@ -10,14 +13,14 @@ import type { AppUpdateState } from '@/types/update'
 const dialog = vi.hoisted(() => ({ warning: vi.fn() }))
 vi.mock('naive-ui', async importOriginal => ({ ...await importOriginal<object>(), useDialog: () => dialog }))
 const base: AppUpdateState = {
-  supported: true, currentVersion: '1.0.2', phase: 'available', autoCheck: true, error: '', checkedAt: '',
+  supported: true, currentVersion: '1.0.2', phase: 'available', autoCheck: false, error: '', checkedAt: '',
   release: { version: '1.0.3', url: 'https://github.com/HannJia/novel-ai-studio/releases/tag/v1.0.3',
     notes: '<script>unsafe()</script>\n修复问题', publishedAt: '', canDownload: true },
   percent: 0, total: 0, transferred: 0, bytesPerSecond: 0, revision: 1,
 }
 const mounted: ReturnType<typeof shallowMount>[] = []
-function mount() {
-  const wrapper = shallowMount(AppUpdatePanel, { global: { renderStubDefaultSlot: true, stubs: {
+function mount(component: Component = AppUpdatePanel) {
+  const wrapper = shallowMount(component, { global: { renderStubDefaultSlot: true, stubs: {
     Button: { props: ['disabled'], emits: ['click'], template: '<button :disabled="disabled" @click="$emit(\'click\')"><slot /></button>' },
   } } })
   mounted.push(wrapper)
@@ -49,6 +52,61 @@ afterEach(() => {
   appUpdateInstalling.value = false
 })
 describe('update settings and notifications', () => {
+  it('shows downloaded notes without opening a dialog, and keeps installation available after choosing later', async () => {
+    const { bridge } = mockBridge({ ...base, phase: 'downloaded', autoCheck: true })
+    const notice = mount(AppUpdateNotice)
+    const panel = mount()
+    await flushPromises()
+    expect(notice.text()).toContain('更新已准备好')
+    expect(notice.get('.ready-notes').text()).toContain('<script>unsafe()</script>')
+    expect(notice.find('script').exists()).toBe(false)
+    expect(dialog.warning).not.toHaveBeenCalled()
+    expect(bridge.updateInstall).not.toHaveBeenCalled()
+    await notice.findAll('button').find(button => button.text() === '稍后')!.trigger('click')
+    expect(notice.find('.update-ready-card').exists()).toBe(false)
+    await panel.findAll('button').find(button => button.text() === '安装并重启')!.trigger('click')
+    expect(bridge.updateInstall).not.toHaveBeenCalled()
+    dialog.warning.mock.calls[0][0].onPositiveClick()
+    await flushPromises()
+    expect(bridge.updateInstall).toHaveBeenCalledOnce()
+  })
+  it('uses the shared confirmation for the ready card and surfaces save failures without reinstalling', async () => {
+    const { bridge, emit } = mockBridge({ ...base, phase: 'downloaded' })
+    const notice = mount(AppUpdateNotice)
+    await flushPromises()
+    await notice.findAll('button').find(button => button.text() === '安装并重启')!.trigger('click')
+    expect(dialog.warning).toHaveBeenCalledOnce()
+    expect(bridge.updateInstall).not.toHaveBeenCalled()
+    dialog.warning.mock.calls[0][0].onPositiveClick()
+    await flushPromises()
+    emit({ ...base, phase: 'downloaded', error: '正文尚未保存', revision: 5 })
+    await flushPromises()
+    expect(notice.get('[role="alert"]').text()).toContain('正文尚未保存')
+    expect(bridge.updateInstall).toHaveBeenCalledOnce()
+    expect(useAppUpdateStore().detailsOpen).toBe(false)
+  })
+  it('suppresses the automatic download transition notice while retaining incomplete release and error notices', async () => {
+    const { emit } = mockBridge({ ...base, autoCheck: true })
+    const notice = mount(AppUpdateNotice)
+    await flushPromises()
+    expect(useAppUpdateStore().showNotice).toBe(false)
+    emit({ ...base, autoCheck: true, release: { ...base.release!, canDownload: false }, revision: 2 })
+    await flushPromises()
+    expect(notice.text()).toContain('发现新版本')
+    emit({ ...base, phase: 'error', error: '网络暂不可用', revision: 3 })
+    await flushPromises()
+    expect(notice.text()).toContain('更新检查或下载未完成')
+  })
+  it('allows disabling automatic updates while a metadata check is in flight', async () => {
+    const { bridge } = mockBridge({ ...base, phase: 'checking', autoCheck: true })
+    const panel = mount()
+    await flushPromises()
+    const toggle = panel.findComponent(NSwitch)
+    expect(toggle.props('disabled')).toBe(false)
+    toggle.vm.$emit('update:value', false)
+    await flushPromises()
+    expect(bridge.updateSetAutoCheck).toHaveBeenCalledWith(false)
+  })
   it('surfaces automatic check failures without pretending no newer version exists', async () => {
     mockBridge({ ...base, phase: 'error', release: null, error: '无法连接更新服务' })
     const wrapper = mount()

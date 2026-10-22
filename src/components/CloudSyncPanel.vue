@@ -1,15 +1,13 @@
 <template>
-  <section class="settings-section paper-panel cloud-panel" id="cloud-sync-panel">
+  <section class="cloud-panel cloud-page" id="cloud-sync-panel">
     <div class="cloud-heading">
-      <h3><n-icon :size="20"><cloud-outline /></n-icon>云同步</h3>
+      <div><h2>云同步</h2><p class="cloud-page-subtitle">在不同设备间继续创作。</p></div>
       <span class="cloud-state" :class="{ problem: sync.error || sync.pendingConflicts.length }" role="status">{{ sync.statusText }}</span>
     </div>
     <p v-if="feedback" class="cloud-feedback" role="alert">{{ feedback }}</p>
     <p v-if="sync.error" class="cloud-feedback" role="alert">{{ sync.error }}</p>
-    <p v-if="isWebBrowser && sync.error" class="cloud-note" style="background: #fff3cd; padding: 0.75rem; border-radius: 4px; margin-top: 0.5rem;">
-      <strong>浏览器版限制：</strong>由于浏览器的跨域安全策略（CORS），云同步功能仅在桌面版中可用。如需使用云同步，请下载并安装桌面版应用。
-    </p>
     <template v-if="!sync.session">
+      <div class="cloud-auth-card paper-panel">
       <n-radio-group v-model:value="mode" name="cloud-auth-mode" size="small">
         <n-radio-button value="login">登录</n-radio-button>
         <n-radio-button value="register">邀请码注册</n-radio-button>
@@ -26,33 +24,52 @@
           {{ mode === 'login' ? '登录' : mode === 'register' ? '注册账号' : '重置密码' }}
         </n-button>
       </form>
-      <p v-if="sync.state.binding" class="cloud-note">本机书架绑定账号：{{ sync.state.binding.username }}</p>
+      </div>
     </template>
     <template v-else>
-      <div class="cloud-account">
+      <section class="cloud-account-card paper-panel"><h3>个人账户</h3>
+      <div class="cloud-account"><span class="cloud-account-avatar" aria-hidden="true">{{ sync.session.user.username.slice(0, 1).toUpperCase() }}</span>
         <div><strong>{{ sync.session.user.username }}</strong><span class="cloud-role">{{ sync.session.user.role === 'admin' ? '管理员' : '个人账户' }}</span></div>
         <div class="cloud-controls">
           <n-button size="small" :disabled="sync.busy || working" @click="passwordDialog = true">修改密码</n-button>
           <n-button size="small" :disabled="sync.busy || working" @click="perform(() => sync.logout())">退出登录</n-button>
         </div>
       </div>
+      <div class="cloud-quota-track" role="progressbar" aria-label="云端空间已用比例" :aria-valuenow="Math.round(Math.min(100, sync.session.user.usedBytes / Math.max(1, sync.session.user.quotaBytes) * 100))" aria-valuemin="0" aria-valuemax="100"><span :style="{ width: Math.min(100, sync.session.user.usedBytes / Math.max(1, sync.session.user.quotaBytes) * 100) + '%' }"></span></div>
       <div class="cloud-details">
         <span>云端空间 {{ size(sync.session.user.usedBytes) }} / {{ size(sync.session.user.quotaBytes) }}</span>
         <span>上次同步：{{ sync.state.lastSync ? new Date(sync.state.lastSync).toLocaleString('zh-CN') : '尚未同步' }}</span>
       </div>
-      <label v-if="!sync.state.binding" class="cloud-consent">
-        <n-checkbox v-model:checked="consented" aria-label="同意将本机书架同步到当前账户">将本机小说及知识库同步到此账号</n-checkbox>
-      </label>
+      </section>
+      <section class="cloud-sync-settings paper-panel"><h3>同步设置</h3>
       <div class="cloud-controls">
-        <label class="cloud-toggle">自动同步<n-switch :value="sync.state.enabled" :disabled="working || sync.busy || (!sync.state.binding && !consented)" aria-label="自动云同步" @update:value="value => perform(() => sync.setEnabled(value))" /></label>
+        <label class="cloud-toggle">自动同步<n-switch :value="sync.state.enabled" :disabled="working || sync.busy" aria-label="自动云同步" @update:value="value => perform(() => sync.setEnabled(value))" /></label>
         <n-button :loading="sync.busy" :disabled="!sync.state.enabled || working" @click="sync.syncNow()">
           <template #icon><n-icon><sync-outline /></n-icon></template>立即同步
         </n-button>
       </div>
-      <p class="cloud-note">同步范围：小说、正文版本、剧情规划、资料记忆、书内对话、最近 5 个灵感会话及未发送草稿、知识库正文与摘要。API 密钥、原始上传文件及识别缓存仅保留在本机。</p>
-      <p class="cloud-note">启用后作品将发送至此服务器。当前不是端到端加密，服务器管理者可访问云端内容。请另外保留项目备份。</p>
+      <p class="cloud-note">首次开启先下载云端内容；本机独有作品可选择加入同步。同一内容在多台设备上均有改动时，将保留双方版本。</p>
       <p v-if="sync.pendingDownloads" class="cloud-note">有 {{ sync.pendingDownloads }} 项云端更新等待合并。</p>
-      <div v-if="sync.session.user.role === 'admin'" class="cloud-invites">
+      <CloudPreferencesPanel />
+      </section>
+      <div v-if="sync.pendingUploads?.length" class="cloud-invites cloud-pending paper-panel">
+        <h4>待加入同步的内容</h4>
+        <p class="cloud-note">未选中的内容继续留在本机，不会自动上传。小说引用的本机知识库也需一起选中。</p>
+        <label v-for="item in sync.pendingUploads" :key="item.key" class="cloud-consent">
+          <n-checkbox :checked="selectedUploads.includes(item.key)" :disabled="working || sync.busy" @update:checked="value => selectUpload(item.key, value)">{{ kindLabel(item.kind) }}：{{ item.title }}</n-checkbox>
+        </label>
+        <n-button size="small" :disabled="!sync.state.enabled || !selectedUploads.length || working || sync.busy" @click="perform(async () => { await sync.approveUploads(selectedUploads); selectedUploads = [] })">将所选内容加入云同步</n-button>
+      </div>
+
+      <details class="cloud-explanation paper-panel">
+        <summary>同步说明</summary>
+        <p class="cloud-note">作品同步包含小说、正文版本、剧情规划、资料记忆、书内对话、最近 5 个灵感会话及草稿、知识库。模型配置与 API 密钥可在上方单独开启同步。</p>
+        <p class="cloud-note">PDF、图片等原始文件和 OCR 识别缓存仅保存在本机。</p>
+        <p class="cloud-note">作品同步不采用端到端加密，云同步服务管理方可访问云端内容。API 密钥在云端加密存储，加密密钥由同步服务管理。</p>
+        <p class="cloud-note">请妥善保管账号和恢复码，避免与他人共享账号。</p>
+        <p class="cloud-note">可定期导出项目备份，另存一份本机副本。</p>
+      </details>
+      <div v-if="sync.session.user.role === 'admin'" class="cloud-invites paper-panel">
         <h4>邀请注册</h4>
         <div class="cloud-controls">
           <label class="cloud-toggle">可用次数<n-input-number v-model:value="inviteUses" :min="1" :max="20" aria-label="邀请码使用次数" style="width: 110px" /></label>
@@ -66,7 +83,7 @@
       </div>
     </template>
     <div v-if="sync.pendingConflicts.length" class="cloud-conflicts">
-      <h4>待处理的版本冲突</h4>
+      <h4>选择要保留的版本</h4>
       <article v-for="conflict in sync.pendingConflicts" :key="conflict.id" class="cloud-conflict">
         <strong>{{ conflict.title }}</strong>
         <span class="cloud-note">{{ new Date(conflict.createdAt).toLocaleString('zh-CN') }}</span>
@@ -80,7 +97,7 @@
         </div>
       </article>
     </div>
-    <details v-if="archives.length" class="cloud-archives"><summary>已处理的冲突备份（{{ archives.length }}）</summary>
+    <details v-if="archives.length" class="cloud-archives"><summary>历史版本备份（{{ archives.length }}）</summary>
       <div v-for="conflict in archives" :key="conflict.id" class="cloud-archive">
         <span>{{ conflict.title }} · {{ new Date(conflict.createdAt).toLocaleString('zh-CN') }}</span>
         <n-button size="tiny" @click="perform(() => sync.exportConflict(conflict.id, 'local'))">导出本机版本</n-button>
@@ -109,12 +126,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { NButton, NCheckbox, NIcon, NInput, NInputNumber, NModal, NRadioButton, NRadioGroup, NSwitch, useDialog } from 'naive-ui'
-import { CloudOutline, CopyOutline, SyncOutline } from '@vicons/ionicons5'
+import { CopyOutline, SyncOutline } from '@vicons/ionicons5'
 import { useCloudSyncStore } from '@/stores/cloudSync'
+import CloudPreferencesPanel from './CloudPreferencesPanel.vue'
 
 const sync = useCloudSyncStore()
 const dialog = useDialog()
-const isWebBrowser = !window.electronAPI
 const mode = ref<'login' | 'register' | 'recover'>('login')
 const username = ref('')
 const password = ref('')
@@ -130,7 +147,10 @@ const invite = ref('')
 const recoveryInput = ref('')
 const recoveryCode = ref('')
 const working = ref(false)
-const consented = ref(false)
+const selectedUploads = ref<string[]>([])
+const kindLabel = (kind: string) => kind === 'novel' ? '小说' : kind === 'knowledge' ? '知识库' : '灵感会话'
+function selectUpload(key: string, value: boolean) { selectedUploads.value = value ? [...new Set([...selectedUploads.value, key])] : selectedUploads.value.filter(item => item !== key) }
+watch(() => sync.pendingUploads, items => { selectedUploads.value = selectedUploads.value.filter(key => items?.some(item => item.key === key)) })
 const feedback = ref('')
 const inviteUses = ref<number | null>(1)
 const createdInvite = ref('')
@@ -234,6 +254,7 @@ summary { cursor:pointer; padding:8px 0; }
 .cloud-consent { display:block; margin-bottom:12px; }
 .cloud-toggle { font-size:13px; }
 .cloud-note { margin:12px 0; line-height:1.6; }
+.cloud-explanation { margin-top:12px; font-size:12px; color:var(--text-color-secondary); }
 .cloud-invites,.cloud-conflicts,.cloud-archives { margin-top:20px; padding-top:14px; border-top:1px solid var(--border-color-light); }
 h4 { font-size:14px; margin:0 0 12px; }
 .cloud-secret { margin-top:12px; padding:10px 0; overflow-wrap:anywhere; }
@@ -248,4 +269,23 @@ h4 { font-size:14px; margin:0 0 12px; }
 .cloud-archive > span { flex:1 1 180px; font-size:12px; overflow-wrap:anywhere; }
 :global(.cloud-recovery-modal) { width:min(520px,calc(100vw - 32px)); }
 @media (max-width:600px) { .cloud-form,.cloud-versions { grid-template-columns:minmax(0,1fr); } }
+
+.cloud-page { display: flex; flex-direction: column; gap: 20px; padding: 0; }
+.cloud-heading { margin-bottom: 4px; }
+.cloud-heading h2 { margin: 0; font-size: 30px; }
+.cloud-page-subtitle { margin-top: 6px; font-size: 14px; color: var(--text-color-secondary); }
+.cloud-account-card, .cloud-sync-settings, .cloud-auth-card { padding: 24px; }
+.cloud-account-card > h3, .cloud-sync-settings > h3 { font-size: 21px; margin: 0 0 20px; }
+.cloud-account { gap: 16px; }
+.cloud-account strong { font-size: 18px; }
+.cloud-account > .cloud-controls { margin-left: auto; }
+.cloud-account-avatar { width: 48px; height: 48px; display: grid; place-items: center; background: var(--color-accent); color: var(--text-color-inverse); border-radius: 50%; font-size: 24px; }
+.cloud-quota-track { height: 5px; background: var(--progress-track); margin-top: 22px; border-radius: 8px; overflow: hidden; }
+.cloud-quota-track > span { display: block; min-width: 2px; height: 100%; background: var(--color-accent); }
+.cloud-details { margin-bottom: 0; justify-content: space-between; }
+.cloud-sync-settings > .cloud-controls { justify-content: space-between; }
+.cloud-sync-settings .cloud-toggle { flex: 1; justify-content: space-between; padding-right: 20px; }
+.cloud-invites.paper-panel { margin-top: 0; padding: 24px; }
+.cloud-explanation.paper-panel { margin-top: 0; padding: 8px 20px; }
+@media (max-width: 600px) { .cloud-account-card, .cloud-sync-settings, .cloud-auth-card { padding: 18px; } .cloud-account > .cloud-controls { margin-left: 0; } }
 </style>

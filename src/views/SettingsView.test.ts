@@ -51,6 +51,63 @@ afterEach(async () => {
 })
 
 describe('模型原始名称与配置备注', () => {
+  it('combines about and updates, and highlights the real workflow limits', async () => {
+    const wrapper = mountSettings()
+    const tabs = wrapper.findAll('.settings-nav-item')
+    expect(tabs.map(tab => tab.text())).toEqual(['云同步', '模型配置', 'AI 工作流', '语义检索', '写作技能', '关于与更新'])
+    await tabs[5].trigger('click')
+    expect(wrapper.get('.about-section').isVisible()).toBe(true)
+    expect(wrapper.get('.about-update').text()).toContain('软件更新')
+    useConfigStore().aiWorkflowMode = 'balanced'
+    await flushPromises()
+    expect(wrapper.findAll('.workflow-rounds-value').map(node => node.text())).toEqual(['2 轮', '2 轮'])
+    useConfigStore().aiWorkflowMode = 'strict'
+    await flushPromises()
+    expect(wrapper.findAll('.workflow-rounds-value').map(node => node.text())).toEqual(['3 轮', '3 轮'])
+  })
+  it('adds a local embedding model through the inline editor without requiring a key', async () => {
+    const store = useConfigStore()
+    const wrapper = mountSettings()
+    await wrapper.get('#add-model-btn').trigger('click')
+    const kind = wrapper.findAllComponents({ name: 'Select' }).find(item => item.attributes('aria-label') === '模型类型')!
+    kind.vm.$emit('update:value', 'embedding')
+    await flushPromises()
+    await wrapper.get('input[placeholder="如：https://api.deepseek.com"]').setValue('http://127.0.0.1:11434')
+    await wrapper.get(`input[placeholder="${modelPlaceholder}"]`).setValue('synthetic-vector')
+    expect(wrapper.findComponent(ModelSearchTest).exists()).toBe(false)
+    expect(wrapper.find('.model-advanced').exists()).toBe(false)
+    const add = wrapper.findAll('button').find(button => button.text() === '添加')!
+    expect(add.attributes('disabled')).toBeUndefined()
+    await add.trigger('click')
+    await flushPromises()
+    expect(store.models).toHaveLength(1)
+    expect(store.models[0]).toMatchObject({ kind: 'embedding', apiKey: '', modelName: 'synthetic-vector' })
+    expect(store.getModelForTask('writing')).toBeNull()
+    expect(store.embedding.enabled).toBe(false)
+  })
+
+  it('offers embedding models only to semantic retrieval and keeps unfinished edits across sections', async () => {
+    const chat = addLegacyModel()
+    const store = useConfigStore()
+    const vector = store.addModel({ name: '资料检索', kind: 'embedding', modelName: 'synthetic-vector', baseUrl: 'http://127.0.0.1:11434', apiKey: '', maxTokens: 4096, temperature: 0, topP: 1 })
+    const wrapper = mountSettings()
+    const semantic = wrapper.find('.embedding-assignment').findComponent({ name: 'Select' })
+    expect(semantic.props('options').map((option: { value: string }) => option.value)).toEqual(['', vector.id])
+    const chatOptions = wrapper.find('.chat-assignment').findComponent({ name: 'Select' }).props('options')
+    expect(chatOptions.some((option: { value: string }) => option.value === vector.id)).toBe(false)
+    await wrapper.findAll('.model-select')[0].trigger('click')
+    await wrapper.get(`input[placeholder="${aliasPlaceholder}"]`).setValue('未保存的配置备注')
+    const tabs = wrapper.findAll('.settings-nav-item')
+    await tabs[2].trigger('click')
+    await tabs[1].trigger('click')
+    expect(wrapper.get(`input[placeholder="${aliasPlaceholder}"]`).element).toHaveProperty('value', '未保存的配置备注')
+    expect(store.models.find(model => model.id === chat.id)?.name).not.toBe('未保存的配置备注')
+    expect(tabs).toHaveLength(6)
+    await tabs[1].trigger('keydown', { key: 'ArrowRight' })
+    expect(tabs[2].attributes('aria-selected')).toBe('true')
+    expect(wrapper.find('.retrieval-model-status').findAll('input')).toHaveLength(0)
+  })
+
   it('separates conversation and search tests and keeps the saved key when the edit field is blank', async () => {
     const model = addLegacyModel()
     const wrapper = mountSettings()

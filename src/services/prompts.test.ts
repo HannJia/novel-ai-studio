@@ -1,6 +1,22 @@
 import { describe, expect, it } from 'vitest'
-import { buildChapterAnalysisPrompt, buildChapterEndingCheckPrompt, buildChapterEndingContinuationPrompt } from './prompts'
+import { buildChapterAnalysisPrompt, buildChapterEndingCheckPrompt, buildChapterEndingContinuationPrompt, buildChapterPrompt, buildOutlinePrompt, buildVolumePlanningPrompt, buildChapterWritingPlanPrompt } from './prompts'
 import type { ChapterEndingCheck } from './chapterEnding'
+import { createPinia, setActivePinia } from 'pinia'
+import { useNovelStore } from '@/stores/novel'
+
+it('uses the same custom length policy in outline, volume, writing and beat planning', () => {
+  setActivePinia(createPinia())
+  const store = useNovelStore()
+  const book = store.addNovel({ genre: '', subGenre: '', tags: [], targetWordCountMin: 10, targetWordCountMax: 20, settings: store.defaultSettings(), writingStyle: store.defaultWritingStyle() })
+  book.chapterLengthPolicy = { minWords: 3000, targetWords: 3500, maxWords: 4000 }
+  for (const prompt of [buildOutlinePrompt(book), buildVolumePlanningPrompt(book), buildChapterPrompt(book, '', '', '', ''), buildChapterWritingPlanPrompt(book, '', '')]) {
+    const text = prompt.map(message => message.content).join('\n')
+    expect(text).toContain('3500')
+    expect(text).toContain('3000~4000')
+    expect(text).not.toContain('2000~2500')
+    expect(text).not.toContain('2000~2200')
+  }
+})
 
 describe('章节结构化分析 Prompt', () => {
   it('要求一次返回事件、角色、全书规划和数据变化', () => {

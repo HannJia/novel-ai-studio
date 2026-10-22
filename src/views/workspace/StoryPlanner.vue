@@ -28,7 +28,7 @@
       </n-button>
     </header>
 
-    <div class="planner-summary">
+    <section class="planner-overview" aria-label="规划概览"><div class="planner-summary">
       <span><strong>{{ activeArcCount }}</strong> 条活跃弧线</span>
       <span><strong>{{ pendingNodeCount }}</strong> 个待完成节点</span>
       <span><strong>{{ unresolvedEventCount }}</strong> 个待推进事件</span>
@@ -37,10 +37,10 @@
       <span><strong>{{ openPromises.length }}</strong> 条未兑现期待</span>
       <span><strong>{{ pendingProposalCount }}</strong> 条待审状态提案</span>
       <span><strong>{{ memoryRecordCount }}</strong> 条可检索记忆</span>
-    </div>
+    </div></section>
 
-    <n-tabs v-model:value="activeTab" type="line" animated>
-      <n-tab-pane name="volumes" tab="分卷规划">
+    <n-tabs v-model:value="activeTab" type="line" class="planner-tabs">
+      <n-tab-pane display-directive="show:lazy" name="volumes" tab="分卷规划">
         <VolumeOutline
           embedded
           :chapter-plan-confirmed="Boolean(novel?.chapterPlanConfirmed)"
@@ -48,24 +48,24 @@
         />
       </n-tab-pane>
 
-      <n-tab-pane name="plans" tab="章节计划">
-        <div class="plan-board">
-          <section v-for="lane in planLanes" :key="lane.horizon" class="plan-lane">
+      <n-tab-pane display-directive="show:lazy" name="plans" tab="章节计划">
+        <div class="plan-workbench"><div class="plan-board">
+          <section v-for="lane in planStatusLanes" :key="lane.status" class="plan-lane">
             <div class="plan-lane-header">
               <div>
                 <strong>{{ lane.label }}</strong>
                 <span>{{ lane.description }}</span>
               </div>
-              <n-tag size="small" round>{{ plansByHorizon[lane.horizon].length }}</n-tag>
+              <n-tag size="small" round>{{ plansByStatus(lane.status).length }}</n-tag>
             </div>
             <div class="plan-list">
-              <article v-for="plan in plansByHorizon[lane.horizon]" :key="plan.id" class="plan-card">
+              <article v-for="plan in plansByStatus(lane.status)" :key="plan.id" class="plan-card" :class="{ selected: selectedPlan?.id === plan.id }">
                 <div class="plan-card-header">
                   <div>
                     <n-tag size="small" :type="planStatusColor(plan.status)">{{ planStatusLabel(plan.status) }}</n-tag>
                     <span class="plan-range">{{ chapterRangeLabel(plan.targetChapterStart, plan.targetChapterEnd) }}</span>
                   </div>
-                  <div class="icon-actions">
+                  <details class="plan-card-menu"><summary aria-label="计划操作">⋯</summary><div class="icon-actions">
                     <n-button quaternary circle size="small" title="编辑计划" @click="openPlanModal(plan)">
                       <template #icon><n-icon><create-outline /></n-icon></template>
                     </n-button>
@@ -83,9 +83,9 @@
                       </template>
                       删除这条章节计划？
                     </n-popconfirm>
-                  </div>
+                  </div></details>
                 </div>
-                <h3>{{ plan.title }}</h3>
+                <button type="button" class="planning-select-title" :aria-pressed="selectedPlan?.id === plan.id" @click="selectedPlanId = plan.id">{{ plan.title }}</button>
                 <strong class="plan-objective">{{ plan.objective }}</strong>
                 <p>{{ plan.summary }}</p>
                 <ol v-if="plan.beats.length" class="plan-beats">
@@ -93,25 +93,35 @@
                 </ol>
                 <small>{{ plan.source === 'ai' ? 'AI 生成' : '手动创建' }}</small>
               </article>
-              <button v-if="plansByHorizon[lane.horizon].length === 0" class="empty-plan" @click="openPlanModal(undefined, lane.horizon)">
+              <button v-if="plansByStatus(lane.status).length === 0" class="empty-plan" @click="openPlanModal()">
                 <n-icon :size="20"><add-outline /></n-icon>
-                <span>添加{{ lane.label }}计划</span>
+                <span>新建计划</span>
               </button>
             </div>
           </section>
-        </div>
+        </div><aside v-if="selectedPlan" class="plan-selection-detail paper-panel">
+          <n-tag size="small" :type="planStatusColor(selectedPlan.status)">{{ planStatusLabel(selectedPlan.status) }}</n-tag><h3>{{ selectedPlan.title }}</h3>
+          <p>{{ chapterRangeLabel(selectedPlan.targetChapterStart, selectedPlan.targetChapterEnd) }}</p>
+          <section><h4>阶段目标</h4><p>{{ selectedPlan.objective }}</p></section>
+          <section v-if="selectedPlan.summary"><h4>推进说明</h4><p>{{ selectedPlan.summary }}</p></section>
+          <section v-if="selectedPlan.beats.length"><h4>写作节拍</h4><ol><li v-for="beat in selectedPlan.beats" :key="beat">{{ beat }}</li></ol></section>
+          <section v-if="selectedPlan.relatedArcIds.length"><h4>关联弧线</h4><p>{{ selectedPlan.relatedArcIds.map(id => sortedArcs.find(arc => arc.id === id)?.title).filter(Boolean).join('、') || '暂无对应弧线' }}</p></section>
+          <n-button @click="openPlanModal(selectedPlan)">编辑计划</n-button>
+        </aside></div>
+        <details v-if="closedPlans.length" class="closed-plans"><summary>已完成与已归档（{{ closedPlans.length }}）</summary><button v-for="plan in closedPlans" :key="plan.id" type="button" @click="selectedPlanId = plan.id">{{ plan.title }} · {{ planStatusLabel(plan.status) }}</button></details>
       </n-tab-pane>
 
-      <n-tab-pane name="relay" tab="剧情接力">
+      <n-tab-pane display-directive="show:lazy" name="relay" tab="剧情接力">
+        <div class="relay-workbench">
         <section class="relay-section">
           <div class="relay-heading">
             <h3>待核对计划</h3>
             <n-button v-if="latestCompletedChapter" text type="primary" :loading="scanningState" @click="scanChapterState()">检查最新章节</n-button>
           </div>
           <div v-if="awaitingPlans.length" class="relay-list">
-            <div v-for="plan in awaitingPlans" :key="plan.id" class="relay-row">
+            <div v-for="plan in awaitingPlans" :key="plan.id" class="relay-row" :class="{ selected: selectedRelayPlan?.id === plan.id }">
               <div class="relay-main">
-                <strong>{{ plan.title }}</strong>
+                <button type="button" class="planning-select-title" :aria-pressed="selectedRelayPlan?.id === plan.id" @click="selectedRelayId = plan.id">{{ plan.title }}</button>
                 <span>{{ chapterRangeLabel(plan.targetChapterStart, plan.targetChapterEnd) }} · {{ plan.objective }}</span>
               </div>
               <div class="relay-actions">
@@ -122,6 +132,16 @@
           </div>
           <n-empty v-else description="没有待核对的章节计划" />
         </section>
+        <section v-if="selectedRelayPlan" class="relay-selection paper-panel">
+          <h3>{{ selectedRelayPlan.title }}</h3><p>{{ chapterRangeLabel(selectedRelayPlan.targetChapterStart, selectedRelayPlan.targetChapterEnd) }}</p>
+          <section><h4>阶段目标</h4><p>{{ selectedRelayPlan.objective }}</p></section>
+          <section v-if="selectedRelayPlan.beats.length"><h4>计划要点</h4><ul><li v-for="beat in selectedRelayPlan.beats" :key="beat">{{ beat }}</li></ul></section>
+          <section v-if="selectedRelayPlan.summary"><h4>推进说明</h4><p>{{ selectedRelayPlan.summary }}</p></section>
+          <section v-if="relayChapter"><h4>关联章节</h4><strong>第 {{ relayChapter.chapterIndex + 1 }} 章 · {{ relayChapter.title }}</strong><p>{{ relayChapter.summary || '本章尚未整理摘要，可打开章节查看正文。' }}</p><n-button text type="primary" @click="router.push(`/workspace/${novelId}/editor/${relayChapter.id}`)">查看章节</n-button></section>
+          <div class="relay-detail-actions"><n-button type="primary" :loading="scanningState" @click="scanChapterState(selectedRelayPlan.targetChapterEnd, selectedRelayPlan.targetChapterStart)">AI 核对计划</n-button><n-button @click="openPlanModal(selectedRelayPlan)">手动核对</n-button></div>
+        </section>
+        <section v-else class="relay-selection paper-panel"><h3>剧情接力</h3><p>计划进入待核对后，可在这里对照正文继续推进故事。</p></section>
+        <div class="relay-context">
         <section class="relay-section">
           <div class="relay-heading">
             <h3>未兑现的期待</h3>
@@ -157,11 +177,13 @@
           </div>
           <n-empty v-else description="没有活跃弧线" />
         </section>
+        </div></div>
       </n-tab-pane>
 
-      <n-tab-pane name="arcs" tab="故事弧线">
-        <div v-if="sortedArcs.length" class="arc-list">
-          <article v-for="arc in sortedArcs" :key="arc.id" class="arc-card">
+      <n-tab-pane display-directive="show:lazy" name="arcs" tab="故事弧线">
+        <div v-if="sortedArcs.length" class="arc-workbench">
+          <div class="arc-selector"><button v-for="arc in sortedArcs" :key="arc.id" type="button" class="arc-selector-card paper-panel" :class="{ selected: selectedArc?.id === arc.id }" :aria-pressed="selectedArc?.id === arc.id" @click="selectedArcId = arc.id"><div><h3>{{ arc.title }}</h3><n-tag size="small" :type="arcTypeColor(arc.type)">{{ arcTypeLabel(arc.type) }}</n-tag></div><p>{{ arc.description || '暂未填写弧线描述' }}</p><div class="arc-node-track"><span v-for="node in arc.nodes" :key="node.id" :class="{ completed: node.status === 'completed' }"><i>{{ node.status === 'completed' ? '✓' : '·' }}</i><small>{{ node.title }}</small></span></div><span class="arc-selector-meta">{{ completedNodeCount(arc) }}/{{ arc.nodes.length }} 个节点已完成 · {{ arcStatusLabel(arc.status) }}</span></button></div>
+          <article v-for="arc in selectedArc ? [selectedArc] : []" :key="arc.id" class="arc-card">
             <div class="arc-card-header">
               <div class="arc-title-row">
                 <n-tag size="small" :type="arcTypeColor(arc.type)">{{ arcTypeLabel(arc.type) }}</n-tag>
@@ -184,6 +206,7 @@
             </div>
 
             <p class="arc-description">{{ arc.description || '暂未填写弧线描述' }}</p>
+            <section v-if="arc.characterIds.length" class="arc-related-characters"><h4>相关角色</h4><span v-for="id in arc.characterIds" :key="id">{{ novel?.characters.find(character => character.id === id)?.name || '未关联角色' }}</span></section>
 
             <div class="arc-meta">
               <span>重要度 {{ arc.importance }}/5</span>
@@ -227,15 +250,15 @@
         </n-empty>
       </n-tab-pane>
 
-      <n-tab-pane name="timeline" tab="故事时间线">
+      <n-tab-pane display-directive="show:lazy" name="timeline" tab="故事时间线">
         <div class="filter-bar">
           <n-input v-model:value="timelineQuery" clearable placeholder="搜索事件、地点或角色" />
           <n-select v-model:value="timelineType" :options="timelineTypeOptions" />
           <n-select v-model:value="timelineStatus" :options="timelineStatusOptions" />
         </div>
 
-        <div v-if="filteredEvents.length" class="timeline-list">
-          <article v-for="event in filteredEvents" :key="event.id" class="timeline-row">
+        <div v-if="filteredEvents.length" class="timeline-workbench"><div class="timeline-list">
+          <article v-for="event in filteredEvents" :key="event.id" class="timeline-row" :class="{ selected: selectedEvent?.id === event.id }">
             <div class="timeline-marker">
               <span>{{ eventChapterLabel(event.chapterIndex) }}</span>
               <i></i>
@@ -244,7 +267,7 @@
               <div class="timeline-heading">
                 <div>
                   <n-tag size="small" :type="eventTypeColor(event.type)">{{ event.type }}</n-tag>
-                  <strong>{{ event.title }}</strong>
+                  <button type="button" class="planning-select-title" :aria-pressed="selectedEvent?.id === event.id" @click="selectedEventId = event.id">{{ event.title }}</button>
                 </div>
                 <div class="icon-actions">
                   <n-button quaternary circle size="small" title="编辑事件" @click="openEventModal(event)">
@@ -276,37 +299,50 @@
               </div>
             </div>
           </article>
-        </div>
+        </div><aside v-if="selectedEvent" class="timeline-selection paper-panel"><h3>事件记录</h3><h4>{{ selectedEvent.title }}</h4><n-tag :type="eventStatusColor(selectedEvent.status)">{{ eventStatusLabel(selectedEvent.status) }}</n-tag><section><h4>提出章节</h4><p>{{ eventChapterLabel(selectedEvent.chapterIndex) }}</p><n-button v-if="selectedEventChapter" text @click="router.push(`/workspace/${novelId}/editor/${selectedEventChapter.id}`)">查看章节 →</n-button></section><section><h4>事件说明</h4><p>{{ selectedEvent.description || '暂无说明' }}</p></section><section v-if="selectedEvent.relatedArcIds?.length"><h4>关联弧线</h4><p>{{ selectedEvent.relatedArcIds.map(id => sortedArcs.find(arc => arc.id === id)?.title).filter(Boolean).join('、') || '暂无对应弧线' }}</p></section><section v-if="selectedEvent.evidence"><h4>原文依据</h4><blockquote>{{ selectedEvent.evidence }}</blockquote></section><section v-if="selectedEvent.storyTime || selectedEvent.location"><h4>时间与地点</h4><p>{{ [selectedEvent.storyTime, selectedEvent.location].filter(Boolean).join(' · ') }}</p></section><n-button @click="openEventModal(selectedEvent)">编辑事件</n-button></aside></div>
         <n-empty v-else description="没有符合条件的事件" class="empty-block" />
       </n-tab-pane>
 
-      <n-tab-pane name="memory" tab="项目记忆">
+      <n-tab-pane display-directive="show:lazy" name="memory" tab="项目记忆">
         <div class="index-status">
           <span v-if="memoryIndexInfo.recordCount">
             {{ memoryIndexInfo.provider === 'remote' ? '真实向量' : '本地索引' }} ·
             {{ memoryIndexInfo.model }} · {{ memoryIndexInfo.recordCount }} 条 · {{ memoryIndexInfo.dimensions }} 维
           </span>
           <span v-else>尚未建立持久化记忆索引</span>
-          <n-button text type="primary" :loading="memoryIndexing" @click="rebuildMemoryIndex">同步索引</n-button>
+          <n-button text type="primary" :loading="memoryIndexing" :disabled="memorySearching" @click="rebuildMemoryIndex">同步索引</n-button>
+        </div>
+        <div class="memory-categories" role="group" aria-label="记忆分类">
+          <button v-for="category in memorySourceOptions" :key="category.value" type="button" :aria-pressed="memorySource === category.value" @click="memorySource = category.value">
+            {{ category.label }}<span>{{ memoryCategoryCounts[category.value] || 0 }}</span>
+          </button>
         </div>
         <div class="memory-search">
           <n-input v-model:value="memoryQuery" clearable placeholder="输入人物、事件、设定或剧情问题" @keydown.enter="runMemorySearch">
             <template #prefix><n-icon><search-outline /></n-icon></template>
           </n-input>
-          <n-select v-model:value="memorySource" :options="memorySourceOptions" />
           <n-button type="primary" :loading="memorySearching" :disabled="!memoryQuery.trim()" @click="runMemorySearch">检索</n-button>
         </div>
 
-        <div v-if="searched && memoryResults.length" class="memory-results">
-          <article v-for="item in memoryResults" :key="item.id" class="memory-result">
+        <div v-if="displayedMemory.length" class="memory-workbench">
+        <div class="memory-results">
+          <button v-for="item in displayedMemory" :key="item.id" type="button" class="memory-result" :aria-pressed="selectedMemory?.id === item.id" @click="selectedMemoryId = item.id">
             <div class="memory-result-header">
               <n-tag size="small">{{ sourceLabel(item.sourceType) }}</n-tag>
               <strong>{{ item.title }}</strong>
-              <span>{{ Math.round(item.score * 100) }}% 相关</span>
+              <span v-if="searched && 'score' in item">{{ Math.round(Number(item.score) * 100) }}% 相关</span>
             </div>
-            <p>{{ item.content }}</p>
+            <p v-if="searched" class="memory-excerpt">{{ item.content.slice(0, 160) }}{{ item.content.length > 160 ? '…' : '' }}</p>
             <small>{{ item.citation }}</small>
-          </article>
+          </button>
+          <n-button v-if="!searched && browsableMemory.length > memoryBrowseLimit" @click="memoryBrowseLimit += 100">加载更多记忆</n-button>
+        </div>
+        <article v-if="selectedMemory" class="memory-detail paper-panel">
+          <n-tag size="small">{{ sourceLabel(selectedMemory.sourceType) }}</n-tag>
+          <h3>{{ selectedMemory.title }}</h3>
+          <p>{{ selectedMemory.content }}</p>
+          <small>{{ selectedMemory.citation }}</small>
+        </article>
         </div>
         <n-empty v-else-if="searched" description="没有找到足够相关的项目记忆" class="empty-block" />
         <div v-else class="memory-placeholder">
@@ -316,7 +352,7 @@
         </div>
       </n-tab-pane>
 
-      <n-tab-pane name="proposals" :tab="pendingProposalCount ? `状态提案 (${pendingProposalCount})` : '状态提案'">
+      <n-tab-pane display-directive="show:lazy" name="proposals" :tab="pendingProposalCount ? `状态提案 (${pendingProposalCount})` : '状态提案'">
         <div v-if="pendingStateProposals.length" class="proposal-list">
           <article v-for="proposal in pendingStateProposals" :key="proposal.id" class="proposal-card">
             <div class="proposal-header">
@@ -326,12 +362,8 @@
               </div>
               <span>来自第 {{ proposal.chapterIndex + 1 }} 章</span>
             </div>
-            <div class="proposal-change">
-              <span>{{ proposalFieldLabel(proposal.field) }}</span>
-              <code>{{ proposalValueLabel(proposal) }}</code>
-            </div>
             <p>{{ proposal.reason }}</p>
-            <blockquote v-if="proposal.evidence">证据：{{ proposal.evidence }}</blockquote>
+            <div class="proposal-comparison" :aria-label="proposalValueLabel(proposal)"><section class="proposal-evidence"><h4>证据片段</h4><blockquote>{{ proposal.evidence || '本次提案未附正文片段，请先查看来源章节核对。' }}</blockquote></section><section><h4>当前值 · {{ proposalFieldLabel(proposal.field) }}</h4><code>{{ proposalDisplayValue(proposal, false) }}</code></section><span class="proposal-arrow" aria-hidden="true">→</span><section><h4>建议更新为</h4><code>{{ proposalDisplayValue(proposal, true) }}</code></section></div>
             <div class="proposal-actions">
               <n-button size="small" type="primary" @click="acceptProposal(proposal.id)">应用</n-button>
               <n-button size="small" @click="rejectProposal(proposal.id)">忽略</n-button>
@@ -429,7 +461,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NEmpty, NForm, NFormItem, NIcon, NInput, NInputNumber, NModal,
@@ -483,6 +515,8 @@ const extractingArcs = ref(false)
 const memorySearching = ref(false)
 const memoryIndexing = ref(false)
 const memoryResults = ref<SemanticEvidence[]>([])
+const selectedMemoryId = ref('')
+const selectedMemory = computed(() => displayedMemory.value.find(item => item.id === selectedMemoryId.value) || displayedMemory.value[0])
 const memoryIndexInfo = ref<SemanticIndexInfo>({ recordCount: 0, provider: 'local', model: 'local-hash-v1', dimensions: 0, updatedAt: '' })
 let chapterCreationPrompted = false
 let chapterCreationDialog: ReturnType<typeof dialog.info> | null = null
@@ -516,15 +550,17 @@ const eventStatusOptions = [
 const timelineTypeOptions = [{ label: '全部类型', value: 'all' }, ...eventTypeOptions]
 const timelineStatusOptions = [{ label: '全部状态', value: 'all' }, ...eventStatusOptions]
 const memorySourceOptions = [
-  { label: '全部来源', value: 'all' }, { label: '章节', value: 'chapter' },
+  { label: '全部', value: 'all' }, { label: '章节', value: 'chapter' },
   { label: '角色', value: 'character' }, { label: '事件', value: 'event' },
   { label: '故事弧线', value: 'story_arc' }, { label: '章节计划', value: 'chapter_plan' }, { label: '知识库', value: 'knowledge' },
   { label: '数据面板', value: 'data_panel' },
-]
+] satisfies Array<{ label: string; value: 'all' | SemanticSourceType }>
 
 const characterOptions = computed(() => (novel.value?.characters || []).map(character => ({ label: character.name, value: character.id })))
 const sortedArcs = computed(() => [...(novel.value?.storyArcs || [])].sort((a, b) => b.importance - a.importance || a.createdAt.localeCompare(b.createdAt)))
 const arcLinkOptions = computed(() => sortedArcs.value.map(arc => ({ label: arc.title, value: arc.id })))
+const selectedArcId = ref('')
+const selectedArc = computed(() => sortedArcs.value.find(arc => arc.id === selectedArcId.value) || sortedArcs.value[0])
 const relayArcs = computed(() => sortedArcs.value.filter(arc => arc.status === 'active' || arc.status === 'paused'))
 const openPromises = computed(() => (novel.value?.eventLog || [])
   .filter(event => event.type === '伏笔' && event.status !== 'resolved' && event.status !== 'abandoned')
@@ -534,11 +570,14 @@ const pendingNodeCount = computed(() => sortedArcs.value.reduce((sum, arc) => su
 const unresolvedEventCount = computed(() => (novel.value?.eventLog || []).filter(event => event.status !== 'resolved' && event.status !== 'abandoned').length)
 const sortedPlans = computed(() => [...(novel.value?.chapterPlans || [])].sort((a, b) => a.targetChapterStart - b.targetChapterStart || a.createdAt.localeCompare(b.createdAt)))
 const awaitingPlans = computed(() => sortedPlans.value.filter(plan => plan.status === 'awaiting_review'))
-const plansByHorizon = computed<Record<ChapterPlanHorizon, ChapterPlan[]>>(() => ({
-  next: sortedPlans.value.filter(plan => plan.horizon === 'next' && (plan.status === 'planned' || plan.status === 'active')),
-  near: sortedPlans.value.filter(plan => plan.horizon === 'near' && (plan.status === 'planned' || plan.status === 'active')),
-  far: sortedPlans.value.filter(plan => plan.horizon === 'far' && (plan.status === 'planned' || plan.status === 'active')),
-}))
+const selectedRelayId = ref('')
+const selectedRelayPlan = computed(() => awaitingPlans.value.find(plan => plan.id === selectedRelayId.value) || awaitingPlans.value[0])
+const relayChapter = computed(() => selectedRelayPlan.value ? novel.value?.chapters.find(chapter => chapter.chapterIndex === selectedRelayPlan.value!.targetChapterEnd) : undefined)
+const planStatusLanes = [{ status: 'planned', label: '待推进', description: '尚未开始的章节计划' }, { status: 'active', label: '进行中', description: '正在推进的故事内容' }, { status: 'awaiting_review', label: '待核对', description: '对照已写正文核对计划' }]
+function plansByStatus(status: string) { return sortedPlans.value.filter(plan => plan.status === status) }
+const closedPlans = computed(() => sortedPlans.value.filter(plan => plan.status === 'completed' || plan.status === 'archived'))
+const selectedPlanId = ref('')
+const selectedPlan = computed(() => sortedPlans.value.find(plan => plan.id === selectedPlanId.value) || sortedPlans.value.find(plan => !['completed', 'archived'].includes(plan.status)) || sortedPlans.value[0])
 const activePlanCount = computed(() => sortedPlans.value.filter(plan => plan.status === 'planned' || plan.status === 'active').length)
 const pendingStateProposals = computed(() => (novel.value?.storyStateProposals || []).filter(proposal => proposal.status === 'pending'))
 const pendingProposalCount = computed(() => pendingStateProposals.value.length)
@@ -552,6 +591,14 @@ const latestCompletedChapter = computed(() => [...(novel.value?.chapters || [])]
   .filter(chapter => ['completed', 'reviewed', 'finalized', 'locked'].includes(chapter.status))
   .sort((a, b) => b.chapterIndex - a.chapterIndex)[0])
 const memoryRecords = computed(() => novel.value ? buildSemanticRecords(novel.value, knowledgeStore.knowledgeBases) : [])
+const memoryCategoryCounts = computed(() => {
+  const counts: Record<string, number> = { all: memoryRecords.value.length }
+  for (const record of memoryRecords.value) counts[record.sourceType] = (counts[record.sourceType] || 0) + 1
+  return counts
+})
+const memoryBrowseLimit = ref(100)
+const browsableMemory = computed(() => memoryRecords.value.filter(item => memorySource.value === 'all' || item.sourceType === memorySource.value).map(item => ({ ...item, citation: `${sourceLabel(item.sourceType)} · ${item.title}` })))
+const displayedMemory = computed(() => searched.value ? memoryResults.value : browsableMemory.value.slice(0, memoryBrowseLimit.value))
 const memoryRecordCount = computed(() => memoryRecords.value.length)
 const planVersionOptions = computed(() => (versionPlan.value?.versions || []).slice().reverse().map(version => ({
   label: `${version.label} · ${new Date(version.savedAt).toLocaleString('zh-CN')}`,
@@ -570,6 +617,10 @@ const filteredEvents = computed(() => {
     .filter(event => !query || [event.title, event.description, event.location, event.storyTime, ...(event.characters || [])].some(value => value?.toLowerCase().includes(query)))
     .sort((a, b) => a.chapterIndex - b.chapterIndex || a.timestamp.localeCompare(b.timestamp))
 })
+const selectedEventId = ref('')
+const selectedEvent = computed(() => filteredEvents.value.find(event => event.id === selectedEventId.value) || filteredEvents.value[0])
+const selectedEventChapter = computed(() => selectedEvent.value ? novel.value?.chapters.find(chapter => chapter.chapterIndex === selectedEvent.value!.chapterIndex) : undefined)
+function eventStatusColor(status: EventLogEntry['status']) { return status === 'resolved' ? 'success' : status === 'developing' ? 'info' : status === 'abandoned' ? 'default' : 'warning' }
 
 async function refreshMemoryIndexInfo() {
   memoryIndexInfo.value = await getSemanticIndexInfo(novelId.value)
@@ -595,31 +646,50 @@ async function rebuildMemoryIndex() {
 
 async function runMemorySearch() {
   const query = memoryQuery.value.trim()
-  searched.value = Boolean(query)
-  if (!query || memorySearching.value) return
+  if (!query || memorySearching.value || memoryIndexing.value || !novel.value) return
+  const source = memorySource.value
+  const requestId = ++memoryRequestId
+  const bookId = novelId.value
+  searched.value = true
+  memoryResults.value = []
   memorySearching.value = true
   try {
-    if (memoryIndexInfo.value.recordCount === 0 && memoryRecords.value.length > 0) {
-      await rebuildMemoryIndex()
-    }
-    memoryResults.value = await queryPersistedSemanticEvidence(
-      novelId.value,
+    // Incremental synchronization also handles edits and a changed embedding
+    // provider when an index already exists. Unchanged vectors are reused.
+    await syncSemanticIndexForNovel(novel.value, knowledgeStore.knowledgeBases, configStore.embedding, false)
+    await refreshMemoryIndexInfo()
+    if (requestId !== memoryRequestId) return
+    const results = await queryPersistedSemanticEvidence(
+      bookId,
       query,
       12,
       configStore.embedding,
-      memorySource.value === 'all' ? undefined : memorySource.value,
+      source === 'all' ? undefined : source,
     )
+    if (requestId === memoryRequestId) memoryResults.value = results.filter(item => source === 'all' || item.sourceType === source)
   } catch (error) {
+    if (requestId !== memoryRequestId) return
     memoryResults.value = []
+    searched.value = false
     message.error(error instanceof Error ? error.message : '项目记忆检索失败')
   } finally {
     memorySearching.value = false
   }
 }
 
+let memoryRequestId = 0
+watch([memoryQuery, memorySource, novelId], () => {
+  memoryRequestId++
+  searched.value = false
+  memoryResults.value = []
+  selectedMemoryId.value = ''
+  memoryBrowseLimit.value = 100
+})
+
 onMounted(() => { void refreshMemoryIndexInfo() })
 
 onBeforeUnmount(() => {
+  memoryRequestId++
   chapterCreationDialog?.destroy()
   chapterCreationDialog = null
 })
@@ -806,6 +876,12 @@ function proposalValueLabel(proposal: StoryStateProposal) {
   if (proposal.field === 'targetChapter') return `第 ${Number(proposal.oldValue) + 1} 章 → 第 ${Number(proposal.newValue) + 1} 章`
   return `${proposalStatusLabels[proposal.oldValue] || proposal.oldValue} → ${proposalStatusLabels[proposal.newValue] || proposal.newValue}`
 }
+function proposalDisplayValue(proposal: StoryStateProposal, next: boolean) {
+  if (proposal.field === 'create') return next ? (proposal.eventDraft?.description || proposal.reason) : '尚未记录'
+  const value = next ? proposal.newValue : proposal.oldValue
+  if (proposal.field === 'targetChapter') return value.trim() && Number.isFinite(Number(value)) ? '第 ' + (Number(value) + 1) + ' 章' : '尚未指定'
+  return proposalStatusLabels[value] || value || '尚未记录'
+}
 function acceptProposal(proposalId: string) {
   if (novelStore.applyStoryStateProposal(novelId.value, proposalId)) message.success('状态提案已应用')
   else message.warning('目标已变化或不存在，请忽略这条过期提案')
@@ -938,14 +1014,15 @@ function removeEvent(eventId: string) { novelStore.deleteEvent(novelId.value, ev
 
 <style scoped>
 .story-planner { max-width: 1180px; margin: 0 auto; padding-bottom: 56px; }
-.planner-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
-.planner-header .page-title { margin: 0; font-family: var(--font-family-serif); font-weight: 700; letter-spacing: 0.04em; }
+.planner-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.planner-header .page-title { margin: 0 0 4px; font-family: var(--font-family-serif); font-weight: 700; font-size: 26px; letter-spacing: 0.02em; line-height: 1.25; }
 .header-actions { display: flex; gap: 8px; }
-.page-subtitle { margin-top: 6px; color: var(--text-color-tertiary); font-size: 13px; }
+.page-subtitle { margin: 0; color: var(--text-color-tertiary); font-size: 14px; line-height: 1.5; }
 .planner-summary {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 8px;
   margin-bottom: 8px; color: var(--text-color-tertiary); font-size: 12px;
 }
+.planner-overview { margin-bottom: 20px; }
 .planner-summary span {
   display: flex; flex-direction: column; gap: 2px;
   padding: 10px 12px;
@@ -974,11 +1051,11 @@ function removeEvent(eventId: string) { novelStore.deleteEvent(novelId.value, ev
 .plan-list { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; }
 .plan-card {
   min-width: 0; padding: 12px 14px;
-  border: 1px solid var(--border-color); border-radius: var(--radius-lg);
-  background: var(--bg-color-card); box-shadow: var(--shadow-card);
+  border: 1px solid var(--border-color); border-radius: var(--radius-md);
+  background: var(--bg-color-card); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
-.plan-card:hover { border-color: var(--color-primary); box-shadow: var(--shadow-hover); }
+.plan-card:hover { border-color: var(--color-primary); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08); }
 .version-dialog { display: grid; gap: 12px; }
 .version-current { margin: 0; color: var(--text-color-secondary); }
 .version-diff-list { display: grid; gap: 8px; max-height: 360px; overflow: auto; }
@@ -986,7 +1063,7 @@ function removeEvent(eventId: string) { novelStore.deleteEvent(novelId.value, ev
 .version-diff-row span { overflow-wrap: anywhere; }
 .plan-card-header, .plan-card-header > div, .proposal-header, .proposal-header > div { display: flex; align-items: center; gap: 7px; }
 .plan-card-header, .proposal-header { justify-content: space-between; }
-.plan-card h3 { margin: 8px 0 6px; color: var(--text-color-primary); font-family: var(--font-family-serif); font-size: 15px; font-weight: 700; }
+.plan-card h3 { margin: 8px 0 6px; color: var(--text-color-primary); font-family: var(--font-family-serif); font-size: 15px; font-weight: 600; line-height: 1.4; }
 .plan-card p { margin: 6px 0; color: var(--text-color-secondary); font-size: 12px; line-height: 1.65; white-space: pre-wrap; }
 .plan-card small { color: var(--text-color-tertiary); font-size: 11px; }
 .plan-range { color: var(--color-primary); font-size: 11px; font-variant-numeric: tabular-nums; }
@@ -997,8 +1074,8 @@ function removeEvent(eventId: string) { novelStore.deleteEvent(novelId.value, ev
 .relay-section {
   margin-top: 14px; padding: 14px 18px 6px;
   background: var(--bg-color-card);
-  border: 1px solid var(--border-color); border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
+  border: 1px solid var(--border-color); border-radius: var(--radius-md);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 .relay-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .relay-heading h3 { margin: 0; color: var(--text-color-primary); font-family: var(--font-family-serif); font-size: 16px; font-weight: 700; }
@@ -1023,13 +1100,13 @@ function removeEvent(eventId: string) { novelStore.deleteEvent(novelId.value, ev
 .arc-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 14px; padding-top: 8px; }
 .arc-card {
   min-width: 0; padding: 18px;
-  border: 1px solid var(--border-color); border-radius: var(--radius-lg);
-  background: var(--bg-color-card); box-shadow: var(--shadow-card);
+  border: 1px solid var(--border-color); border-radius: var(--radius-md);
+  background: var(--bg-color-card); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 .arc-card-header, .arc-title-row, .timeline-heading, .timeline-heading > div, .memory-result-header { display: flex; align-items: center; gap: 8px; }
 .arc-card-header, .timeline-heading { justify-content: space-between; }
 .arc-title-row { min-width: 0; flex-wrap: wrap; }
-.arc-title-row h3 { margin: 0; font-family: var(--font-family-serif); font-size: 17px; font-weight: 700; color: var(--text-color-primary); }
+.arc-title-row h3 { margin: 0; font-family: var(--font-family-serif); font-size: 17px; font-weight: 600; line-height: 1.35; color: var(--text-color-primary); }
 .icon-actions { display: flex; flex-shrink: 0; }
 .arc-description { min-height: 42px; margin: 12px 0; color: var(--text-color-secondary); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
 .arc-meta, .timeline-meta { display: flex; flex-wrap: wrap; gap: 10px 16px; color: var(--text-color-tertiary); font-size: 12px; font-variant-numeric: tabular-nums; }
@@ -1047,7 +1124,12 @@ function removeEvent(eventId: string) { novelStore.deleteEvent(novelId.value, ev
 .node-empty { padding: 18px 0; color: var(--text-color-tertiary); font-size: 12px; text-align: center; }
 .add-node-button { margin-top: 12px; }
 .filter-bar, .memory-search { display: grid; grid-template-columns: minmax(220px, 1fr) 150px 150px; gap: 10px; padding: 8px 0 18px; }
-.memory-search { grid-template-columns: minmax(240px, 1fr) 160px auto; }
+.memory-search { grid-template-columns: minmax(0, 1fr) auto; }
+.memory-categories { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 8px; }
+.memory-categories button { display: flex; align-items: center; gap: 6px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-color-card); color: var(--text-color-secondary); padding: 7px 12px; cursor: pointer; }
+.memory-categories button[aria-pressed="true"] { color: var(--color-primary); background: var(--color-primary-light); border-color: var(--color-primary); }
+.memory-categories span { font-size: 11px; font-variant-numeric: tabular-nums; opacity: .75; }
+.memory-excerpt { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .index-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0 4px; color: var(--text-color-tertiary); font-size: 12px; }
 .timeline-list { position: relative; }
 .timeline-row { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 18px; }
@@ -1055,11 +1137,18 @@ function removeEvent(eventId: string) { novelStore.deleteEvent(novelId.value, ev
 .timeline-marker::after { position: absolute; top: 0; right: -14px; width: 1px; height: 100%; background: var(--border-color-light); content: ''; }
 .timeline-marker i { position: absolute; z-index: 1; top: 22px; right: -18px; width: 9px; height: 9px; border: 2px solid var(--bg-color); border-radius: 50%; background: var(--color-primary); box-shadow: 0 0 0 1px var(--color-primary); }
 .timeline-content { min-width: 0; padding: 14px 0 20px; border-bottom: 1px solid var(--border-color-light); }
-.timeline-heading strong { font-family: var(--font-family-serif); font-size: 15px; }
+.timeline-heading strong { font-family: var(--font-family-serif); font-size: 15px; font-weight: 600; line-height: 1.4; }
 .timeline-content p { margin: 8px 0; color: var(--text-color-secondary); font-size: 13px; line-height: 1.65; white-space: pre-wrap; }
 .timeline-evidence { margin: 8px 0; padding-left: 10px; border-left: 2px solid var(--border-color); color: var(--text-color-tertiary); font-size: 12px; }
 .character-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
 .memory-results { display: flex; flex-direction: column; }
+.memory-workbench { display: grid; grid-template-columns: minmax(240px, 0.85fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.memory-result { text-align: left; background: transparent; color: var(--text-color-primary); border: 0; cursor: pointer; padding: 16px 12px; }
+.memory-result[aria-pressed="true"] { background: var(--color-primary-light); border-left: 3px solid var(--color-primary); }
+.memory-detail { position: sticky; top: 0; min-width: 0; }
+.memory-detail h3 { font-size: 24px; margin: 16px 0; }
+.memory-detail p { font-family: var(--font-family-serif); font-size: 16px; line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; }
+.memory-detail small { display: block; margin-top: 24px; color: var(--text-color-tertiary); }
 .memory-result { padding: 15px 0; border-bottom: 1px solid var(--border-color-light); }
 .memory-result-header { flex-wrap: wrap; }
 .memory-result-header strong { font-size: 14px; }
@@ -1074,7 +1163,12 @@ function removeEvent(eventId: string) { novelStore.deleteEvent(novelId.value, ev
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
 .span-2 { grid-column: span 2; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.planner-tabs :deep(.n-tabs-nav) { overflow-x: auto; overflow-y: hidden; }
+.planner-tabs :deep(.n-tabs-tab) { white-space: nowrap; }
 @media (max-width: 720px) {
+  .memory-workbench { grid-template-columns: 1fr; }
+  .memory-results { max-height: 340px; overflow: auto; }
+  .memory-detail { position: static; }
   .planner-header { align-items: stretch; flex-direction: column; }
   .header-actions { align-self: stretch; }
   .header-actions :deep(.n-button) { flex: 1; }
@@ -1085,4 +1179,70 @@ function removeEvent(eventId: string) { novelStore.deleteEvent(novelId.value, ev
   .plan-board { grid-template-columns: 1fr; }
   .relay-row { align-items: flex-start; flex-direction: column; gap: 8px; }
 }
+.planning-select-title { display: block; text-align: left; padding: 6px 0; border: 0; background: none; color: var(--text-color-primary); font: 600 20px/1.5 var(--font-family-serif); cursor: pointer; }
+.plan-workbench { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; padding-top: 12px; align-items: start; }
+.plan-board { min-width: 0; padding: 0; }
+.plan-lane { padding: 12px; min-height: 450px; }
+.plan-card { padding: 16px; }
+.plan-card.selected, .arc-selector-card.selected { border-color: var(--color-primary); background: var(--color-primary-light); }
+.plan-card .plan-beats, .plan-card .plan-objective { display: none; }
+.plan-card .icon-actions { flex-wrap: wrap; justify-content: flex-end; }
+.plan-selection-detail, .relay-selection { padding: 24px; min-width: 0; }
+.plan-selection-detail h3, .relay-selection h3 { font-size: 24px; margin: 12px 0; }
+.plan-selection-detail section, .relay-selection section { margin: 18px 0; padding: 18px; border: 1px solid var(--border-color-light); border-radius: var(--radius-md); }
+.plan-selection-detail h4, .relay-selection h4 { font: 600 16px var(--font-family-serif); margin-bottom: 10px; }
+.plan-selection-detail p, .relay-selection p { font-size: 14px; line-height: 1.8; color: var(--text-color-secondary); overflow-wrap: anywhere; }
+.plan-selection-detail ol, .relay-selection ul { padding-left: 18px; font-size: 14px; line-height: 1.9; }
+.closed-plans { margin-top: 18px; color: var(--text-color-secondary); }
+.closed-plans button { display: block; margin: 8px 0; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-color-card); color: var(--text-color-primary); cursor: pointer; }
+.relay-workbench { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(0, 1.3fr) minmax(220px, 1fr); gap: 18px; align-items: start; padding-top: 12px; }
+.relay-workbench .relay-section { padding: 20px; margin: 0; }
+.relay-workbench .relay-row { align-items: flex-start; flex-direction: column; gap: 10px; }
+.relay-workbench .relay-row.selected { padding: 12px; background: var(--color-primary-light); border-radius: var(--radius-sm); }
+.relay-context { min-width: 0; display: grid; gap: 18px; }
+.relay-detail-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.arc-workbench { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; padding-top: 12px; }
+.arc-selector { display: grid; gap: 16px; min-width: 0; }
+.arc-selector-card { width: 100%; min-width: 0; text-align: left; padding: 24px; cursor: pointer; color: var(--text-color-primary); }
+.arc-selector-card > div:first-child { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.arc-selector-card h3 { font-size: 24px; }
+.arc-selector-card p { margin: 16px 0; font-size: 14px; line-height: 1.8; color: var(--text-color-secondary); }
+.arc-node-track { display: flex; gap: 6px; padding: 10px 0; overflow-x: auto; }
+.arc-node-track span { display: grid; justify-items: center; align-content: start; gap: 6px; flex: 1 0 64px; color: var(--text-color-tertiary); }
+.arc-node-track i { display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid var(--border-color-hover); border-radius: 50%; font-style: normal; }
+.arc-node-track .completed i { background: var(--color-success); color: var(--text-color-inverse); }
+.arc-selector-meta { font-size: 12px; color: var(--text-color-tertiary); }
+.arc-related-characters { padding: 16px; margin: 16px 0; border: 1px solid var(--border-color-light); border-radius: var(--radius-md); }
+.arc-related-characters span { display: inline-block; margin: 8px 8px 0 0; padding: 3px 10px; border-radius: 20px; background: var(--color-accent-light); }
+@media (max-width: 1350px) { .plan-workbench { grid-template-columns: minmax(0, 1fr); } .plan-selection-detail { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } .plan-selection-detail section { margin: 0; } }
+@media (max-width: 1100px) { .relay-workbench, .arc-workbench { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 650px) { .plan-selection-detail { display: block; } .plan-selection-detail section { margin-top: 14px; } .arc-selector-card { padding: 18px; } }
+.timeline-workbench { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: start; }
+.timeline-selection { min-width: 0; padding: 24px; }
+.timeline-selection h3 { font-size: 20px; margin-bottom: 24px; }
+.timeline-selection > h4 { font: 600 25px var(--font-family-serif); margin-bottom: 12px; }
+.timeline-selection section { padding: 20px 0; border-bottom: 1px solid var(--border-color-light); }
+.timeline-selection section h4 { font: 600 16px var(--font-family-serif); margin-bottom: 10px; }
+.timeline-selection p, .timeline-selection blockquote { font-size: 14px; color: var(--text-color-secondary); line-height: 1.8; overflow-wrap: anywhere; }
+.timeline-selection blockquote { border-left: 3px solid var(--border-color-hover); padding: 12px; background: var(--bg-color-hover); }
+.timeline-row.selected .timeline-content { border-color: var(--color-primary); background: var(--color-primary-light); }
+.timeline-content { padding: 24px; }
+.timeline-heading .planning-select-title { display: inline; margin-left: 10px; }
+.proposal-card { padding: 24px; }
+.proposal-header strong { font: 600 23px var(--font-family-serif); }
+.proposal-comparison { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr) 24px minmax(0, 1fr); gap: 16px; margin: 20px 0; align-items: stretch; }
+.proposal-comparison section { border: 1px solid var(--border-color-light); border-radius: var(--radius-md); background: var(--bg-color-hover); padding: 18px; min-width: 0; }
+.proposal-comparison h4 { font: 600 16px var(--font-family-serif); margin-bottom: 12px; }
+.proposal-comparison code { white-space: pre-wrap; overflow-wrap: anywhere; font: 14px var(--font-family); color: var(--text-color-primary); }
+.proposal-comparison blockquote { margin: 0; border: 0; padding: 0; font-size: 14px; line-height: 1.8; }
+.proposal-arrow { align-self: center; color: var(--text-color-tertiary); font-size: 24px; }
+@media (max-width: 1100px) { .timeline-workbench { grid-template-columns: minmax(0, 1fr); } .proposal-comparison { grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr); } .proposal-evidence { grid-column: 1 / -1; } }
+@media (max-width: 650px) { .proposal-comparison { grid-template-columns: minmax(0, 1fr); } .proposal-arrow { display: none; } .timeline-content { padding: 16px; } }
+.plan-card-header { align-items: flex-start; gap: 8px; }
+.plan-card-header > div:first-child { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.plan-card-header .plan-range { white-space: nowrap; margin: 0; }
+.plan-card-menu { position: relative; flex: 0 0 auto; }
+.plan-card-menu summary { cursor: pointer; list-style: none; padding: 0 4px; color: var(--text-color-secondary); font: 700 22px/1 var(--font-family); }
+.plan-card-menu[open] .icon-actions { position: absolute; z-index: 10; right: 0; top: 28px; min-width: 160px; display: flex; flex-wrap: wrap; padding: 12px; background: var(--bg-color-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); box-shadow: var(--shadow-md); }
+.plan-lane-header strong { font: 600 20px var(--font-family-serif); }
 </style>

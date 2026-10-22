@@ -124,7 +124,7 @@ try {
     $null = Invoke-Git -GitArguments @('read-tree', '--empty') -SnapshotIndex
     $null = Invoke-Git -GitArguments @('update-index', '--add', '--remove', '-z', '--stdin') -InputText (($paths -join [char]0) + [char]0) -SnapshotIndex
     # Inspect the exact staged snapshot; report filenames only, never matching values.
-    $secretPattern = 'sk-(proj-)?[a-zA-Z0-9_-]{24,}|gh[pousr]_[a-zA-Z0-9]{30,}|github_pat_[a-zA-Z0-9_]{30,}|AKIA[0-9A-Z]{16}|-----BEGIN (OPENSSH |RSA |EC |DSA )?PRIVATE KEY-----'
+    $secretPattern = '(^|[^a-zA-Z0-9_])(sk-(proj-)?[a-zA-Z0-9_-]{24,}|gh[pousr]_[a-zA-Z0-9]{30,}|github_pat_[a-zA-Z0-9_]{30,}|AKIA[0-9A-Z]{16})|-----BEGIN (OPENSSH |RSA |EC |DSA )?PRIVATE KEY-----'
     $secretFiles = Invoke-Git -GitArguments @('grep', '--cached', '--name-only', '-I', '-E', '-e', $secretPattern, '--', '.') -SnapshotIndex -AllowedCodes @(0, 1)
     if ($secretFiles) { throw ('Possible credentials detected. Backup stopped in: ' + $secretFiles) }
     $tree = Invoke-Git -GitArguments @('write-tree') -SnapshotIndex

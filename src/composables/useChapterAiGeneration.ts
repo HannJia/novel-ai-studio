@@ -5,14 +5,13 @@ import type { ModelConfig } from '@/stores/config'
 import type { Novel } from '@/types/novel'
 import { countNovelWords } from '@/utils/format'
 import { MAX_CHAPTER_DRAFT_REQUESTS } from '@/services/chapterGeneration'
+import type { ChapterLengthPolicy } from '@/services/chapterLength'
 
 interface ChapterAiGenerationOptions {
   content: Ref<string>
   writing: Ref<boolean>
   statusText: Ref<string>
-  minWords: number
-  softWords: number
-  hardWords: number
+  lengthPolicy: Ref<ChapterLengthPolicy>
   onChunk?: () => void
   onWarning?: (message: string) => void
 }
@@ -95,7 +94,7 @@ export function useChapterAiGeneration(options: ChapterAiGenerationOptions) {
         signal.throwIfAborted()
         options.content.value += chunk
         options.statusText.value = getChapterGenerationStatus(
-          countNovelWords(options.content.value), options.minWords, options.softWords, options.hardWords,
+          countNovelWords(options.content.value), options.lengthPolicy.value.minWords, options.lengthPolicy.value.targetWords, options.lengthPolicy.value.maxWords,
         )
         options.onChunk?.()
       },

@@ -22,6 +22,7 @@ New-Item -ItemType Directory -Path $repo -Force | Out-Null
 $null = Git @('remote', 'add', 'origin', $remote)
 Set-Content -LiteralPath (Join-Path $repo 'code.ts') -Value 'initial' -Encoding UTF8
 Set-Content -LiteralPath (Join-Path $repo 'removed.ts') -Value 'remove me' -Encoding UTF8
+Set-Content -LiteralPath (Join-Path $repo 'notes.md') -Value 'capability-task-oriented-model-selection-policy' -Encoding UTF8
 $null = Git @('add', '.')
 $null = Git @('-c', 'user.name=Backup Test', '-c', 'user.email=test@localhost', 'commit', '-m', 'initial')
 $initialHead = Git @('rev-parse', 'HEAD')
@@ -38,6 +39,7 @@ $indexBefore = (Get-FileHash -LiteralPath (Join-Path $repo '.git/index')).Hash
 RunBackup
 $first = Git @('rev-parse', 'backup/test')
 Assert ((Git @('show', 'backup/test:code.ts')).Trim() -eq 'working') 'Snapshot must contain working content.'
+Assert ((Git @('show', 'backup/test:notes.md')).Trim() -eq 'capability-task-oriented-model-selection-policy') 'Ordinary task-oriented text must not be treated as a key.'
 Assert ((Git @('show', ('backup/test:' + $unicodeName))).Trim() -eq 'new tracked file') 'Unicode staged file missing.'
 $files = Git @('ls-tree', '-r', '--name-only', 'backup/test')
 Assert ($files -notmatch 'private.pdf|removed.ts') 'Untracked or removed file included.'

@@ -1,17 +1,26 @@
 <template>
   <div class="kb-page page-container fade-in" id="knowledge-base">
     <div class="kb-header">
-      <h2 class="page-title">知识库</h2>
+      <div>
+        <h2 class="page-title">{{ selectedKB?.name || '知识库' }}</h2>
+        <p v-if="!selectedKBId" class="page-subtitle">全局设定资料与书籍挂载</p>
+      </div>
       <div class="header-actions">
-        <n-button v-if="!hasNovelContext" size="small" secondary @click="router.push('/')">返回书架</n-button>
+        <n-button v-if="!hasNovelContext" size="small" tertiary @click="router.push('/')">返回书架</n-button>
         <n-button size="small" type="primary" @click="showCreateModal = true">
-          + 创建知识库
+          <template #icon><span style="font-size:16px">+</span></template>
+          创建知识库
         </n-button>
       </div>
     </div>
 
     <!-- 知识库列表 -->
     <div v-if="!selectedKBId" class="kb-list">
+      <div class="kb-list-toolbar">
+        <span class="kb-library-count">共 {{ knowledgeBases.length }} 个知识库</span>
+        <n-input v-model:value="libraryQuery" placeholder="搜索知识库、描述或条目..." clearable aria-label="搜索知识库" />
+        <n-select v-model:value="librarySort" :options="librarySortOptions" aria-label="知识库排序" />
+      </div>
       <div v-if="knowledgeBases.length === 0" class="empty-state paper-panel">
         <div class="empty-icon"><svg class="ink-mountains" viewBox="0 0 220 80" aria-hidden="true"><path fill="currentColor" d="M0 80 L40 38 L62 56 L98 14 L130 50 L150 34 L188 66 L220 46 L220 80 Z" /></svg></div>
         <h3>还没有知识库</h3>
@@ -19,18 +28,23 @@
         <n-button type="primary" @click="showCreateModal = true">创建第一个知识库</n-button>
       </div>
       <div
-        v-for="kb in knowledgeBases"
+        v-for="kb in filteredKnowledgeBases"
         :key="kb.id"
         class="kb-card paper-panel"
+        role="button"
+        tabindex="0"
         @click="selectKB(kb.id)"
+        @keydown.enter.self.prevent="selectKB(kb.id)"
+        @keydown.space.self.prevent="selectKB(kb.id)"
       >
-        <div class="kb-card-icon seal">典</div>
+        <div class="kb-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h6a3 3 0 0 1 3 3v13a3 3 0 0 0-3-3H3zM21 4h-6a3 3 0 0 0-3 3v13a3 3 0 0 1 3-3h6z" /></svg></div>
         <div class="kb-card-info">
           <h3>{{ kb.name }}</h3>
           <p>{{ kb.description || '暂无描述' }}</p>
           <p v-if="kb.summary" class="kb-summary-preview">摘要：{{ kb.summary.slice(0, 180) }}{{ kb.summary.length > 180 ? '...' : '' }}</p>
-          <span class="kb-card-meta">{{ kb.entries.length }} 条目 · {{ formatDate(kb.createdAt) }}{{ hasNovelContext && isBound(kb.id) ? ' · 本书已挂载' : '' }}</span>
+          <span class="kb-card-meta">{{ kb.entries.length }} 条目 · {{ kbActivityTime(kb) ? formatDate(new Date(kbActivityTime(kb)).toISOString()) : '暂无编辑记录' }}{{ hasNovelContext && isBound(kb.id) ? ' · 本书已挂载' : '' }}</span>
         </div>
+        <div class="kb-card-actions">
         <n-button
           v-if="hasNovelContext"
           size="tiny"
@@ -45,18 +59,22 @@
           </template>
           确定删除此知识库？
         </n-popconfirm>
+        </div>
       </div>
+      <p v-if="knowledgeBases.length && !filteredKnowledgeBases.length" class="kb-no-results paper-panel">没有匹配的知识库，请尝试其他关键词。</p>
     </div>
 
     <!-- 知识库详情 -->
     <div v-else class="kb-detail">
       <div class="kb-detail-header">
         <n-button size="small" text @click="selectedKBId = ''">←  返回列表</n-button>
-        <h3>{{ selectedKB?.name }}</h3>
         <div class="detail-actions">
-          <n-button size="small" @click="showImportModal = true">导入</n-button>
-          <n-button size="small" secondary :loading="summarizingKB" @click="summarizeSelectedKB">整理摘要</n-button>
-          <n-button size="small" type="primary" @click="openAddEntry">+ 添加条目</n-button>
+          <n-button size="small" tertiary @click="showImportModal = true">导入</n-button>
+          <n-button size="small" tertiary :loading="summarizingKB" @click="summarizeSelectedKB">整理摘要</n-button>
+          <n-button size="small" type="primary" @click="openAddEntry">
+            <template #icon><span style="font-size:16px">+</span></template>
+            添加条目
+          </n-button>
         </div>
       </div>
 
@@ -112,6 +130,7 @@
               v-for="entry in filteredEntries"
               :key="entry.id"
               class="entry-card paper-panel"
+              :class="{ 'entry-selected': selectedEntryId === entry.id }"
             >
               <div class="entry-header">
                 <h4>{{ entry.title }}</h4>
@@ -123,10 +142,31 @@
                   <span v-for="t in entry.tags" :key="t" class="tag-chip">{{ t }}</span>
                 </div>
                 <div class="entry-actions">
+                  <n-button size="tiny" :aria-pressed="selectedEntryId === entry.id" @click="selectEntry(entry.id)">查看</n-button>
                   <n-button size="tiny" @click="editEntry(entry)">编辑</n-button>
                   <n-button size="tiny" type="error" quaternary @click="removeEntry(entry.id)">删除</n-button>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右侧详情面板 -->
+        <div v-if="selectedEntryId && selectedEntry" class="entry-detail-panel">
+          <div class="entry-detail-header">
+            <div class="entry-detail-title-group">
+              <h3>{{ selectedEntry.title }}</h3>
+              <span class="entry-detail-cat">{{ categoryLabel(selectedEntry.category) }}</span>
+            </div>
+          </div>
+          <div class="entry-detail-content" v-html="renderMd(selectedEntry.content)"></div>
+          <div class="entry-detail-meta">
+            <div v-if="selectedEntry.tags.length" class="entry-detail-tags">
+              <span v-for="t in selectedEntry.tags" :key="t" class="tag-chip">{{ t }}</span>
+            </div>
+            <div class="entry-detail-timestamps">
+              <span>创建：{{ formatDateTime(selectedEntry.createdAt) }}</span>
+              <span v-if="selectedEntry.updatedAt !== selectedEntry.createdAt">更新：{{ formatDateTime(selectedEntry.updatedAt) }}</span>
             </div>
           </div>
         </div>
@@ -170,7 +210,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NInput, NSelect, NModal, NPopconfirm, useMessage } from 'naive-ui'
 import { useKnowledgeStore, kbCategories, type KBEntry, type KnowledgeBase } from '@/stores/knowledge'
@@ -179,6 +219,7 @@ import { useConfigStore } from '@/stores/config'
 import { callAI } from '@/services/ai'
 import KnowledgeImportDialog from '@/components/KnowledgeImportDialog.vue'
 import { parseAiJsonObject } from '@/utils/aiJson'
+import { renderMd } from '@/utils/markdown'
 
 const route = useRoute()
 const router = useRouter()
@@ -196,6 +237,27 @@ const selectedKBId = ref('')
 const selectedKB = computed(() => kbStore.getKB(selectedKBId.value))
 const searchQuery = ref('')
 const categoryFilter = ref<string | null>(null)
+const libraryQuery = ref('')
+const librarySort = ref<'recent' | 'name'>('recent')
+const librarySortOptions = [{ label: '最近编辑', value: 'recent' }, { label: '名称', value: 'name' }]
+function kbActivityTime(kb: KnowledgeBase) {
+  const time = (value: string | undefined) => {
+    const parsed = value ? Date.parse(value) : NaN
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+  return kb.entries.reduce((latest, entry) => Math.max(latest, time(entry.updatedAt)), Math.max(time(kb.createdAt), time(kb.summaryUpdatedAt)))
+}
+const filteredKnowledgeBases = computed(() => {
+  const query = libraryQuery.value.trim().toLowerCase()
+  return knowledgeBases.value.filter(kb => !query || kb.name.toLowerCase().includes(query)
+    || kb.description.toLowerCase().includes(query) || kb.entries.some(entry => entry.title.toLowerCase().includes(query)))
+    .sort((a, b) => librarySort.value === 'name' ? a.name.localeCompare(b.name, 'zh-CN') : kbActivityTime(b) - kbActivityTime(a))
+})
+const selectedEntryId = ref('')
+const selectedEntry = computed(() => {
+  if (!selectedEntryId.value || !selectedKB.value) return null
+  return selectedKB.value.entries.find(e => e.id === selectedEntryId.value) || null
+})
 
 const showCreateModal = ref(false)
 const showEntryModal = ref(false)
@@ -242,6 +304,25 @@ const filteredEntries = computed(() => {
   }
   return list
 })
+
+function selectEntry(id: string) {
+  selectedEntryId.value = id
+}
+
+// Auto-select first visible entry when filters or KB change
+watch([filteredEntries, selectedKBId], ([entries, kbId]) => {
+  if (!kbId) {
+    selectedEntryId.value = ''
+    return
+  }
+  // If current selection is no longer visible, select first visible entry
+  const currentVisible = entries.some(e => e.id === selectedEntryId.value)
+  if (!currentVisible && entries.length > 0) {
+    selectedEntryId.value = entries[0].id
+  } else if (entries.length === 0) {
+    selectedEntryId.value = ''
+  }
+}, { immediate: true })
 
 function selectKB(id: string) {
   selectedKBId.value = id
@@ -322,6 +403,11 @@ function saveEntry() {
 function removeEntry(id: string) {
   kbStore.deleteEntry(selectedKBId.value, id)
   msg.success('已删除')
+  // After deletion, auto-select first visible entry
+  if (selectedEntryId.value === id) {
+    const remaining = filteredEntries.value
+    selectedEntryId.value = remaining.length > 0 ? remaining[0].id : ''
+  }
 }
 
 async function afterImport(result: { kbId: string; entryIds: string[]; summarize: boolean }) {
@@ -462,14 +548,15 @@ function toggleBind(kbId: string) {
 <style scoped>
 .kb-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
   margin-bottom: var(--space-lg);
-  padding-bottom: var(--space-md);
-  border-bottom: 1px solid var(--border-color);
 }
 .kb-header .page-title { font-family: var(--font-family-serif); font-weight: 700; letter-spacing: 0.04em; margin: 0; }
-.header-actions { display: flex; gap: 8px; }
+.page-subtitle { margin: 6px 0 0; color: var(--text-color-tertiary); font-size: 13px; }
+.header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 .empty-state {
   display: flex; flex-direction: column; align-items: center;
@@ -482,33 +569,46 @@ function toggleBind(kbId: string) {
 /* 知识库卡片 */
 .kb-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-md);
 }
 .kb-list > .empty-state { grid-column: 1 / -1; }
+.kb-list-toolbar { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin-bottom: 8px; }
+.kb-library-count { margin-right: auto; color: var(--text-color-secondary); }
+.kb-list-toolbar :deep(.n-input) { width: min(100%, 300px); }
+.kb-list-toolbar :deep(.n-select) { width: 130px; }
+.kb-no-results { grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-color-secondary); }
+@media (max-width: 1100px) { .kb-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 650px) { .kb-list { grid-template-columns: 1fr; } }
 
 .kb-card {
-  display: flex; align-items: flex-start; gap: 14px;
-  padding: 16px 18px; cursor: pointer;
+  display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: start; gap: 16px;
+  padding: 24px; cursor: pointer;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 .kb-card:hover { transform: translateY(-1px); border-color: var(--border-color-hover); box-shadow: var(--shadow-hover); }
+.kb-card:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.kb-card-info { min-width: 0; overflow-wrap: anywhere; }
+.kb-card-actions { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
 .kb-card-icon {
   flex-shrink: 0;
-  width: 36px; height: 36px;
+  width: 64px; height: 72px;
   display: grid; place-items: center;
   font-family: var(--font-family-serif); font-size: 18px;
-  color: var(--text-color-inverse); background: var(--color-primary);
+  color: var(--color-primary); background: var(--bg-color-hover);
   border-radius: var(--radius-sm);
 }
+.kb-card-icon svg { width: 32px; height: 32px; }
+.kb-card:nth-of-type(3n) .kb-card-icon { color: var(--color-info); }
+.kb-card:nth-of-type(3n + 1) .kb-card-icon { color: var(--color-success); }
 .kb-card-info { flex: 1; min-width: 0; }
 .kb-card-info h3 {
-  font-family: var(--font-family-serif); font-size: 17px; font-weight: 700;
-  color: var(--text-color-primary); margin: 0 0 4px;
+  font-family: var(--font-family-serif); font-size: 18px; font-weight: 700;
+  color: var(--text-color-primary); margin: 0 0 6px; letter-spacing: 0.02em;
 }
 .kb-card-info p { font-size: 13px; color: var(--text-color-tertiary); margin: 0; line-height: 1.6; }
 .kb-summary-preview {
@@ -524,7 +624,7 @@ function toggleBind(kbId: string) {
 
 /* 知识库详情 */
 .kb-detail-header {
-  display: flex; align-items: center; gap: 12px;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   margin-bottom: var(--space-md);
 }
 .kb-detail-header h3 {
@@ -532,15 +632,16 @@ function toggleBind(kbId: string) {
   font-family: var(--font-family-serif); font-size: 24px; font-weight: 700;
   color: var(--text-color-primary); letter-spacing: 0.03em;
 }
-.detail-actions { display: flex; gap: 8px; }
+.detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
 
-/* 左侧分类 + 右侧卡片 */
+/* 左侧分类 + 中间列表 + 右侧详情 */
 .kb-browser {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
+  grid-template-columns: 140px 280px minmax(0, 1fr);
   gap: var(--space-lg);
   align-items: start;
 }
+
 .kb-category-rail {
   position: sticky; top: 0;
   display: flex; flex-direction: column; gap: 2px;
@@ -576,19 +677,24 @@ function toggleBind(kbId: string) {
 .filter-bar {
   display: flex; gap: 12px; margin-bottom: var(--space-md); align-items: center;
 }
-.entry-count { font-size: 12px; color: var(--text-color-tertiary); margin-left: auto; font-variant-numeric: tabular-nums; }
+.entry-count { flex-shrink: 0; white-space: nowrap; font-size: 12px; color: var(--text-color-tertiary); margin-left: auto; font-variant-numeric: tabular-nums; }
+.kb-summary-panel .empty-hint { padding: 12px 0; }
 
 /* 条目列表 */
 .entry-list { display: flex; flex-direction: column; gap: 10px; }
 
 .entry-card {
-  padding: 14px 18px;
+  padding: 16px 20px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
-  transition: border-color var(--transition-fast);
+  transition: border-color var(--transition-fast), background var(--transition-fast);
 }
 .entry-card:hover { border-color: var(--border-color-hover); }
+.entry-card.entry-selected {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+}
 .entry-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
 .entry-cat {
   flex-shrink: 0;
@@ -596,8 +702,8 @@ function toggleBind(kbId: string) {
   background: var(--color-accent-light); color: var(--color-accent);
 }
 .entry-header h4 {
-  font-family: var(--font-family-serif); font-size: 16px; font-weight: 700;
-  color: var(--text-color-primary); margin: 0;
+  font-family: var(--font-family-serif); font-size: 17px; font-weight: 700;
+  color: var(--text-color-primary); margin: 0; letter-spacing: 0.01em;
 }
 .entry-preview { font-size: 13px; color: var(--text-color-secondary); line-height: 1.7; margin: 0 0 8px; }
 
@@ -621,9 +727,161 @@ function toggleBind(kbId: string) {
 .kb-summary-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .kb-summary-toolbar h4 { margin: 0 0 4px; font-family: var(--font-family-serif); font-size: 16px; color: var(--text-color-primary); }
 
-@media (max-width: 860px) {
-  .kb-browser { grid-template-columns: 1fr; }
-  .kb-category-rail { position: static; flex-direction: row; flex-wrap: wrap; }
+/* Entry detail panel */
+.entry-detail-panel {
+  position: sticky;
+  top: 0;
+  padding: 20px 24px;
+  background: var(--bg-color-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+}
+
+.entry-detail-header {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.entry-detail-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.entry-detail-panel h3 {
+  font-family: var(--font-family-serif);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-color-primary);
+  margin: 0;
+  letter-spacing: 0.02em;
+}
+
+.entry-detail-cat {
+  flex-shrink: 0;
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-accent-light);
+  color: var(--color-accent);
+}
+
+.entry-detail-content {
+  font-size: 16px;
+  line-height: 1.85;
+  color: var(--text-color-primary);
+  overflow-wrap: break-word;
+}
+
+.entry-detail-content :deep(h1),
+.entry-detail-content :deep(h2),
+.entry-detail-content :deep(h3),
+.entry-detail-content :deep(h4),
+.entry-detail-content :deep(h5),
+.entry-detail-content :deep(h6) {
+  font-family: var(--font-family-serif);
+  margin-top: 1.5em;
+  margin-bottom: 0.6em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.entry-detail-content :deep(p) {
+  margin: 0.8em 0;
+}
+
+.entry-detail-content :deep(ul),
+.entry-detail-content :deep(ol) {
+  margin: 0.8em 0;
+  padding-left: 1.8em;
+}
+
+.entry-detail-content :deep(li) {
+  margin: 0.4em 0;
+}
+
+.entry-detail-content :deep(code) {
+  font-family: var(--font-family-mono);
+  font-size: 0.9em;
+  padding: 2px 6px;
+  background: var(--bg-color-hover);
+  border-radius: var(--radius-sm);
+}
+
+.entry-detail-content :deep(pre) {
+  background: var(--bg-color-hover);
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  margin: 1em 0;
+}
+
+.entry-detail-content :deep(blockquote) {
+  margin: 1em 0;
+  padding-left: 16px;
+  border-left: 3px solid var(--border-color);
+  color: var(--text-color-secondary);
+}
+
+.entry-detail-meta {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+.entry-detail-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.entry-detail-timestamps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-color-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1100px) {
+  .kb-browser {
+    grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1fr);
+  }
+  .kb-category-rail {
+    grid-row: 1;
+    grid-column: 1 / -1;
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .kb-entries {
+    grid-row: 2;
+    grid-column: 1;
+  }
+  .entry-detail-panel {
+    grid-row: 2;
+    grid-column: 2;
+    position: static;
+    max-height: none;
+  }
+}
+
+@media (max-width: 700px) {
+  .kb-browser {
+    grid-template-columns: 1fr;
+  }
+  .kb-entries, .entry-detail-panel { grid-row: auto; grid-column: 1; }
+  .entry-list {
+    max-height: 320px;
+    overflow-y: auto;
+  }
 }
 .kb-summary-toolbar p { margin: 0; color: var(--text-color-tertiary); font-size: 12px; line-height: 1.6; }
 .kb-summary-content { margin: 14px 0 0; white-space: pre-wrap; color: var(--text-color-secondary); line-height: 1.7; font-size: 13px; }

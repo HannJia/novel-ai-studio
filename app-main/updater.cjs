@@ -108,8 +108,8 @@ function createUpdateController(options) {
     return operation
   }
   async function check() {
-    if (!supported || state.phase === 'downloaded' || state.phase === 'installing') return snapshot()
-    return exclusive(async () => {
+    if (disposed || !supported || ['downloaded', 'installing', 'downloading'].includes(state.phase)) return snapshot()
+    await exclusive(async () => {
       clearTimeout(retryTimer)
       retryTimer = null
       lastAttempt = Date.now()
@@ -141,6 +141,10 @@ function createUpdateController(options) {
       }
       return snapshot()
     })
+    // The check must release its operation before acquiring the download lock.
+    // Re-read the preference after network I/O so opting out takes effect immediately.
+    if (!disposed && state.autoCheck && ready && state.phase === 'available') return download()
+    return snapshot()
   }
   async function download() {
     if (!supported || !ready || !release?.canDownload || state.phase !== 'available') return snapshot()

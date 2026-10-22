@@ -27,6 +27,18 @@ function renderReview(contentReview: string, editableReview = contentReview) {
 }
 
 describe('chapter review repair controls', () => {
+  it('shows real dimensions as cards, retains the complete source and escapes markup', async () => {
+    const report = passingReview + '\n## 六维度简评\n1. 角色一致性：✅通过，动机明确\n2. 剧情连贯性：<img src=x onerror=alert(1)>\n## 编辑建议\n保留悬念。'
+    const wrapper = renderReview(report)
+    expect(wrapper.findAll('.review-card h4').map(node => node.text())).toEqual(['1角色一致性', '2剧情连贯性', '3编辑建议'])
+    expect(wrapper.get('.review-card p').text()).toContain('动机明确')
+    expect(wrapper.find('.review-cards img').exists()).toBe(false)
+    expect(wrapper.get('.review-full-report').text()).toContain('总体判断')
+    expect(wrapper.get('.review-verdict').text()).toContain('可通过')
+    await wrapper.setProps({ loading: true })
+    expect(wrapper.get('.review-verdict').text()).toContain('结论尚未完成')
+    wrapper.unmount()
+  })
   it('shows repair controls before the report when changes are required', () => {
     const wrapper = renderReview(requiredReview)
     const section = wrapper.get('.review-section-content')

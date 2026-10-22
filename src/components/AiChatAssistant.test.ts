@@ -16,6 +16,21 @@ vi.mock('naive-ui', async original => ({
 beforeEach(() => { setActivePinia(createPinia()); vi.mocked(chatWithOptionalSearch).mockReset() })
 
 describe('chat window background behavior', () => {
+  it('keeps an IME composition in the input when Ctrl+Enter is pressed', async () => {
+    const store = useNovelStore()
+    const book = store.addNovel({ genre: '', subGenre: '', tags: [], targetWordCountMin: 1, targetWordCountMax: 2,
+      writingStyle: store.defaultWritingStyle(), settings: store.defaultSettings() })
+    const wrapper = shallowMount(AiChatAssistant, { props: { novelId: book.id }, global: { renderStubDefaultSlot: true, stubs: {
+      Input: { props: ['value'], emits: ['update:value'], template: '<textarea :value="value" @input="$emit(\'update:value\', $event.target.value)" />' },
+    } } })
+    await wrapper.get('.chat-fab').trigger('click')
+    await wrapper.get('textarea').setValue('尚在输入的灵感')
+    await wrapper.get('textarea').trigger('keydown', { key: 'Enter', ctrlKey: true, isComposing: true })
+    expect(chatWithOptionalSearch).not.toHaveBeenCalled()
+    expect(wrapper.get('textarea').element.value).toBe('尚在输入的灵感')
+    expect(book.chatHistory).toHaveLength(0)
+    wrapper.unmount()
+  })
   it('renders and copies readable citation names without changing stored replies or source links', async () => {
     const store = useNovelStore()
     const book = store.addNovel({ genre: '', subGenre: '', tags: [], targetWordCountMin: 1, targetWordCountMax: 2,

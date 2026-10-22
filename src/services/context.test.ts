@@ -222,10 +222,10 @@ describe('写作上下文', () => {
     expect(timelineSection).not.toContain('收到匿名信')
   })
 
-  it('审查上下文按预算裁剪正文并复用相关角色', () => {
+  it('审查上下文保留提供的完整正文，由审核服务分段并记录覆盖范围', () => {
     const novel = createNovel(['林青', '苏瑶'])
     const reviewCtx = buildReviewContext(novel, novel.chapters[0], '正文'.repeat(3000), 2000)
-    expect(reviewCtx.chapterContent.length).toBeLessThanOrEqual(1000)
+    expect(reviewCtx.chapterContent).toBe('正文'.repeat(3000))
     expect(reviewCtx.characters).toContain('林青')
   })
 

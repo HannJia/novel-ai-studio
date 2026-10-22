@@ -64,10 +64,11 @@ export const useThemeStore = defineStore('theme', () => {
 
   // 切换主题
   function switchTheme(theme: ThemeName) {
+    // A storage failure must leave the visible theme unchanged during restore.
+    localStorage.setItem('novel-writer-theme', theme)
     currentTheme.value = theme
     document.documentElement.setAttribute('data-theme', theme)
     // 持久化到 localStorage
-    localStorage.setItem('novel-writer-theme', theme)
   }
 
   // 初始化主题（从 localStorage 或默认）

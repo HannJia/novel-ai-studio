@@ -5,17 +5,20 @@
       <div class="sidebar-header">
         <button class="back-btn" @click="$router.push('/')" title="返回书架" aria-label="返回书架">
           <n-icon :size="17"><arrow-back-outline /></n-icon>
+          <span>返回书架</span>
         </button>
+        <div class="sidebar-book">
+        <div class="sidebar-book-cover" aria-hidden="true"><span>{{ novel.title.slice(0, 8) }}</span></div>
         <div class="novel-info">
-          <h3 class="novel-title" title="点击修改书名" @click="openRename">《{{ novel.title }}》</h3>
+          <button type="button" class="novel-title" title="点击修改书名" :aria-label="`修改《${novel.title}》书名`" @click="openRename">《{{ novel.title }}》</button>
           <span class="novel-meta">{{ novel.genreLabel }} · {{ novel.subGenreLabel }}</span>
+          <span class="novel-meta">{{ ({ creating: '设定中', writing: '创作中', archived: '已归档', trash: '回收站', completed: '已完结' })[novel.status] }} · {{ formatWordCount(novel.currentWordCount, '') }} 字</span>
+        </div>
         </div>
       </div>
 
       <nav class="sidebar-nav" aria-label="作品导航">
-        <router-link
-          v-for="item in navItems"
-          :key="item.path"
+        <template v-for="item in navItems" :key="item.path"><router-link
           :to="`/workspace/${novelId}/${item.path}`"
           class="nav-link"
           :class="{ 'nav-link--active': item.path === 'chapters' && isEditorRoute }"
@@ -27,6 +30,8 @@
           <span class="nav-link-label">{{ item.label }}</span>
           <span class="nav-badge" v-if="item.badge">{{ item.badge }}</span>
         </router-link>
+        <ol v-if="item.path === 'chapters' && isEditorRoute" class="sidebar-chapters" aria-label="附近章节"><li v-for="chapter in nearbyChapters" :key="chapter.id"><router-link :to="`/workspace/${novelId}/editor/${chapter.id}`" :aria-current="route.params.chapterId === chapter.id ? 'page' : undefined">第 {{ chapter.chapterIndex + 1 }} 章 <span>{{ chapter.title || '未命名' }}</span></router-link></li></ol>
+        </template>
 
         <div class="nav-divider"></div>
 
@@ -104,7 +109,7 @@
     </main>
 
     <!-- AI 对话助手 -->
-    <AiChatAssistant :novelId="novelId" :chapter-id="typeof route.params.chapterId === 'string' ? route.params.chapterId : ''" />
+    <AiChatAssistant :novelId="novelId" :chapter-id="typeof route.params.chapterId === 'string' ? route.params.chapterId : ''" :host="assistantChatHost" />
 
     <n-modal v-model:show="showRenameModal" preset="card" title="修改书名" style="width: 420px;">
       <n-input v-model:value="renameTitle" placeholder="输入新的书名" @keydown="handleRenameKeydown" />
@@ -130,7 +135,7 @@
 <script setup lang="ts">
 defineOptions({ name: 'Workspace' })
 
-import { computed, ref, type Component } from 'vue'
+import { computed, provide, ref, shallowRef, type Component } from 'vue'
 import { useRoute } from 'vue-router'
 import { NIcon, NButton, NDropdown, NModal, NInput, useMessage } from 'naive-ui'
 import {
@@ -140,6 +145,7 @@ import {
 import { useNovelStore } from '@/stores/novel'
 import { exportToTXT, exportToWordHtml, exportToEpub } from '@/services/export'
 import AiChatAssistant from '@/components/AiChatAssistant.vue'
+import { editorAssistantHostKey } from '@/services/editorAssistantHost'
 import { formatWordCount } from '@/utils/format'
 import { openAiActivity, useAiActivities } from '@/services/aiActivity'
 
@@ -148,6 +154,11 @@ const novelStore = useNovelStore()
 const msg = useMessage()
 const showRenameModal = ref(false)
 const renameTitle = ref('')
+const assistantChatHost = shallowRef<HTMLElement | null>(null)
+provide(editorAssistantHostKey, (host, active) => {
+  if (active) assistantChatHost.value = host
+  else if (assistantChatHost.value === host) assistantChatHost.value = null
+})
 const {
   activities: aiActivities,
   runningActivities: runningAiActivities,
@@ -159,6 +170,11 @@ const novelId = ref(route.params.novelId as string)
 const novel = computed(() => novelStore.getNovel(novelId.value))
 // 编辑器属于“章节”分组，导航高亮保持在章节上
 const isEditorRoute = computed(() => route.name === 'WorkspaceEditor')
+const nearbyChapters = computed(() => {
+  const chapters = [...(novel.value?.chapters || [])].sort((a, b) => a.chapterIndex - b.chapterIndex)
+  const index = Math.max(0, chapters.findIndex(chapter => chapter.id === route.params.chapterId))
+  return chapters.slice(Math.max(0, index - 2), index + 3)
+})
 
 const navItems = computed<Array<{ path: string; label: string; icon: Component; badge?: number }>>(() => {
   const book = novel.value
@@ -230,13 +246,13 @@ const getProgress = computed(() => {
 <style scoped>
 .workspace-layout {
   display: flex;
-  height: calc(100vh - 52px);
+  height: 100%;
   overflow: hidden;
 }
 
 /* 侧边栏 */
 .workspace-sidebar {
-  width: 212px;
+  width: 208px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -245,28 +261,38 @@ const getProgress = computed(() => {
   transition: background-color var(--transition-normal);
 }
 
+@media (min-width: 1200px) {
+  .workspace-sidebar { width: 208px; }
+}
+
 .sidebar-header {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 16px 12px 14px;
-  border-bottom: 1px solid var(--border-color-light);
+  flex-direction: column;
+  align-items: stretch;
+  gap: 16px;
+  padding: 20px 16px;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .back-btn {
-  width: 30px;
-  height: 30px;
+  width: fit-content;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--border-color);
+  gap: 8px;
+  border: 0;
   border-radius: var(--radius-md);
-  background: var(--bg-color-card);
+  background: transparent;
   color: var(--text-color-secondary);
   cursor: pointer;
   flex-shrink: 0;
   transition: all var(--transition-fast);
 }
+
+.sidebar-book { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.sidebar-book-cover { display: grid; place-items: center; flex: 0 0 48px; height: 72px; padding: 8px 6px; border-radius: 3px 6px 6px 3px; background: var(--color-primary); color: var(--text-color-inverse); box-shadow: inset 4px 0 0 #ffffff26, 0 4px 10px #0000000c; }
+.sidebar-book-cover span { writing-mode: vertical-rl; font-family: var(--font-family-serif); font-size: 14px; letter-spacing: 2px; max-height: 60px; overflow: hidden; }
 
 .back-btn:hover {
   border-color: var(--color-primary);
@@ -279,10 +305,19 @@ const getProgress = computed(() => {
 }
 
 .novel-title {
-  font-size: 15px;
+  border: 0;
+  background: none;
+  padding: 0;
+  max-width: 100%;
+  text-align: left;
+  font-family: var(--font-family-serif);
+  font-size: 16px;
   font-weight: 700;
   color: var(--text-color-primary);
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-height: 1.5;
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: pointer;
@@ -598,7 +633,7 @@ const getProgress = computed(() => {
 
   .workspace-layout .workspace-sidebar {
     position: fixed;
-    top: 52px;
+    top: var(--app-header-height, 56px);
     bottom: 0;
     left: 0;
     width: 56px;
@@ -611,12 +646,16 @@ const getProgress = computed(() => {
   }
 
   .novel-info,
+  .sidebar-book,
+  .back-btn span,
   .sidebar-stats,
   .nav-badge,
   .nav-link-label,
   .ai-task-panel {
     display: none;
   }
+
+  .back-btn { width: 32px; align-self: center; }
 
   .sidebar-nav {
     padding: 8px 6px;
@@ -641,4 +680,9 @@ const getProgress = computed(() => {
     width: 100%;
   }
 }
+.sidebar-chapters { list-style: none; padding: 6px 0 16px 18px; margin-left: 16px; border-left: 1px solid var(--border-color-hover); display: grid; gap: 4px; }
+.sidebar-chapters a { display: block; padding: 8px; color: var(--text-color-secondary); font-size: 12px; border-radius: var(--radius-sm); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sidebar-chapters a[aria-current="page"] { color: var(--color-primary); background: var(--color-primary-light); }
+.sidebar-chapters span { margin-left: 6px; }
+@media (max-width: 768px) { .sidebar-chapters { display: none; } }
 </style>

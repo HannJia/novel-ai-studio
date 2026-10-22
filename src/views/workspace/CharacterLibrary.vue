@@ -3,12 +3,8 @@
     <div class="chars-header">
       <h2 class="page-title">角色库</h2>
       <div class="header-actions">
-        <n-button-group size="small">
-          <n-button :type="viewMode === 'grid' ? 'primary' : 'default'" @click="viewMode = 'grid'">列表</n-button>
-          <n-button :type="viewMode === 'graph' ? 'primary' : 'default'" @click="viewMode = 'graph'">关系图</n-button>
-        </n-button-group>
-        <n-button size="small" @click="resetForm(); showAddModal = true">+ 手动添加</n-button>
-        <n-button size="small" type="primary" @click="aiScanCharacters" :loading="scanning" :disabled="relationshipScanning">
+        <n-button type="primary" @click="resetForm(); showAddModal = true">+ 手动添加</n-button>
+        <n-button @click="aiScanCharacters" :loading="scanning" :disabled="relationshipScanning">
           AI 扫描角色
         </n-button>
         <n-button v-if="scanning || relationshipScanning" size="small" @click="cancelAnalysis">停止</n-button>
@@ -20,11 +16,14 @@
     </div>
 
     <!-- 筛选栏 -->
-    <div class="filter-bar" v-if="characters.length > 0">
+    <div class="filter-bar">
+      <div class="character-view-tabs" role="group" aria-label="角色视图"><button type="button" :class="{ active: viewMode === 'grid' }" :aria-pressed="viewMode === 'grid'" @click="viewMode = 'grid'">列表</button><button type="button" :class="{ active: viewMode === 'graph' }" :aria-pressed="viewMode === 'graph'" @click="viewMode = 'graph'">关系图</button></div>
       <n-input v-model:value="searchText" placeholder="搜索角色..." size="small" clearable style="max-width:200px;" />
       <n-select v-model:value="statusFilter" :options="statusOptions" size="small" clearable placeholder="状态" style="width:100px;" />
     </div>
 
+    <div class="character-workbench" :class="{ 'with-detail': showDetail && selectedChar }">
+    <div class="character-main">
     <!-- 空状态 -->
     <div v-if="!characters.length && !scanning" class="empty-state paper-panel">
       <div class="empty-icon"><svg class="ink-mountains" viewBox="0 0 220 80" aria-hidden="true"><path fill="currentColor" d="M0 80 L40 38 L62 56 L98 14 L130 50 L150 34 L188 66 L220 46 L220 80 Z" /></svg></div>
@@ -45,12 +44,15 @@
         v-for="char in filteredChars"
         :key="char.id"
         class="char-card paper-panel"
+        tabindex="0"
+        role="button"
+        :aria-label="`${char.name}，${char.identity || '未知身份'}`"
         @click="selectChar(char)"
+        @keydown.enter="selectChar(char)"
+        @keydown.space.prevent="selectChar(char)"
         :class="{ 'char-card--selected': selectedId === char.id }"
       >
-        <div class="char-avatar" :style="{ background: char.avatarColor }">
-          {{ char.name[0] }}
-        </div>
+        <CharacterAvatar :character="char" :size="96" :era="inferredEra" />
         <div class="char-info">
           <h3 class="char-name">{{ char.name }}</h3>
           <span class="char-identity">{{ char.identity || '未知身份' }}</span>
@@ -60,20 +62,22 @@
           <span class="char-tag" v-if="char.faction">{{ char.faction }}</span>
           <span class="char-tag" v-if="char.powerLevel">{{ char.powerLevel }}</span>
         </div>
+        <p v-if="char.description" class="char-description">{{ char.description }}</p>
       </div>
     </div>
 
     <!-- 角色关系图谱 -->
     <div v-if="viewMode === 'graph' && filteredChars.length > 0" class="relationship-graph">
+      <div class="graph-controls"><n-button size="small" :aria-pressed="graphFit" @click="graphFit = true">适应画布</n-button><n-button size="small" :aria-pressed="!graphFit" @click="graphFit = false">100%</n-button></div>
       <div class="graph-scroll">
         <canvas ref="graphCanvas" :width="graphSize.width" :height="graphSize.height"
-          :style="{ width: `${graphSize.width}px` }" aria-label="人物关系图" @click="onGraphClick"></canvas>
+          :style="{ width: graphFit ? `min(100%, ${graphSize.width}px, ${65 * graphSize.width / graphSize.height}vh)` : `${graphSize.width}px`, height: 'auto' }" role="img" aria-label="人物关系图，下方按钮可查看各角色" @click="onGraphClick"></canvas>
       </div>
       <p v-if="filteredChars.length < 2" class="graph-hint">当前仅显示一个角色</p>
       <p v-else-if="relationshipEdges.length === 0" class="graph-hint">
         当前角色之间尚无已确认关系
       </p>
-      <div v-else class="graph-legend">
+      <div v-else class="graph-legend" aria-live="polite">
         <span>已显示 {{ relationshipEdges.length }} 条关系</span>
       </div>
       <div class="graph-node-links">
@@ -81,14 +85,13 @@
       </div>
     </div>
 
+    </div>
     <!-- 角色详情面板 -->
-    <n-drawer v-model:show="showDetail" :width="400" placement="right">
-      <n-drawer-content :title="selectedChar?.name || ''" closable>
+    <aside v-if="showDetail && selectedChar" class="character-detail paper-panel" aria-label="角色详情">
+      <header class="character-detail-heading"><h3>{{ selectedChar.name }}</h3><button type="button" aria-label="关闭角色详情" @click="showDetail = false">×</button></header>
         <template v-if="selectedChar">
           <div class="detail-panel">
-            <div class="detail-avatar" :style="{ background: selectedChar.avatarColor }">
-              {{ selectedChar.name[0] }}
-            </div>
+            <CharacterAvatar :character="selectedChar" :size="88" :era="inferredEra" style="margin: 0 auto 12px;" />
 
             <div class="detail-field">
               <label>别称</label>
@@ -154,35 +157,98 @@
             </div>
           </div>
         </template>
-      </n-drawer-content>
-    </n-drawer>
+    </aside>
+    </div>
 
     <!-- 添加/编辑弹窗 -->
-    <n-modal v-model:show="showAddModal" preset="card" title="角色信息" style="max-width:500px;">
+    <n-modal v-model:show="showAddModal" preset="card" title="编辑角色资料" style="width:min(1040px,calc(100vw - 32px));max-height:90vh;overflow-y:auto;">
       <div class="char-form">
+        <div class="char-profile"><div class="char-fields">
+        <div class="char-form-field">
         <label>姓名 *</label>
         <n-input v-model:value="form.name" size="small" placeholder="角色姓名" />
+        </div>
+        <div class="char-form-field">
         <label>别称（逗号分隔）</label>
         <n-input v-model:value="form.aliasesText" size="small" placeholder="如：林少侠, 小林" />
+        </div>
+        <div class="char-form-field">
         <label>身份</label>
         <n-input v-model:value="form.identity" size="small" placeholder="如：天衍宗外门弟子" />
+        </div>
+        <div class="char-form-field">
         <label>性格</label>
         <n-input v-model:value="form.personality" size="small" placeholder="如：沉稳内敛，心思缜密" />
+        </div>
+        <div class="char-form-field">
         <label>实力</label>
         <n-input v-model:value="form.powerLevel" size="small" placeholder="如：炼气一层" />
+        </div>
+        <div class="char-form-field">
         <label>阵营</label>
         <n-input v-model:value="form.faction" size="small" placeholder="如：天衍宗" />
+        </div>
+        <div class="char-form-field">
         <label>状态</label>
         <n-select v-model:value="form.status" :options="statusOptions" size="small" />
+        </div>
+        <div class="char-form-field">
         <label>描述</label>
         <n-input v-model:value="form.description" type="textarea" :rows="3" size="small" placeholder="角色详细描述" />
-        <label>人物关系</label>
+        </div>
+        </div>
+          <div class="avatar-preview">
+            <div class="avatar-preview-box">
+              <CharacterAvatar :character="formCharacter" :size="96" :era="inferredEra" />
+              <div v-if="selectedAvatar" class="avatar-preview-label">{{ selectedAvatar.label }}</div>
+            </div>
+            <n-button size="small" @click="form.avatarId = ''">自动匹配</n-button>
+          </div>
+        </div>
+        <div class="avatar-picker"><h3>内置水墨头像</h3><p class="avatar-help">按时代、性别与身份挑选，保存后应用到角色。</p>
+          <div class="avatar-filters">
+            <n-button-group size="tiny" role="group" aria-label="头像时代">
+              <n-button :aria-pressed="avatarFilterEra === ''" :type="avatarFilterEra === '' ? 'primary' : 'default'" @click="avatarFilterEra = ''">全部</n-button>
+              <n-button :aria-pressed="avatarFilterEra === 'ancient'" :type="avatarFilterEra === 'ancient' ? 'primary' : 'default'" @click="avatarFilterEra = 'ancient'">古代</n-button>
+              <n-button :aria-pressed="avatarFilterEra === 'modern'" :type="avatarFilterEra === 'modern' ? 'primary' : 'default'" @click="avatarFilterEra = 'modern'">现代</n-button>
+            </n-button-group>
+            <n-button-group size="tiny" role="group" aria-label="头像性别">
+              <n-button :aria-pressed="avatarFilterGender === ''" :type="avatarFilterGender === '' ? 'primary' : 'default'" @click="avatarFilterGender = ''">全部</n-button>
+              <n-button :aria-pressed="avatarFilterGender === 'female'" :type="avatarFilterGender === 'female' ? 'primary' : 'default'" @click="avatarFilterGender = 'female'">女性</n-button>
+              <n-button :aria-pressed="avatarFilterGender === 'male'" :type="avatarFilterGender === 'male' ? 'primary' : 'default'" @click="avatarFilterGender = 'male'">男性</n-button>
+            </n-button-group>
+            <n-button-group size="tiny" role="group" aria-label="头像身份">
+              <n-button :aria-pressed="avatarFilterCategory === ''" :type="avatarFilterCategory === '' ? 'primary' : 'default'" @click="avatarFilterCategory = ''">全部</n-button>
+              <n-button :aria-pressed="avatarFilterCategory === 'main'" :type="avatarFilterCategory === 'main' ? 'primary' : 'default'" @click="avatarFilterCategory = 'main'">主角女主</n-button>
+              <n-button :aria-pressed="avatarFilterCategory === 'villain'" :type="avatarFilterCategory === 'villain' ? 'primary' : 'default'" @click="avatarFilterCategory = 'villain'">反派</n-button>
+              <n-button :aria-pressed="avatarFilterCategory === 'support'" :type="avatarFilterCategory === 'support' ? 'primary' : 'default'" @click="avatarFilterCategory = 'support'">配角</n-button>
+              <n-button :aria-pressed="avatarFilterCategory === 'profession'" :type="avatarFilterCategory === 'profession' ? 'primary' : 'default'" @click="avatarFilterCategory = 'profession'">职业人物</n-button>
+            </n-button-group>
+          </div>
+          <div v-if="filteredAvatars.length === 0" class="avatar-empty">无匹配头像 (共 {{ characterAvatars.length }} 个)</div>
+          <div v-else class="avatar-grid" role="group" aria-label="内置水墨头像">
+            <button
+              v-for="av in filteredAvatars"
+              :key="av.id"
+              type="button"
+              class="avatar-tile"
+              :class="{ 'avatar-tile--selected': form.avatarId === av.id }"
+              :aria-label="av.label"
+              :aria-pressed="form.avatarId === av.id"
+              @click="form.avatarId = av.id"
+            >
+              <CharacterAvatar :character="{ id: 'tile', name: av.label, identity: av.role, avatarId: av.id, avatarColor: 'var(--color-accent)' }" :size="64" :era="av.era" /><span class="avatar-tile-label">{{ av.label }}</span>
+            </button>
+          </div>
+          <div class="avatar-count">显示 {{ filteredAvatars.length }} / {{ characterAvatars.length }} 个头像</div>
+        </div>
+        <section class="char-relationships"><label>人物关系</label>
         <div v-for="(relation, index) in form.relationships" :key="index" class="relationship-form-row">
           <n-select v-model:value="relation.targetId" :options="relationTargetOptions" placeholder="关联角色" />
           <n-input v-model:value="relation.relation" placeholder="关系描述" />
           <n-button size="small" @click="form.relationships.splice(index, 1)">移除</n-button>
         </div>
-        <n-button size="small" @click="form.relationships.push({ targetId: '', targetName: '', relation: '' })">添加关系</n-button>
+        <n-button size="small" @click="form.relationships.push({ targetId: '', targetName: '', relation: '' })">添加关系</n-button></section>
       </div>
       <template #action>
         <n-button @click="showAddModal = false">取消</n-button>
@@ -206,15 +272,19 @@
 </template>
 
 <script setup lang="ts">
+import { fitGraphText, placeGraphLabel, type GraphBox } from '@/services/relationshipGraphLayout'
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
-import { NButton, NButtonGroup, NInput, NSelect, NDrawer, NDrawerContent, NModal, NPopconfirm, NCheckbox, useMessage } from 'naive-ui'
+import { NButton, NButtonGroup, NInput, NSelect, NModal, NPopconfirm, NCheckbox, useMessage } from 'naive-ui'
 import { useNovelStore } from '@/stores/novel'
 import { useConfigStore } from '@/stores/config'
 import { useThemeStore } from '@/stores/theme'
 import { callAI } from '@/services/ai'
 import { parseAiJsonArray } from '@/utils/aiJson'
 import type { Character } from '@/types/novel'
+import CharacterAvatar from '@/components/CharacterAvatar.vue'
+import { characterAvatars, resolveCharacterAvatar, inferAvatarEra } from '@/data/characterAvatars'
+import type { CharacterAvatarEra, CharacterAvatarGender } from '@/data/characterAvatars'
 
 const route = useRoute()
 const novelStore = useNovelStore()
@@ -236,13 +306,33 @@ const relationshipScanning = ref(false)
 const editingId = ref('')
 const viewMode = ref<'grid' | 'graph'>('grid')
 const graphCanvas = ref<HTMLCanvasElement | null>(null)
+const atlasImages = ref<Map<string, HTMLImageElement>>(new Map())
+const avatarFilterEra = ref<CharacterAvatarEra | ''>('')
+const avatarFilterGender = ref<CharacterAvatarGender | ''>('')
+const avatarFilterCategory = ref<'' | 'main' | 'villain' | 'support' | 'profession'>('')
 const showRelationshipReview = ref(false)
 const pendingRelationships = ref<Array<{ sourceName: string; targetName: string; relation: string; selected: boolean }>>([])
 let analysisController: AbortController | null = null
 let reviewNovelId = ''
 let reviewSnapshot = ''
 let graphPositions: Array<{ x: number; y: number; char: Character }> = []
-const graphSize = computed(() => ({ width: Math.max(700, filteredChars.value.length * 52), height: Math.max(440, filteredChars.value.length * 36) }))
+const graphFit = ref(true)
+const graphRings = computed(() => {
+  const rings: Array<{ radius: number; count: number }> = []
+  let remaining = Math.max(0, filteredChars.value.length - 1)
+  let radius = 230
+  while (remaining > 0) {
+    const count = Math.min(remaining, Math.floor(2 * Math.PI * radius / 220))
+    rings.push({ radius, count })
+    remaining -= count
+    radius += 210
+  }
+  return rings
+})
+const graphSize = computed(() => {
+  const diameter = 2 * ((graphRings.value[graphRings.value.length - 1]?.radius || 0) + 140)
+  return { width: Math.max(760, diameter), height: Math.max(600, diameter) }
+})
 
 function analysisSnapshot() {
   return JSON.stringify({ id: novelId.value, outline: novel.value?.outline, characters: characters.value, chapters: novel.value?.chapters })
@@ -267,6 +357,36 @@ const form = ref({
   powerLevel: '', faction: '', status: '活跃' as Character['status'],
   description: '',
   relationships: [] as Character['relationships'],
+  avatarId: '' as string,
+})
+
+const formCharacter = computed(() => ({
+  id: editingId.value || 'preview',
+  name: form.value.name || '预览',
+  identity: form.value.identity,
+  avatarId: form.value.avatarId || undefined,
+  avatarColor: 'var(--color-accent)',
+}))
+
+const inferredEra = computed<CharacterAvatarEra>(() => {
+  if (!novel.value) return 'ancient'
+  const worldText = [novel.value.genre, novel.value.subGenre, novel.value.genreLabel, novel.value.settings?.worldBuilding?.worldType].filter(Boolean).join(' ')
+  return inferAvatarEra(worldText)
+})
+
+const filteredAvatars = computed(() => {
+  let list = characterAvatars
+  if (avatarFilterEra.value) list = list.filter(av => av.era === avatarFilterEra.value)
+  if (avatarFilterGender.value) list = list.filter(av => av.gender === avatarFilterGender.value)
+  if (avatarFilterCategory.value === 'main') list = list.filter(av => av.category === 'heroine' || av.category === 'protagonist')
+  else if (avatarFilterCategory.value === 'profession') list = list.filter(av => !['heroine', 'protagonist', 'villain', 'support'].includes(av.category))
+  else if (avatarFilterCategory.value) list = list.filter(av => av.category === avatarFilterCategory.value)
+  return list
+})
+
+const selectedAvatar = computed(() => {
+  if (!form.value.avatarId) return null
+  return characterAvatars.find(av => av.id === form.value.avatarId) || null
 })
 
 const filteredChars = computed(() => {
@@ -316,6 +436,9 @@ function selectChar(char: Character) {
 }
 
 function editChar(char: Character) {
+  avatarFilterEra.value = ''
+  avatarFilterGender.value = ''
+  avatarFilterCategory.value = ''
   editingId.value = char.id
   form.value = {
     name: char.name,
@@ -327,6 +450,7 @@ function editChar(char: Character) {
     status: char.status,
     description: char.description,
     relationships: char.relationships.map(relation => ({ ...relation })),
+    avatarId: char.avatarId || '',
   }
   showDetail.value = false
   showAddModal.value = true
@@ -347,6 +471,7 @@ function saveChar() {
       return target && relation.relation.trim() && target.id !== editingId.value
         ? [{ targetId: target.id, targetName: target.name, relation: relation.relation.trim() }] : []
     }),
+    avatarId: form.value.avatarId || undefined,
   }
 
   if (editingId.value) {
@@ -363,12 +488,16 @@ function saveChar() {
 function removeChar(id: string) {
   novelStore.deleteCharacter(novelId.value, id)
   showDetail.value = false
+  if (selectedId.value === id) selectedId.value = ''
   msg.success('已删除')
 }
 
 function resetForm() {
   editingId.value = ''
-  form.value = { name: '', aliasesText: '', identity: '', personality: '', powerLevel: '', faction: '', status: '活跃', description: '', relationships: [] }
+  form.value = { name: '', aliasesText: '', identity: '', personality: '', powerLevel: '', faction: '', status: '活跃', description: '', relationships: [], avatarId: '' }
+  avatarFilterEra.value = ''
+  avatarFilterGender.value = ''
+  avatarFilterCategory.value = ''
 }
 
 // AI 扫描角色
@@ -595,79 +724,136 @@ function drawRelationshipGraph() {
   const n = chars.length
   const cx = w / 2
   const cy = h / 2
-  const radius = Math.min(w, h) * 0.35
-
-  // 计算节点位置（圆形布局）
-  const positions: { x: number; y: number }[] = []
-  for (let i = 0; i < n; i++) {
-    const angle = (2 * Math.PI * i) / n - (n === 2 ? Math.PI : Math.PI / 2)
-    positions.push({
-      x: cx + radius * Math.cos(angle),
-      y: cy + radius * Math.sin(angle),
-    })
+  const focusIndex = Math.max(0, chars.findIndex(char => char.id === selectedId.value))
+  const positions: { x: number; y: number }[] = Array.from({ length: n }, () => ({ x: cx, y: cy }))
+  const others = chars.map((_, index) => index).filter(index => index !== focusIndex)
+  let offset = 0
+  for (const ring of graphRings.value) {
+    for (let index = 0; index < ring.count; index++) {
+      const angle = 2 * Math.PI * index / ring.count - Math.PI / 2
+      positions[others[offset++]] = { x: cx + ring.radius * Math.cos(angle), y: cy + ring.radius * Math.sin(angle) }
+    }
   }
   graphPositions = positions.map((position, index) => ({ ...position, char: chars[index] }))
   const styles = getComputedStyle(canvas)
   const textColor = styles.getPropertyValue('--text-color-primary').trim() || '#333'
   const surface = styles.getPropertyValue('--bg-color-card').trim() || '#fff'
 
-  // 绘制关系线
   ctx.strokeStyle = '#9aa4b2'
   ctx.lineWidth = 1.5
   ctx.font = '11px sans-serif'
   ctx.textAlign = 'center'
 
+  const occupiedLabels: GraphBox[] = positions.map((point, index) => {
+    const radius = index === focusIndex ? 52 : 40
+    return { x: point.x - 86, y: point.y - radius - 6, width: 172, height: radius * 2 + 62 }
+  })
   for (const edge of relationshipEdges.value) {
     const i = chars.findIndex(char => char.id === edge.source.id)
     const j = chars.findIndex(char => char.id === edge.target.id)
     if (i >= 0 && j >= 0) {
         const p1 = positions[i]
         const p2 = positions[j]
-        // 线条
         ctx.beginPath()
         ctx.moveTo(p1.x, p1.y)
         ctx.lineTo(p2.x, p2.y)
         ctx.strokeStyle = '#9aa4b2'
         ctx.lineWidth = 2
         ctx.stroke()
-        // 关系标签
-        const mx = (p1.x + p2.x) / 2
-        const my = (p1.y + p2.y) / 2
-        const label = edge.relation.length > 18 ? edge.relation.slice(0, 18) + '…' : edge.relation
-        const labelWidth = ctx.measureText(label).width
-        ctx.fillStyle = surface
-        ctx.fillRect(mx - labelWidth / 2 - 5, my - 16, labelWidth + 10, 18)
-        ctx.fillStyle = textColor
-        ctx.fillText(label, mx, my - 4)
+        const label = fitGraphText(edge.relation, 110, text => ctx.measureText(text).width)
+        const box = placeGraphLabel(p1, p2, ctx.measureText(label).width + 14, occupiedLabels, { x: w, y: h })
+        if (box && label) {
+          ctx.fillStyle = surface
+          ctx.fillRect(box.x, box.y, box.width, box.height)
+          ctx.fillStyle = textColor
+          ctx.fillText(label, box.x + box.width / 2, box.y + 14)
+          occupiedLabels.push(box)
+        }
     }
   }
 
-  // 绘制节点
   for (let i = 0; i < n; i++) {
     const char = chars[i]
     const p = positions[i]
-    // 圆形背景
-    ctx.beginPath()
-    ctx.arc(p.x, p.y, 24, 0, 2 * Math.PI)
-    ctx.fillStyle = char.avatarColor || '#e0e0e0'
-    ctx.fill()
-    ctx.strokeStyle = '#fff'
-    ctx.lineWidth = 2
-    ctx.stroke()
-    // 姓名首字
-    ctx.fillStyle = '#fff'
-    ctx.font = 'bold 14px sans-serif'
-    ctx.textAlign = 'center'
-    ctx.fillText(char.name[0], p.x, p.y + 5)
-    // 姓名
+    const nodeRadius = i === focusIndex ? 52 : 40
+    const avatar = resolveCharacterAvatar(char, { era: inferredEra.value })
+    if (avatar) {
+      const img = atlasImages.value.get(avatar.src)
+      if (img && img.complete && img.naturalWidth > 0) {
+        const tileW = img.naturalWidth / 4
+        const tileH = img.naturalHeight / 4
+        const sx = avatar.col * tileW
+        const sy = avatar.row * tileH
+        ctx.save()
+        ctx.beginPath()
+        ctx.arc(p.x, p.y, nodeRadius, 0, 2 * Math.PI)
+        ctx.clip()
+        ctx.drawImage(img, sx, sy, tileW, tileH, p.x - nodeRadius, p.y - nodeRadius, nodeRadius * 2, nodeRadius * 2)
+        ctx.restore()
+        ctx.beginPath()
+        ctx.arc(p.x, p.y, nodeRadius, 0, 2 * Math.PI)
+        ctx.strokeStyle = styles.getPropertyValue(i === focusIndex ? '--color-primary' : '--color-accent').trim()
+        ctx.lineWidth = 2
+        ctx.stroke()
+      } else {
+        ctx.beginPath()
+        ctx.arc(p.x, p.y, nodeRadius, 0, 2 * Math.PI)
+        ctx.fillStyle = char.avatarColor || '#e0e0e0'
+        ctx.fill()
+        ctx.strokeStyle = '#fff'
+        ctx.lineWidth = 2
+        ctx.stroke()
+        ctx.fillStyle = '#fff'
+        ctx.font = 'bold 14px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.fillText(char.name[0] || '?', p.x, p.y + 5)
+      }
+    } else {
+      ctx.beginPath()
+      ctx.arc(p.x, p.y, nodeRadius, 0, 2 * Math.PI)
+      ctx.fillStyle = char.avatarColor || '#e0e0e0'
+      ctx.fill()
+      ctx.strokeStyle = '#fff'
+      ctx.lineWidth = 2
+      ctx.stroke()
+      ctx.fillStyle = '#fff'
+      ctx.font = 'bold 14px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText(char.name[0] || '?', p.x, p.y + 5)
+    }
     ctx.fillStyle = textColor
-    ctx.font = '12px sans-serif'
-    const nameWidth = ctx.measureText(char.name).width
+    ctx.font = '600 17px serif'
+    const name = fitGraphText(char.name, 156, text => ctx.measureText(text).width)
+    const nameWidth = ctx.measureText(name).width
     ctx.fillStyle = surface
-    ctx.fillRect(p.x - nameWidth / 2 - 3, p.y + 27, nameWidth + 6, 18)
+    ctx.fillRect(p.x - nameWidth / 2 - 3, p.y + nodeRadius + 8, nameWidth + 6, 22)
     ctx.fillStyle = textColor
-    ctx.fillText(char.name, p.x, p.y + 40)
+    ctx.fillText(name, p.x, p.y + nodeRadius + 26)
+    ctx.font = '12px sans-serif'
+    const identity = fitGraphText(char.identity || '', 156, text => ctx.measureText(text).width)
+    ctx.fillStyle = surface
+    ctx.fillRect(p.x - 84, p.y + nodeRadius + 30, 168, 21)
+    ctx.fillStyle = textColor
+    ctx.fillText(identity, p.x, p.y + nodeRadius + 46)
   }
+}
+
+function loadAtlasImage(src: string) {
+  if (atlasImages.value.has(src)) return
+  const img = new Image()
+  img.onload = () => {
+    if (viewMode.value === 'graph') nextTick(drawRelationshipGraph)
+  }
+  img.onerror = () => {
+    atlasImages.value.delete(src)
+  }
+  img.src = src
+  atlasImages.value.set(src, img)
+}
+
+function preloadAllAtlases() {
+  const srcs = new Set(characterAvatars.map(av => av.src))
+  srcs.forEach(src => loadAtlasImage(src))
 }
 
 function onGraphClick(event: MouseEvent) {
@@ -676,23 +862,35 @@ function onGraphClick(event: MouseEvent) {
   const bounds = canvas.getBoundingClientRect()
   const x = (event.clientX - bounds.left) * canvas.width / bounds.width
   const y = (event.clientY - bounds.top) * canvas.height / bounds.height
-  const node = graphPositions.find(position => Math.hypot(position.x - x, position.y - y) <= 30)
+  const node = graphPositions.find(position => Math.hypot(position.x - x, position.y - y) <= (position.char.id === selectedId.value || (!selectedId.value && position.char.id === filteredChars.value[0]?.id) ? 52 : 40))
   if (node) selectChar(node.char)
 }
 
 // 监听视图切换绘制图谱
 watch(viewMode, (val) => {
   if (val === 'graph') {
+    preloadAllAtlases()
     nextTick(() => drawRelationshipGraph())
   }
 })
 
+onBeforeUnmount(() => {
+  atlasImages.value.forEach(img => {
+    img.onload = null
+    img.onerror = null
+  })
+  atlasImages.value.clear()
+})
+
 watch(filteredChars, () => {
+  graphPositions = []
   if (viewMode.value === 'graph') {
     nextTick(() => drawRelationshipGraph())
   }
 }, { deep: true })
 watch(() => themeStore.currentTheme, () => { if (viewMode.value === 'graph') nextTick(drawRelationshipGraph) })
+watch(inferredEra, () => { if (viewMode.value === 'graph') nextTick(drawRelationshipGraph) })
+watch(selectedId, () => { if (viewMode.value === 'graph') nextTick(drawRelationshipGraph) })
 </script>
 
 <style scoped>
@@ -725,8 +923,15 @@ watch(() => themeStore.currentTheme, () => { if (viewMode.value === 'graph') nex
 /* 角色网格 */
 .char-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: var(--space-md);
+}
+
+@media (min-width: 1280px) {
+  .char-grid { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
+}
+@media (min-width: 1440px) {
+  .char-grid { grid-template-columns: repeat(3, 1fr); }
 }
 
 .char-card {
@@ -740,31 +945,17 @@ watch(() => themeStore.currentTheme, () => { if (viewMode.value === 'graph') nex
   border-radius: var(--radius-lg);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background-color var(--transition-fast);
 }
-.char-card:hover { border-color: var(--border-color-hover); box-shadow: var(--shadow-md); }
+.char-card:hover,
+.char-card:focus-visible { border-color: var(--border-color-hover); box-shadow: var(--shadow-md); outline: none; }
 .char-card--selected {
   border-color: var(--color-primary);
   background: var(--color-primary-light);
   box-shadow: inset 3px 0 0 var(--color-primary);
 }
 
-/* 印章风格头像：首字 + 圆角方块 + 内框 */
-.char-avatar,
-.detail-avatar {
-  display: flex; align-items: center; justify-content: center;
-  border-radius: var(--radius-md);
-  font-family: var(--font-family-serif);
-  font-weight: 700;
-  color: var(--text-color-inverse);
-  box-shadow: inset 0 0 0 2px var(--bg-color-paper), inset 0 0 0 3px currentColor;
-  flex-shrink: 0;
-}
-.char-avatar {
-  grid-row: span 2;
-  width: 48px; height: 48px;
-  font-size: 22px;
-}
+.char-info { grid-row: span 2; }
 
-.char-info { margin-bottom: 8px; min-width: 0; }
+.char-info { margin-bottom: 8px; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 .char-name { font-family: var(--font-family-serif); font-size: 16px; font-weight: 700; color: var(--text-color-primary); margin-bottom: 2px; }
 .char-identity { font-size: 12px; color: var(--text-color-tertiary); display: block; margin-bottom: 6px; }
 .char-status {
@@ -786,11 +977,7 @@ watch(() => themeStore.currentTheme, () => { if (viewMode.value === 'graph') nex
 
 /* 详情面板 */
 .detail-panel { display: flex; flex-direction: column; gap: 14px; }
-.detail-avatar {
-  width: 72px; height: 72px;
-  font-size: 32px;
-  margin: 0 auto 8px;
-}
+
 .detail-field {
   padding-bottom: 10px;
   border-bottom: 1px solid var(--border-color-light);
@@ -798,7 +985,7 @@ watch(() => themeStore.currentTheme, () => { if (viewMode.value === 'graph') nex
 .detail-field:last-of-type { border-bottom: 0; }
 .detail-field label { font-family: var(--font-family-serif); font-size: 13px; font-weight: 700; color: var(--text-color-primary); display: block; margin-bottom: 4px; }
 .detail-field p { font-size: 13px; color: var(--text-color-secondary); line-height: 1.6; margin: 0; }
-.relation-item { font-size: 13px; margin-bottom: 4px; }
+.relation-item { grid-column: 1 / -1; font-size: 13px; padding: 8px 0; border-bottom: 1px solid var(--border-color-light); line-height: 1.75; overflow-wrap: anywhere; }
 .detail-field ul { margin: 0; padding-left: 16px; font-size: 13px; color: var(--text-color-secondary); }
 .detail-actions { display: flex; gap: 8px; margin-top: 8px; }
 
@@ -821,18 +1008,58 @@ watch(() => themeStore.currentTheme, () => { if (viewMode.value === 'graph') nex
   margin-top: var(--space-md);
 }
 
-.graph-scroll { overflow: auto; max-height: 65vh; }
+.graph-scroll { overflow: auto; max-height: 65vh; background: var(--bg-color-paper); border: 1px solid var(--border-color-light); border-radius: var(--radius-lg); }
+.graph-scroll canvas { display: block; margin-inline: auto; max-width: none; }
 .relationship-graph canvas {
   display: block;
   margin: 0 auto;
   height: auto;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
+  border: 0;
   background: var(--bg-color-paper);
 }
 .graph-legend, .graph-node-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; font-size: 12px; }
 .relationship-form-row { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(100px, 1fr) auto; gap: 6px; }
 .relationship-review-row { display: grid; gap: 6px; margin-bottom: 12px; }
+
+.char-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
+.char-form-field { display: grid; align-content: start; gap: 6px; min-width: 0; }
+@media (max-width: 600px) { .char-fields { grid-template-columns: 1fr; } }
+.avatar-picker { display: flex; flex-direction: column; gap: 12px; }
+.avatar-preview { display: flex; align-items: center; gap: 12px; }
+.avatar-preview-box { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.avatar-preview-label { font-size: 11px; color: var(--text-color-tertiary); text-align: center; }
+.avatar-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.avatar-empty { padding: 24px; text-align: center; color: var(--text-color-tertiary); font-size: 13px; border: 1px dashed var(--border-color); border-radius: var(--radius-md); }
+.avatar-count { font-size: 12px; color: var(--text-color-tertiary); text-align: center; }
+.avatar-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 4px;
+}
+@media (min-width: 480px) {
+  .avatar-grid { grid-template-columns: repeat(8, 1fr); }
+}
+.avatar-tile {
+  border: 2px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  background: var(--bg-color-paper);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.avatar-tile:hover,
+.avatar-tile:focus-visible {
+  border-color: var(--border-color-hover);
+  box-shadow: var(--shadow-sm);
+  outline: none;
+}
+.avatar-tile--selected {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary-light);
+}
 
 .graph-hint {
   text-align: center;
@@ -855,4 +1082,48 @@ watch(() => themeStore.currentTheme, () => { if (viewMode.value === 'graph') nex
   background: var(--color-primary-light);
   color: var(--color-primary);
 }
+.char-card:focus-visible, .avatar-tile:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
+@media (max-width: 768px) { .char-grid { grid-template-columns: minmax(0, 1fr); } }
+.character-workbench { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 24px; }
+.character-workbench.with-detail { grid-template-columns: minmax(0, 1fr) 320px; }
+.character-main { min-width: 0; }
+.character-view-tabs { display: flex; gap: 24px; margin-right: auto; }
+.character-view-tabs button { border: 0; border-bottom: 2px solid transparent; background: none; padding: 10px 16px; color: var(--text-color-secondary); font: inherit; cursor: pointer; }
+.character-view-tabs button.active { color: var(--color-primary); border-color: var(--color-primary); font-weight: 600; }
+.filter-bar { flex-wrap: wrap; border-bottom: 1px solid var(--border-color-light); padding-bottom: 12px; }
+.char-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.char-card { display: flex; position: relative; flex-direction: column; align-items: flex-start; min-width: 0; min-height: 260px; padding: 20px; gap: 10px; }
+.char-card :deep(.character-avatar), .character-detail :deep(.character-avatar) { border-radius: 50%; border: 2px solid var(--border-color-hover); }
+.char-info { margin: 0; gap: 6px; }
+.char-name { font-size: 22px; }
+.char-identity { font-size: 14px; margin: 0; overflow-wrap: anywhere; }
+.char-status { position: absolute; right: 14px; top: 22px; }
+.char-tags { gap: 6px; }
+.char-description { border-top: 1px solid var(--border-color-light); padding-top: 12px; font-size: 14px; line-height: 1.8; color: var(--text-color-secondary); display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.character-detail { min-width: 0; padding: 24px; position: sticky; top: 0; max-height: calc(100dvh - 120px); overflow-y: auto; }
+.character-detail-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.character-detail-heading h3 { font-size: 24px; }
+.character-detail-heading button { border: 0; background: none; color: var(--text-color-secondary); font-size: 26px; cursor: pointer; }
+.character-detail .detail-field { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; }
+.character-detail .detail-field p { overflow-wrap: anywhere; }
+.character-detail .detail-actions { margin-top: auto; padding-top: 16px; }
+@media (max-width: 1350px) { .character-workbench.with-detail .char-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 1100px) { .character-workbench.with-detail { grid-template-columns: minmax(0, 1fr); } .character-detail { position: static; max-height: none; } .char-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 650px) { .char-grid, .character-workbench.with-detail .char-grid { grid-template-columns: minmax(0, 1fr); } .character-detail { padding: 18px; } }
+.graph-controls { display: flex; justify-content: flex-end; gap: 8px; padding-bottom: 12px; }
+.char-form { display: grid; grid-template-columns: minmax(260px, .8fr) minmax(0, 1.2fr); gap: 28px; }
+.char-profile { min-width: 0; display: flex; flex-direction: column-reverse; justify-content: flex-end; gap: 20px; }
+.char-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.char-form-field:last-child { grid-column: 1 / -1; }
+.avatar-preview { justify-content: center; padding: 16px; border-bottom: 1px solid var(--border-color-light); }
+.avatar-preview-box { gap: 8px; }
+.avatar-picker { min-width: 0; }
+.avatar-picker h3 { font: 600 22px var(--font-family-serif); margin: 0; }
+.avatar-help { color: var(--text-color-tertiary); font-size: 12px; margin: 0; }
+.avatar-filters { flex-direction: column; align-items: flex-start; }
+.avatar-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); max-height: 390px; gap: 8px; }
+.avatar-tile { min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 8px 3px; }
+.avatar-tile-label { font-size: 11px; color: var(--text-color-secondary); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.char-relationships { grid-column: 1 / -1; display: grid; gap: 10px; border-top: 1px solid var(--border-color-light); padding-top: 16px; }
+@media (max-width: 760px) { .char-form { grid-template-columns: 1fr; gap: 20px; } .avatar-grid { max-height: 320px; grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 </style>

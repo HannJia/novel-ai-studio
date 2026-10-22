@@ -1,5 +1,5 @@
 ﻿<template>
-  <div class="generate-page fade-in" id="generate-outline-page">
+  <div class="generate-page fade-in" :class="{ 'outline-ready': isDone }" id="generate-outline-page">
     <!-- 生成动画头部 -->
     <div class="generate-header">
       <div class="generate-animation" :class="{ 'animation-done': isDone }">
@@ -8,6 +8,8 @@
         <div class="ai-icon seal">{{ isDone ? '成' : '墨' }}</div>
       </div>
       <h2>{{ isDone ? '大纲生成完成！' : 'AI 正在构思大纲...' }}</h2>
+      <p v-if="isDone" class="generate-ready-hint">先检查和调整，再继续规划。</p>
+      <ol v-if="isDone" class="generation-steps" aria-label="创作进度"><li class="done">✓ 生成大纲</li><li :class="{ active: !acceptingOutline }">2 检查确认</li><li :class="{ active: acceptingOutline }">3 分卷规划</li></ol>
       <p v-if="!isDone && !hasError" class="generate-hint">
         正在根据你的设定生成总大纲，这可能需要 30 秒 ~ 2 分钟
       </p>
@@ -17,8 +19,9 @@
     <!-- 流式输出内容 -->
     <div class="output-container paper-panel" v-if="streamContent || isDone">
       <div v-if="isDone" class="outline-edit-toolbar" role="toolbar" aria-label="大纲编辑操作">
+        <h3>大纲草稿 <span>已生成</span></h3>
         <span v-if="acceptingOutline" class="outline-edit-status" role="status">正在规划分卷，完成后可在工作区编辑大纲</span>
-        <n-button v-if="!editingOutline" type="primary" :disabled="acceptingOutline" @click="startOutlineEdit">
+        <n-button v-if="!editingOutline" :disabled="acceptingOutline" @click="startOutlineEdit">
           <template #icon><n-icon><create-outline /></n-icon></template>编辑大纲
         </n-button>
         <template v-else>
@@ -419,11 +422,11 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: var(--space-xl);
-  height: calc(100vh - 52px);
+  padding: 32px;
+  height: calc(100vh - 56px);
   min-height: 0;
   overflow-y: auto;
-  gap: var(--space-lg);
+  gap: 24px;
 }
 
 .generate-header {
@@ -433,9 +436,11 @@ onUnmounted(() => {
 }
 
 .generate-header h2 {
-  font-size: 22px;
+  font-family: var(--font-family-serif);
+  font-size: 24px;
+  font-weight: 600;
   color: var(--text-color-primary);
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .generate-hint {
@@ -501,7 +506,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 800px;
+  max-width: 880px;
   flex: 1 1 auto;
   min-height: 180px;
   max-height: none;
@@ -515,18 +520,22 @@ onUnmounted(() => {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--space-lg);
+  padding: 28px 32px;
 }
 
 .output-content {
-  font-size: 14.5px;
-  line-height: 1.8;
+  font-size: 15px;
+  line-height: 1.85;
   color: var(--text-color-primary);
+  max-width: 720px;
+  margin: 0 auto;
 }
 
 .output-content :deep(h2) {
-  font-size: 20px;
-  margin: 20px 0 10px;
+  font-family: var(--font-family-serif);
+  font-size: 21px;
+  font-weight: 600;
+  margin: 24px 0 12px;
   color: var(--color-primary);
 }
 
@@ -571,14 +580,14 @@ onUnmounted(() => {
   flex-wrap: wrap;
   justify-content: center;
   align-items: stretch;
-  gap: var(--space-md);
+  gap: 12px;
   width: 100%;
-  max-width: 840px;
-  padding: 12px;
-  border: 1px solid var(--border-color-light);
-  border-radius: var(--radius-lg);
+  max-width: 920px;
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
   background: var(--bg-color-card);
-  box-shadow: var(--shadow-card);
+  box-shadow: 0 2px 12px rgba(43, 42, 40, 0.08);
   backdrop-filter: blur(12px);
   flex-shrink: 0;
 }
@@ -588,9 +597,9 @@ onUnmounted(() => {
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 12px var(--space-lg);
-  border-bottom: 1px solid var(--border-color-light);
+  gap: 10px;
+  padding: 16px 32px;
+  border-bottom: 1px solid var(--border-color);
   background: var(--bg-color-card);
 }
 .outline-edit-status { flex: 1; min-width: 160px; font-size: 12px; color: var(--text-color-secondary); }
@@ -696,22 +705,41 @@ onUnmounted(() => {
   }
 }
 
-@media (max-width: 640px) {
-  .generate-page {
-    padding: var(--space-md);
-  }
-
-  .generate-actions {
-    align-items: stretch;
-  }
-
-  .generate-actions :deep(.n-button) {
-    flex: 1 1 160px;
-  }
-
-  .title-picker-header {
-    flex-direction: column;
-    gap: 2px;
-  }
+@media (max-width: 768px) {
+  .generate-page { padding: 20px; }
+  .outline-output-scroll { padding: 20px 24px; }
+  .outline-edit-toolbar { padding: 12px 24px; }
+  .generate-actions { padding: 12px; gap: 10px; }
+  .title-picker-header { flex-direction: column; gap: 4px; }
 }
+@media (max-width: 390px) {
+  .generate-page { padding: 16px; }
+  .outline-output-scroll { padding: 16px 20px; }
+  .outline-edit-toolbar { padding: 10px 20px; }
+  .generate-actions { align-items: stretch; }
+  .generate-actions :deep(.n-button) { flex: 1 1 100%; }
+}
+.generate-page.outline-ready { display: grid; grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); align-items: start; gap: 24px; max-width: 1440px; width: 100%; margin: 0 auto; padding: 40px 32px; overflow-y: auto; }
+.outline-ready .generate-header { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto; text-align: left; margin: 0 0 8px; padding: 0; width: 100%; }
+.outline-ready .generate-animation { display: none; }
+.outline-ready .generate-header h2 { font: 700 38px var(--font-family-serif); margin: 0; }
+.generate-ready-hint { color: var(--text-color-secondary); margin-top: 12px; font-size: 15px; }
+.generation-steps { grid-column: 2; grid-row: 1 / 3; align-self: center; display: flex; flex-wrap: wrap; list-style: none; gap: 24px; color: var(--text-color-tertiary); font-size: 14px; }
+.generation-steps .done { color: var(--color-accent); }
+.generation-steps .active { color: var(--color-primary); font-weight: 600; }
+.outline-ready .output-container { width: 100%; max-width: none; margin: 0; align-self: stretch; min-height: 520px; }
+.outline-ready .outline-output-scroll { max-height: none; padding: 24px 32px; }
+.outline-ready .output-content { padding: 0; font-size: 15px; line-height: 1.9; }
+.outline-edit-toolbar h3 { margin-right: auto; font: 600 24px var(--font-family-serif); }
+.outline-edit-toolbar h3 span { display: inline-block; margin-left: 8px; padding: 3px 8px; color: var(--color-success); background: var(--bg-color-hover); font: 12px var(--font-family); }
+.outline-ready .generate-actions { position: static; bottom: auto; display: flex; flex-direction: column; align-items: stretch; gap: 16px; width: 100%; max-width: none; margin: 0; padding: 28px; background: var(--bg-color-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); box-shadow: none; }
+.outline-ready .title-picker { width: 100%; padding: 0; box-shadow: none; border: 0; }
+.outline-ready .title-picker-header { flex-direction: column; align-items: flex-start; gap: 8px; margin-bottom: 24px; }
+.outline-ready .title-picker-header strong { font: 600 28px var(--font-family-serif); }
+.outline-ready .title-options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; max-height: 360px; margin-bottom: 24px; }
+.outline-ready .title-option { padding: 16px; text-align: left; font: 600 20px var(--font-family-serif); }
+.outline-ready .generate-actions > .n-button:last-child { order: 1; }
+.outline-ready .generate-actions > .n-button:nth-last-child(2) { order: 2; }
+@media (max-width: 900px) { .generate-page.outline-ready { grid-template-columns: minmax(0, 1fr); padding: 24px; } .outline-ready .generate-header { grid-template-columns: minmax(0, 1fr); gap: 12px; } .generation-steps { grid-column: 1; grid-row: auto; } }
+@media (max-width: 550px) { .generate-page.outline-ready { padding: 20px 16px; } .outline-ready .generate-header h2 { font-size: 30px; } .outline-ready .outline-output-scroll { padding: 20px; } .outline-ready .generate-actions { padding: 20px; } .outline-edit-toolbar h3 { font-size: 20px; } }
 </style>

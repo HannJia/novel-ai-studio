@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [vue()],
   test: {
     environment: 'node',
-    exclude: ['.compare/**', 'node_modules/**'],
+    exclude: ['.compare/**', '.local-recovery/**', 'node_modules/**', 'scripts/model-team/*.test.cjs'],
   },
   resolve: {
     alias: {

@@ -120,7 +120,8 @@ describe('character relationship workflow', () => {
     await flushPromises()
     const canvas = wrapper.get('canvas')
     vi.spyOn(canvas.element, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 350, height: 220 } as DOMRect)
-    await canvas.trigger('click', { clientX: 98, clientY: 110 })
+    // The focused character is at the center; hit testing must map the scaled canvas back to its natural size.
+    await canvas.trigger('click', { clientX: 175, clientY: 110 })
     expect(wrapper.get('aside').text()).toContain('乙 → 甲')
     expect(wrapper.get('aside').text()).toContain('同事')
     wrapper.unmount()

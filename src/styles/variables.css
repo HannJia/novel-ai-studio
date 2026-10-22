@@ -8,6 +8,8 @@
    米白宣纸底 + 墨黑文字 + 朱砂红点缀 + 黛青辅助 */
 [data-theme="fanqie"],
 :root {
+  --app-header-height: 56px;
+  --content-max-width: 1440px;
   /* 主色调：朱砂 */
   --color-primary: #B83A2E;
   --color-primary-hover: #C94C3F;
@@ -34,7 +36,7 @@
   /* 文字色：墨色 */
   --text-color-primary: #2B2A28;
   --text-color-secondary: #5F5A52;
-  --text-color-tertiary: #8E877C;
+  --text-color-tertiary: #6E665A;
   --text-color-disabled: #BEB6A8;
   --text-color-inverse: #FFFDF8;
 
@@ -54,7 +56,7 @@
   /* 圆角 */
   --radius-sm: 4px;
   --radius-md: 6px;
-  --radius-lg: 8px;
+  --radius-lg: 10px;
   --radius-xl: 12px;
 
   /* 间距 */
@@ -122,7 +124,7 @@
 
   --text-color-primary: #2D3328;
   --text-color-secondary: #56604D;
-  --text-color-tertiary: #84907A;
+  --text-color-tertiary: #5D6851;
   --text-color-disabled: #B4BDA8;
   --text-color-inverse: #F7F9F1;
 
@@ -178,7 +180,7 @@
 
   --text-color-primary: #E6E0D4;
   --text-color-secondary: #ABA496;
-  --text-color-tertiary: #7C766B;
+  --text-color-tertiary: #A59D90;
   --text-color-disabled: #565249;
   --text-color-inverse: #191C20;
 
@@ -232,9 +234,6 @@
   }
   .page-container {
     padding: 8px;
-  }
-  .char-grid {
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)) !important;
   }
   .paper-editor {
     max-width: 100% !important;

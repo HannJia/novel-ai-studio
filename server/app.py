@@ -1,4 +1,4 @@
-"""Account-isolated, optimistic-concurrency sync. Never stores model credentials."""
+"""Account-isolated sync. Credentials are accepted only in opaque encrypted envelopes."""
 import hashlib
 import ipaddress
 import json
@@ -14,6 +14,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from server.preferences import mount_preferences
 
 VERSION = "1.0.7"
 MAX_BODY = 64 * 1024 * 1024
@@ -63,6 +64,11 @@ class Repository:
                   PRIMARY KEY(user_id,key));
                 CREATE TABLE IF NOT EXISTS limits(
                   key TEXT PRIMARY KEY, attempts INTEGER NOT NULL, expires REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS account_preferences(
+                  user_id TEXT PRIMARY KEY, version INTEGER NOT NULL, payload TEXT NOT NULL,
+                  hash TEXT NOT NULL, bytes INTEGER NOT NULL, updated REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS server_settings(
+                  key TEXT PRIMARY KEY, value TEXT NOT NULL);
             """)
 
     @contextmanager
@@ -118,6 +124,7 @@ class Repository:
     @staticmethod
     def public_user(db, user):
         used = db.execute("SELECT COALESCE(SUM(bytes),0) FROM documents WHERE user_id=?", (user["id"],)).fetchone()[0]
+        used += db.execute("SELECT COALESCE(SUM(bytes),0) FROM account_preferences WHERE user_id=?", (user["id"],)).fetchone()[0]
         return {"id": user["id"], "username": user["username"], "role": user["role"],
                 "quotaBytes": user["quota"], "usedBytes": used}
 
@@ -192,7 +199,7 @@ def create_app(data_dir=None):
 
     @app.get("/v1/health")
     def health():
-        return {"ok": True, "version": VERSION, "protocol": 1, "features": ["inspiration", "change-password"]}
+        return {"ok": True, "version": VERSION, "protocol": 1, "features": ["inspiration", "change-password", "preferences-v1", "preferences-account-key-v1"]}
 
     @app.post("/v1/auth/register")
     async def register(request: Request):
@@ -322,7 +329,7 @@ def create_app(data_dir=None):
             rows = db.execute("SELECT key,version,hash,bytes,updated FROM documents WHERE user_id=? ORDER BY key",
                               (user["id"],)).fetchall()
         include_inspiration = request.query_params.get("include") == "inspiration"
-        return {"protocol": 1, "features": ["inspiration", "change-password"],
+        return {"protocol": 1, "features": ["inspiration", "change-password", "preferences-v1", "preferences-account-key-v1"],
                 "records": [record(row, False) for row in rows if include_inspiration or not row["key"].startswith("inspiration:")]}
 
     @app.post("/v1/sync/pull")
@@ -385,10 +392,12 @@ def create_app(data_dir=None):
             if not current and count >= 2000:
                 fail(413, "Document count quota exceeded")
             used = db.execute("SELECT COALESCE(SUM(bytes),0) FROM documents WHERE user_id=?", (user["id"],)).fetchone()[0]
+            used += db.execute("SELECT COALESCE(SUM(bytes),0) FROM account_preferences WHERE user_id=?", (user["id"],)).fetchone()[0]
             delta = size - (current["bytes"] if current else 0)
             if used + delta > user["quota"]:
                 fail(413, "Account storage quota exceeded")
             total = db.execute("SELECT COALESCE(SUM(bytes),0) FROM documents").fetchone()[0]
+            total += db.execute("SELECT COALESCE(SUM(bytes),0) FROM account_preferences").fetchone()[0]
             if total + delta > int(os.environ.get("SYNC_GLOBAL_QUOTA", str(12 * 1024**3))):
                 fail(507, "Server storage quota reached")
             next_version = version + 1
@@ -400,4 +409,5 @@ def create_app(data_dir=None):
             row = db.execute("SELECT * FROM documents WHERE user_id=? AND key=?", (user["id"], key)).fetchone()
             return {"record": record(row)}
 
+    mount_preferences(app, repo, body_json, fail, digest)
     return app

@@ -10,6 +10,9 @@ const rootDir = path.dirname(fileURLToPath(import.meta.url))
 export default defineConfig({
   plugins: [vue(), pdfjsAssets(path.join(rootDir, 'node_modules/pdfjs-dist')), ocrAssets(rootDir)],
   base: './',
+  server: {
+    watch: { ignored: ['**/.local-recovery/**', '**/.compare/**', '**/release/**'] },
+  },
   resolve: {
     alias: {
       '@': path.resolve(rootDir, 'src'),

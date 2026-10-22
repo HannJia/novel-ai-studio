@@ -10,6 +10,7 @@ import { showRecoveryScreen } from './services/recoveryScreen'
 import { cloudApplyBusy, flushEditorDrafts } from './services/appLifecycle'
 import { prepareUpdateInstall } from './services/updateSafety'
 import { useCloudSyncStore } from './stores/cloudSync'
+import { useCloudPreferencesStore } from './stores/cloudPreferences'
 import { useInspirationSessionsStore } from './stores/inspirationSessions'
 
 // 全局样式
@@ -61,7 +62,7 @@ async function bootstrap() {
   }
 
   app.mount('#app')
-  void useCloudSyncStore().initialize()
+  void useCloudSyncStore().initialize().then(() => useCloudPreferencesStore().initialize())
   router.afterEach(() => useCloudSyncStore().schedule())
 }
 

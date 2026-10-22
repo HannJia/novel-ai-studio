@@ -27,6 +27,14 @@
       </div>
     </div>
 
+    <!-- 继续写作 -->
+    <button v-if="resumeTarget && activeTab === 'all'" class="resume-card" @click="resumeWriting">
+      <span class="resume-text">
+        <span class="resume-chapter">《{{ resumeTarget.novel.title }}》· {{ resumeTarget.chapterLabel }}</span>
+      </span>
+      <span class="resume-action">继续写作 <n-icon :size="16"><chevron-forward-outline /></n-icon></span>
+    </button>
+
     <!-- 分类标签 -->
     <div class="shelf-tabs" role="tablist" aria-label="书架分类">
       <button
@@ -70,10 +78,8 @@
       >
         <!-- 线装书封面 -->
         <div class="book-cover" :style="coverStyle(novel)">
-          <div class="book-binding" aria-hidden="true"><span v-for="n in 4" :key="n" /></div>
           <div class="book-label">
             <span class="book-label-text">{{ coverTitle(novel.title) }}</span>
-            <span class="book-label-seal" aria-hidden="true" />
           </div>
           <span v-if="novel.status === 'creating'" class="cover-badge">生成中</span>
         </div>
@@ -127,19 +133,10 @@
         <span class="new-card-plus"><n-icon :size="26"><add-outline /></n-icon></span>
         <span class="new-card-title">新建一部作品</span>
         <span class="new-card-hint">从一个念头，开始新的故事</span>
-        <svg class="ink-mountains new-card-ink" viewBox="0 0 220 80" aria-hidden="true"><path fill="currentColor" d="M0 80 L40 38 L62 56 L98 14 L130 50 L150 34 L188 66 L220 46 L220 80 Z" /></svg>
       </button>
     </div>
 
-    <!-- 继续写作 -->
-    <button v-if="resumeTarget && activeTab === 'all'" class="resume-card" @click="resumeWriting">
-      <span class="resume-ribbon" aria-hidden="true" />
-      <span class="resume-text">
-        <span class="resume-label">继续写作 · 《{{ resumeTarget.novel.title }}》</span>
-        <span class="resume-chapter">{{ resumeTarget.chapterLabel }}</span>
-      </span>
-      <n-icon :size="18"><chevron-forward-outline /></n-icon>
-    </button>
+
 
     <n-modal v-model:show="showRenameModal" preset="card" title="修改书名" style="width: 420px;">
       <n-input v-model:value="renameTitle" placeholder="输入新的书名" @keydown="handleRenameKeydown" />
@@ -509,25 +506,39 @@ function formatDate(dateStr: string): string {
 /* 小说卡片网格 */
 .novel-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 22px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+}
+
+@media (max-width: 1350px) {
+  .novel-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 1000px) {
+  .novel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 620px) {
+  .novel-grid { grid-template-columns: 1fr; }
 }
 
 .novel-card {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 18px;
+  padding: 20px;
   overflow: hidden;
-  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
   background: var(--bg-color-card);
-  box-shadow: var(--shadow-card);
   cursor: pointer;
   animation: fadeIn 0.4s ease backwards;
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .novel-card:hover {
-  transform: translateY(-3px);
-  box-shadow: var(--shadow-hover);
+  border-color: var(--border-color-hover);
+  box-shadow: var(--shadow-sm);
 }
 
 .novel-card:focus-visible {
@@ -544,64 +555,28 @@ function formatDate(dateStr: string): string {
   opacity: 0.75;
 }
 
-/* 线装书封面 */
+/* 简约书封 */
 .book-cover {
   position: relative;
-  aspect-ratio: 4 / 5;
-  max-height: 300px;
-  background:
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 3px),
-    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.03) 0 1px, transparent 1px 3px),
-    linear-gradient(160deg, var(--cover-light), var(--cover-base));
+  height: 148px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px 7px 7px 4px;
+  background: var(--cover-base);
+  box-shadow: inset 3px 0 0 rgba(255, 253, 248, 0.16), var(--shadow-sm);
   overflow: hidden;
 }
 
-.book-cover::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 42%;
-  background: rgba(0, 0, 0, 0.12);
-  clip-path: polygon(0 70%, 16% 38%, 28% 56%, 46% 14%, 62% 50%, 74% 32%, 90% 62%, 100% 44%, 100% 100%, 0 100%);
-}
-
-.book-binding {
-  position: absolute;
-  top: 0;
-  right: 14px;
-  bottom: 0;
-  width: 2px;
-  background: rgba(255, 253, 248, 0.5);
-}
-
-.book-binding span {
-  position: absolute;
-  right: -6px;
-  width: 14px;
-  height: 2px;
-  background: rgba(255, 253, 248, 0.75);
-}
-
-.book-binding span:nth-child(1) { top: 12%; }
-.book-binding span:nth-child(2) { top: 37%; }
-.book-binding span:nth-child(3) { top: 62%; }
-.book-binding span:nth-child(4) { top: 87%; }
-
 .book-label {
-  position: absolute;
-  top: 9%;
-  left: 15%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 8px 10px;
-  border: 1px solid rgba(60, 40, 20, 0.35);
-  background: #F7F0E1;
-  box-shadow: inset 0 0 0 3px #F7F0E1, inset 0 0 0 4px rgba(60, 40, 20, 0.25), 0 2px 6px rgba(0, 0, 0, 0.2);
+  position: relative;
   z-index: 1;
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
 }
 
 .book-label-text {
@@ -609,15 +584,10 @@ function formatDate(dateStr: string): string {
   font-family: var(--font-family-serif);
   font-size: 19px;
   font-weight: 700;
-  letter-spacing: 0.18em;
-  color: #2B2A28;
-}
-
-.book-label-seal {
-  width: 12px;
-  height: 12px;
-  border-radius: 2px;
-  background: #B83A2E;
+  letter-spacing: 0.08em;
+  color: rgba(255, 253, 248, 0.95);
+  max-height: 126px;
+  overflow: hidden;
 }
 
 .cover-badge {
@@ -633,11 +603,10 @@ function formatDate(dateStr: string): string {
 }
 
 .card-body {
-  flex: 1;
-  padding: 14px 16px 12px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 9px;
+  min-width: 0;
 }
 
 .card-title {
@@ -660,6 +629,7 @@ function formatDate(dateStr: string): string {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -736,10 +706,12 @@ function formatDate(dateStr: string): string {
 /* 新建入口卡片 */
 .new-card {
   position: relative;
+  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 360px;
+  min-height: 178px;
   border: 1px dashed var(--border-color-hover);
   background: transparent;
   box-shadow: none;
@@ -781,70 +753,53 @@ function formatDate(dateStr: string): string {
   color: var(--text-color-tertiary);
 }
 
-.new-card-ink {
-  position: absolute;
-  bottom: 16px;
-  width: 70%;
-  opacity: 0.07;
-}
-
 /* 继续写作 */
 .resume-card {
-  position: fixed;
-  right: 32px;
-  bottom: 28px;
-  z-index: 20;
   display: flex;
   align-items: center;
-  gap: 14px;
-  max-width: 380px;
-  padding: 14px 18px 14px 22px;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 88px;
+  margin-bottom: 18px;
+  padding: 11px 14px;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
+  border-left: 3px solid var(--color-primary);
+  border-radius: var(--radius-md);
   background: var(--bg-color-card);
-  box-shadow: var(--shadow-lg);
   font: inherit;
-  color: var(--text-color-secondary);
   text-align: left;
   cursor: pointer;
-  transition: transform var(--transition-fast), border-color var(--transition-fast);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .resume-card:hover {
-  transform: translateY(-2px);
-  border-color: var(--color-primary);
-  color: var(--color-primary);
-}
-
-.resume-ribbon {
-  position: absolute;
-  top: -1px;
-  left: 10px;
-  width: 8px;
-  height: 22px;
-  background: var(--color-primary);
-  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 75%, 0 100%);
+  border-left-color: var(--color-primary-hover);
+  box-shadow: var(--shadow-sm);
 }
 
 .resume-text {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 
-.resume-label {
-  font-size: 12px;
-  color: var(--text-color-tertiary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.resume-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  padding: 10px 18px;
+  border-radius: var(--radius-md);
+  color: var(--text-color-inverse);
+  background: var(--color-primary);
+  font-weight: 600;
 }
 
 .resume-chapter {
-  font-family: var(--font-family-serif);
-  font-size: 16px;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 600;
   color: var(--text-color-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -858,7 +813,7 @@ function formatDate(dateStr: string): string {
 }
 
 @media (max-width: 900px) {
-  .shelf-page { padding: 24px 20px 96px; }
+  .shelf-page { padding: 24px 20px 32px; }
 }
 
 @media (max-width: 640px) {
@@ -873,11 +828,8 @@ function formatDate(dateStr: string): string {
     justify-content: flex-start;
   }
 
-  .resume-card {
-    left: 12px;
-    right: 12px;
-    bottom: 12px;
-    max-width: none;
-  }
+  .shelf-page { padding: 20px 16px 28px; }
+  .shelf-tabs { gap: 20px; overflow-x: auto; }
+  .shelf-tab { flex-shrink: 0; }
 }
 </style>

@@ -3,11 +3,11 @@
     <header class="archive-header">
       <div>
         <h2 class="page-title">灵感记录</h2>
-        <p>创建前的讨论存档，与书内助手对话独立保存。备选或已否定的想法不代表最终设定。</p>
+        <p class="page-subtitle">创建前的讨论存档，与书内助手对话独立保存。备选或已否定的想法不代表最终设定。</p>
       </div>
       <div class="archive-actions">
-        <n-button :disabled="!messages.length" @click="exportArchive('markdown')">导出 Markdown</n-button>
-        <n-button :disabled="!messages.length" @click="exportArchive('json')">导出 JSON</n-button>
+        <n-button :disabled="!messages.length" tertiary @click="exportArchive('markdown')">导出 Markdown</n-button>
+        <n-button :disabled="!messages.length" tertiary @click="exportArchive('json')">导出 JSON</n-button>
       </div>
     </header>
     <div v-if="!messages.length" class="archive-empty paper-panel">
@@ -16,21 +16,26 @@
       <p>书内助手的聊天不会被收录到这份存档。</p>
     </div>
     <template v-else>
+      <section class="archive-discussion paper-panel">
       <nav class="archive-pagination" aria-label="灵感记录分页">
+        <h3>创建讨论 <span>共 {{ messages.length }} 条消息</span></h3>
         <n-button :disabled="page <= 1" @click="changePage(page - 1)">上一页</n-button>
         <span>第 {{ page }} / {{ pageCount }} 页 · 共 {{ messages.length }} 条</span>
         <n-button :disabled="page >= pageCount" @click="changePage(page + 1)">下一页</n-button>
       </nav>
       <div class="archive-history" ref="historyElement" tabindex="0" aria-label="灵感对话存档">
         <article v-for="message in visibleMessages" :key="message.id" class="archive-message" :class="message.role">
-          <div class="archive-bubble paper-panel">
-            <strong>{{ message.role === 'user' ? '我' : 'AI' }}</strong>
+          <span class="archive-avatar" aria-hidden="true">{{ message.role === 'user' ? '我' : 'AI' }}</span>
+          <div class="archive-bubble">
+            <strong class="archive-message-role">{{ message.role === 'user' ? '我' : 'AI' }}</strong>
+            <time v-if="Number.isFinite(Date.parse(message.timestamp))" :datetime="message.timestamp">{{ new Date(message.timestamp).toLocaleString('zh-CN') }}</time>
             <div v-if="message.role === 'user'" class="archive-author">{{ message.content }}</div>
             <div v-else class="archive-content" v-html="renderMd(formatChatReply(message.content, message.search))"></div>
             <ChatSearchEvidence :record="message.search" />
           </div>
         </article>
       </div>
+      </section>
     </template>
     <p v-if="error" role="alert">{{ error }}</p>
   </section>
@@ -74,23 +79,37 @@ watch(pageCount, () => { if (page.value > pageCount.value) void changePage(pageC
 
 <style scoped>
 .inspiration-archive { height: 100%; min-height: 0; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; }
-.archive-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; flex-shrink: 0; }
-.archive-header p { color: var(--text-color-secondary); font-size: 13px; margin: 8px 0 0; }
+.archive-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; flex-shrink: 0; }
+.page-subtitle { color: var(--text-color-tertiary); font-size: 13px; margin: 6px 0 0; line-height: 1.6; max-width: 600px; }
 .archive-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .archive-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; flex-shrink: 0; }
 .archive-pagination span { font-size: 12px; color: var(--text-color-secondary); }
-.archive-history { flex: 1; min-height: 100px; overflow-y: auto; overscroll-behavior: contain; padding: 4px; }
-.archive-message { display: flex; margin-bottom: 16px; }
+.archive-history { flex: 1; min-height: 100px; overflow-y: auto; overscroll-behavior: contain; padding: 8px 0; }
+.archive-message { display: flex; margin-bottom: 20px; }
 .archive-message.user { justify-content: flex-end; }
-.archive-bubble { max-width: min(90%, 860px); min-width: 0; padding: 16px; overflow-wrap: anywhere; }
+.archive-bubble { max-width: min(90%, 800px); min-width: 0; padding: 18px 20px; overflow-wrap: anywhere; }
 .user .archive-bubble { background: var(--color-primary-light); border: 1px solid var(--color-primary); }
-.archive-bubble strong { display: block; margin-bottom: 8px; color: var(--color-primary); }
-.archive-author { white-space: pre-wrap; }
-.archive-content { line-height: 1.8; }
+.archive-bubble strong { display: block; margin-bottom: 10px; color: var(--color-primary); font-size: 14px; }
+.archive-author { white-space: pre-wrap; line-height: 1.7; color: var(--text-color-primary); }
+.archive-content { line-height: 1.8; color: var(--text-color-secondary); }
 .archive-content :deep(pre) { max-width: 100%; overflow-x: auto; }
 .archive-empty { padding: 32px; text-align: center; color: var(--text-color-secondary); }
 @media (max-width: 600px) {
   .inspiration-archive { padding: 12px; }
   .archive-bubble { max-width: 96%; padding: 12px; }
 }
+.archive-discussion { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 24px; }
+.archive-pagination { justify-content: flex-end; border-bottom: 1px solid var(--border-color-light); padding-bottom: 18px; gap: 12px; }
+.archive-pagination h3 { margin-right: auto; font-size: 20px; }
+.archive-pagination h3 span { font: 14px var(--font-family); color: var(--text-color-secondary); margin-left: 12px; }
+.archive-history { padding-top: 16px; }
+.archive-message, .archive-message.user { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: start; gap: 16px; justify-content: stretch; margin-bottom: 16px; padding: 16px; border-radius: var(--radius-md); }
+.archive-message.assistant { background: var(--color-accent-light); }
+.archive-avatar { display: grid; place-items: center; width: 44px; height: 48px; border-radius: var(--radius-sm); font: 600 20px var(--font-family-serif); background: var(--color-accent-light); color: var(--color-accent); }
+.user .archive-avatar { background: var(--color-primary-light); color: var(--color-primary); }
+.archive-bubble, .user .archive-bubble { max-width: none; width: 100%; padding: 0; border: 0; background: none; box-shadow: none; }
+.archive-message-role { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.archive-author, .archive-content { font-size: 15px; line-height: 1.9; }
+@media (max-width: 600px) { .archive-discussion { padding: 12px; } .archive-message, .archive-message.user { padding: 10px 0; grid-template-columns: 32px minmax(0, 1fr); gap: 10px; } .archive-avatar { width: 32px; height: 38px; font-size: 16px; } }
+.archive-bubble time { display: block; margin-bottom: 8px; color: var(--text-color-tertiary); font-size: 12px; }
 </style>

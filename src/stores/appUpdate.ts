@@ -39,6 +39,7 @@ export const useAppUpdateStore = defineStore('app-update', () => {
   }
   const noticeKey = computed(() => `${state.value.release?.version}:${state.value.phase}`)
   const showNotice = computed(() => state.value.supported && ['available', 'downloaded', 'error'].includes(state.value.phase)
+    && !(state.value.phase === 'available' && state.value.autoCheck && state.value.release?.canDownload && !state.value.error)
     && dismissed.value !== noticeKey.value)
   function dismissNotice() { dismissed.value = noticeKey.value }
   async function check() {

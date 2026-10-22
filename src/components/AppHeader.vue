@@ -1,11 +1,10 @@
 <template>
   <header class="app-header" id="app-header">
     <div class="header-left">
-      <div class="app-logo" title="返回书架" @click="goHome">
+      <button class="app-logo" type="button" title="返回书架" aria-label="返回书架" @click="goHome">
         <span class="seal logo-seal" aria-hidden="true">墨</span>
         <span class="logo-text">墨笺</span>
-        <span class="logo-sub">AI 小说写作</span>
-      </div>
+      </button>
       <nav class="header-nav" aria-label="主导航">
         <router-link to="/" class="nav-item" :class="{ 'nav-item--active': isShelf }">
           <n-icon :size="17"><library-outline /></n-icon>
@@ -89,8 +88,8 @@ function goSettings() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 52px;
-  padding: 0 18px;
+  height: 56px;
+  padding: 0 20px;
   background: var(--bg-color-header);
   border-bottom: 1px solid var(--border-color);
   backdrop-filter: blur(12px);
@@ -119,10 +118,13 @@ function goSettings() {
 .app-logo {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   cursor: pointer;
-  padding: 4px 6px;
+  padding: 5px 8px;
+  border: none;
+  background: transparent;
   border-radius: var(--radius-sm);
+  font: inherit;
   transition: background-color var(--transition-fast);
 }
 
@@ -131,28 +133,21 @@ function goSettings() {
 }
 
 .logo-seal {
-  width: 28px;
-  height: 28px;
-  font-size: 17px;
+  width: 32px;
+  height: 32px;
+  font-size: 20px;
 }
 
 .logo-text {
   font-family: var(--font-family-serif);
-  font-size: 19px;
+  font-size: 22px;
   font-weight: 700;
   letter-spacing: 0.12em;
   color: var(--text-color-primary);
   white-space: nowrap;
 }
 
-.logo-sub {
-  padding-left: 10px;
-  border-left: 1px solid var(--border-color);
-  font-size: 12px;
-  letter-spacing: 0.1em;
-  color: var(--text-color-tertiary);
-  white-space: nowrap;
-}
+
 
 .header-nav {
   display: flex;
@@ -237,11 +232,10 @@ function goSettings() {
 .theme-switcher {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--border-color);
+  gap: 3px;
+  padding: 4px;
   border-radius: 100px;
-  background: var(--bg-color-card);
+  background: var(--bg-color-secondary);
 }
 
 .theme-btn {
@@ -293,6 +287,7 @@ function goSettings() {
 }
 
 .header-icon-btn:focus-visible,
+.app-logo:focus-visible,
 .theme-btn:focus-visible,
 .header-pill:focus-visible,
 .nav-item:focus-visible {
@@ -300,9 +295,7 @@ function goSettings() {
   outline-offset: 2px;
 }
 
-@media (max-width: 960px) {
-  .logo-sub { display: none; }
-}
+
 
 @media (max-width: 850px) {
   .cloud-header-label { display: none; }
@@ -311,7 +304,8 @@ function goSettings() {
 
 @media (max-width: 600px) {
   .app-header { padding: 0 10px; }
-  .header-nav { display: none; }
+  .header-nav { gap: 0; }
+  .nav-item { gap: 4px; padding: 0 7px; font-size: 12px; }
   .header-left, .header-right { gap: 6px; }
   .logo-text { display: none; }
 }

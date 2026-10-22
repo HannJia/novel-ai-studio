@@ -88,6 +88,16 @@ const dialogue = object({ id, role: oneOf('user', 'assistant'), content: text, t
   search: optional(object({ protocol: oneOf('responses', 'anthropic', 'openrouter', 'chat-completions'),
     status: oneOf('searched', 'not-used', 'unverified'), sources: list(object({ url: text, title: text, excerpt: optional(text) }), 30) })),
 })
+const chapterLengthPolicy: Check = (value, path) => {
+  object({ minWords: integer, targetWords: integer, maxWords: integer })(value, path)
+  const policy = value as { minWords: number; targetWords: number; maxWords: number }
+  if (policy.minWords < 100 || policy.maxWords > 20000 || policy.minWords > policy.targetWords || policy.targetWords > policy.maxWords) fail(path)
+}
+const reviewCoverage = object({
+  signature: text, totalChunks: integer, completedChunks: integer, totalCharacters: integer, coveredCharacters: integer,
+  status: oneOf('running', 'complete', 'failed'), globalStatus: oneOf('pending', 'complete', 'failed', 'not-needed'),
+  failedChunk: optional(integer), error: optional(text),
+})
 const book = object({
   id, ...strings('title genre subGenre genreLabel subGenreLabel outline synopsis'), tags: list(text, 1000),
   targetWordCountMin: number, targetWordCountMax: number, currentWordCount: integer,
@@ -95,16 +105,19 @@ const book = object({
   writingMode: optional(oneOf('manual', 'ai')), chatWebSearchEnabled: optional(boolean), storyClock: optional(object({
     currentDay: number, label: text, lastChapterIndex: optional(number), updatedAt: date,
   })), settings,
+  chapterLengthPolicy: optional(chapterLengthPolicy),
   status: oneOf('creating', 'writing', 'archived', 'trash', 'completed'), ...times, knowledgeBaseIds: list(id, 1000),
   volumes: list(object({ id, volumeIndex: integer, ...strings('title theme summary keyTurningPoints characterChanges'),
     estimatedChapters: number, estimatedWordCount: number, versions }), 10_000),
   chapters: list(object({ id, volumeIndex: integer, chapterIndex: integer, ...strings('title content summary'),
     bannedReview: optional(text), contentReview: optional(text), contentReviewSignature: optional(text), reviewRewriteBlockedSignature: optional(text),
+    contentReviewCoverage: optional(reviewCoverage),
     wordCount: integer, storyDaysElapsed: optional(number), storyDay: optional(number),
     status: oneOf('draft', 'writing', 'completed', 'reviewed', 'finalized', 'locked'), ...times, versions,
     sceneNotes: optional(list(object({ id, title: text, content: text, source, ...times }), 10_000)),
   }), 30_000),
   characters: list(object({ id, ...strings('name identity personality powerLevel faction description avatarColor'), aliases: list(text),
+    avatarId: optional(text),
     status: oneOf('活跃', '退场', '死亡', '失踪'), firstAppearChapter: number, events: list(text),
     relationships: list(object({ targetId: id, targetName: text, relation: text })),
   }), 20_000),

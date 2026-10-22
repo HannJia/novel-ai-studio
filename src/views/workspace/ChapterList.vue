@@ -58,7 +58,7 @@
             class="chapter-card paper-panel"
             :ref="el => { if (isLastChapter(group, idx)) lastChapterEl = el as HTMLElement }"
           >
-            <div class="chapter-main" @click="openChapter(chapter.id)">
+            <div class="chapter-main" role="button" tabindex="0" @click="openChapter(chapter.id)" @keydown.enter.self.prevent="openChapter(chapter.id)" @keydown.space.self.prevent="openChapter(chapter.id)">
               <div class="chapter-header-row">
                 <div class="chapter-number">第 {{ chapter.chapterIndex + 1 }} 章</div>
                 <n-popconfirm @positive-click="removeChapter(chapter.id)">
@@ -81,7 +81,7 @@
             </div>
 
             <!-- 单章总结展开/收起 -->
-            <div class="summary-toggle" @click.stop="toggleSummary(chapter.id)">
+            <div class="summary-toggle" :aria-expanded="expandedSummaries.has(chapter.id)" role="button" tabindex="0" @click.stop="toggleSummary(chapter.id)" @keydown.enter.stop.prevent="toggleSummary(chapter.id)" @keydown.space.stop.prevent="toggleSummary(chapter.id)">
               <span v-if="chapter.summary" class="summary-indicator has-summary">已总结</span>
               <span v-else class="summary-indicator no-summary">无总结</span>
               <span class="summary-arrow">{{ expandedSummaries.has(chapter.id) ? '▲' : '▼' }}</span>
@@ -124,7 +124,10 @@ import { NButton, NInput, NPopconfirm, useMessage } from 'naive-ui'
 import { useNovelStore } from '@/stores/novel'
 import { useConfigStore } from '@/stores/config'
 import { callAI } from '@/services/ai'
-import { buildChapterPrompt, buildContentReviewPrompt } from '@/services/prompts'
+import { buildChapterPrompt } from '@/services/prompts'
+import { requestCoveredContentReview } from '@/services/chapterReview'
+import { chapterOutputTokenBudget } from '@/services/chapterGeneration'
+import { resolveChapterLengthPolicy } from '@/services/chapterLength'
 import { augmentWritingContextWithVectorMemory, buildReviewContext, buildWritingContext } from '@/services/context'
 import { chapterBackgroundQueue } from '@/services/aiTaskQueue'
 import type { Chapter } from '@/types/novel'
@@ -305,7 +308,8 @@ function batchGenerateEmptyChapters() {
         skillTask: 'writing',
         messages,
         stream: true,
-        maxTokens: 4000,
+        maxTokens: chapterOutputTokenBudget(model.maxTokens, resolveChapterLengthPolicy(currentNovel.chapterLengthPolicy).targetWords),
+        noAutomaticRetry: true,
         onChunk: chunk => { generated += chunk },
       })
       const latestNovel = novelStore.getNovel(queuedNovelId)
@@ -328,7 +332,7 @@ function batchReviewChapters() {
     message.warning('请先配置审校模型')
     return
   }
-  const targets = novel.value.chapters.filter(ch => ch.content.trim().length > 100)
+  const targets = novel.value.chapters.filter(ch => ch.content.trim().length > 100 && ch.status !== 'locked')
   if (targets.length === 0) {
     message.info('没有可审校的章节')
     return
@@ -337,21 +341,31 @@ function batchReviewChapters() {
   chapterBackgroundQueue.enqueueBatch('批量审校章节', targets.map(chapter => ({
     name: `审校第${chapter.chapterIndex + 1}章`,
     task: async () => {
-       const currentNovel = novelStore.getNovel(queuedNovelId)
+      const currentNovel = novelStore.getNovel(queuedNovelId)
       const currentChapter = currentNovel?.chapters.find(ch => ch.id === chapter.id)
-      if (!currentNovel || !currentChapter) return
-      const reviewContext = buildReviewContext(currentNovel, currentChapter, currentChapter.content)
-      const messages = buildContentReviewPrompt(reviewContext, currentChapter.chapterIndex)
-      let reviewText = ''
-      await callAI({
-        model,
-        skillTask: 'review',
-        messages,
-        stream: true,
-        onChunk: chunk => { reviewText += chunk },
+      if (!currentNovel || !currentChapter || currentChapter.status === 'locked') return
+      const source = currentChapter.content
+      const getSnapshot = () => JSON.stringify({
+        content: currentChapter.content, policy: resolveChapterLengthPolicy(currentNovel.chapterLengthPolicy),
+        context: buildReviewContext(currentNovel, currentChapter, currentChapter.content),
       })
+      const snapshot = getSnapshot()
+      const ensureCurrent = () => {
+        if (novelStore.getNovel(queuedNovelId) !== currentNovel || !currentNovel.chapters.includes(currentChapter)
+          || currentChapter.status === 'locked' || getSnapshot() !== snapshot) throw new Error('正文或设定已变化，未采用旧版本的批量审查')
+      }
+      const reviewText = await requestCoveredContentReview({
+        model, source, chapterIndex: currentChapter.chapterIndex,
+        buildContext: text => buildReviewContext(currentNovel, currentChapter, text), ensureCurrent,
+        onProgress: coverage => novelStore.updateChapter(queuedNovelId, currentChapter.id, {
+          // Batch results are advisory. Completion uses its own fact-aware v3 signature and local checks.
+          contentReviewCoverage: { ...coverage, signature: 'batch-review-v1' },
+        }),
+      })
+      ensureCurrent()
       novelStore.updateChapter(currentNovel.id, currentChapter.id, {
         contentReview: reviewText,
+        contentReviewSignature: 'batch-review-v1',
         status: currentChapter.status === 'finalized' ? 'finalized' : 'reviewed',
       })
     },
@@ -454,24 +468,27 @@ function batchReviewChapters() {
 /* 章节网格 */
 .chapters-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 10px;
-  align-items: start;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
 }
+@media (max-width: 1250px) { .chapters-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .chapters-grid { grid-template-columns: 1fr; } }
 
 .chapter-card {
   display: flex;
   flex-direction: column;
-  padding: 12px 14px 4px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  min-width: 0;
+  padding: 14px 16px 6px;
+  border: 1px solid var(--border-color-light);
+  border-left: 3px solid var(--text-color-disabled);
+  border-radius: var(--radius-sm);
+  background: var(--bg-color-paper);
+  transition: all var(--transition-fast);
 }
 
 .chapter-card:hover {
-  border-color: var(--border-color-hover);
-  box-shadow: var(--shadow-hover);
+  border-left-color: var(--color-primary);
+  box-shadow: var(--shadow-sm);
 }
 
 .chapter-main {
@@ -479,6 +496,12 @@ function batchReviewChapters() {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.chapter-main:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
 
 .chapter-main:hover .chapter-title {

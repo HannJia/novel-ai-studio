@@ -17,6 +17,8 @@ const errors: Record<string, string> = {
   'Sign in required': '请先登录同步账号。',
   'Invalid recovery details': '账号或恢复码不正确。',
   'Document changed on another device': '另一台设备更新了这份内容，稍后将重新比较版本。',
+  'Preferences changed on another device': '另一台设备更新了模型配置，请重新比较后再同步。',
+  'Preferences key unavailable; restore the matching server key backup': '云端配置加密密钥暂不可用，请由管理员恢复匹配的服务器密钥备份。本机配置已保留。',
   'Account storage quota exceeded': '云端账户空间不足。本地内容已保留，请联系管理员。',
   'Server storage quota reached': '服务器空间已达上限，本地内容已保留。',
   'Document exceeds 50 MiB': '单本小说或单个知识库超过 50 MiB 同步上限。',

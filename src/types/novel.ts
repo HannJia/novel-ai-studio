@@ -1,4 +1,6 @@
 import type { ChatSearchRecord } from './chat'
+import type { ChapterLengthPolicy } from '@/services/chapterLength'
+import type { StoredReviewCoverage } from '@/services/chapterReviewCoverage'
 
 // 小说分类类型
 export interface Genre {
@@ -27,6 +29,7 @@ export interface Character {
   relationships: CharacterRelation[]
   events: string[]          // 关键事件
   avatarColor: string       // 头像卡片颜色
+  avatarId?: string         // 内置头像的稳定 ID；省略或空值时按身份匹配
 }
 
 interface CharacterRelation {
@@ -354,6 +357,7 @@ export interface Chapter {
   bannedReview?: string   // 违禁词审查结果
   contentReview?: string  // 内容一致性审查结果
   contentReviewSignature?: string // 内容审查对应的正文签名
+  contentReviewCoverage?: StoredReviewCoverage // 完整覆盖与失败信息，绑定被审正文及设定
   reviewRewriteBlockedSignature?: string // 该版正文自动重写已用尽，避免重复循环
   wordCount: number       // 正文字数
   storyDaysElapsed?: number // 本章明确经过的故事天数
@@ -413,6 +417,7 @@ export interface Novel {
   currentWordCount: number    // 当前字数
   writingStyle: WritingStyle
   writingMode?: 'manual' | 'ai'
+  chapterLengthPolicy?: ChapterLengthPolicy // 缺省沿用默认篇幅，不更改既有字数统计
   settings: NovelSettings
   outline: string           // 总大纲内容（Markdown）
   synopsis: string          // 小说简介

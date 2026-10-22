@@ -2,7 +2,7 @@ import type { Novel, Chapter, Character, EventLogEntry, DataPanelItem } from '@/
 import type { KnowledgeBase } from '@/stores/knowledge'
 import type { EmbeddingConfig } from '@/stores/config'
 import { execute, initDb, queryAll, runTransaction } from '@/services/database'
-import { embedTextsWithProvider, isRemoteEmbeddingEnabled } from '@/services/embeddings'
+import { embedTextsWithProvider, embeddingSourceId, isRemoteEmbeddingEnabled } from '@/services/embeddings'
 import { equipmentSnapshot, formatEquipmentTotals } from '@/services/dataPanelEquipment'
 
 export type SemanticSourceType = 'knowledge' | 'chapter' | 'character' | 'event' | 'story_arc' | 'chapter_plan' | 'data_panel'
@@ -439,6 +439,7 @@ export async function syncSemanticIndexForNovel(
       const compatible = vector.length > 0
         && embedding?.provider === targetProvider
         && embedding?.model === targetModel
+        && (targetProvider === 'local' || (embedding?.endpointId && embedding.endpointId === embeddingSourceId(embeddingConfig!.baseUrl)))
         && embedding?.contentFingerprint === contentFingerprint
       if (compatible) reusableVectors.set(record.id, vector)
       else needsEmbedding.push(record)
@@ -487,6 +488,7 @@ export async function syncSemanticIndexForNovel(
         _embedding: {
           provider,
           model,
+          ...(provider === 'remote' ? { endpointId: embeddingSourceId(embeddingConfig!.baseUrl) } : {}),
           dimensions: vector.length || dimensions,
           contentFingerprint: semanticRecordFingerprint(record),
         },
@@ -554,11 +556,12 @@ export async function queryPersistedSemanticEvidence(
   await initDb()
   const rows = queryAll<Record<string, any>>('SELECT * FROM semantic_index WHERE novel_id = ?', [novelId])
     .filter(row => !sourceType || row.source_type === sourceType)
-  const remoteModels = new Set(rows
+  const remoteSources = rows
     .map(row => parseMetadata(row.metadata)._embedding)
     .filter(embedding => embedding?.provider === 'remote')
-    .map(embedding => String(embedding.model || '')))
-  const hasCompatibleRemoteVectors = remoteModels.size === 1 && remoteModels.has(embeddingConfig?.modelName || '')
+  const endpointId = embeddingSourceId(embeddingConfig?.baseUrl || '')
+  const hasCompatibleRemoteVectors = !!endpointId && remoteSources.length > 0
+    && remoteSources.every(source => source.model === embeddingConfig?.modelName && source.endpointId === endpointId)
   let remoteQueryVector: number[] = []
   if (hasCompatibleRemoteVectors && isRemoteEmbeddingEnabled(embeddingConfig)) {
     remoteQueryVector = (await embedTextsWithProvider(embeddingConfig, [query]))[0] || []
@@ -578,10 +581,13 @@ export async function queryPersistedSemanticEvidence(
         metadata,
       }
       const provider = metadata._embedding?.provider === 'remote' ? 'remote' : 'local'
-      const queryVector = provider === 'remote' ? remoteQueryVector : localQueryVector
+      const storedVector = parseVector(row.embedding)
+      const queryVector = provider === 'remote'
+        ? (remoteQueryVector.length === storedVector.length ? remoteQueryVector : [])
+        : localQueryVector
       return {
         ...record,
-        score: relevanceScore(queryTerms, queryVector, record, JSON.parse(row.embedding || '[]')),
+        score: relevanceScore(queryTerms, queryVector, record, storedVector),
         citation: citationFor(record),
       }
     })

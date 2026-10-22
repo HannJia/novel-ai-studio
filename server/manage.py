@@ -6,9 +6,11 @@ import shutil
 import sqlite3
 import tempfile
 from datetime import datetime, timezone
+from contextlib import closing
 from pathlib import Path
 
 from .app import Repository
+from .preferences import read_master_key
 
 
 def main():
@@ -30,19 +32,28 @@ def main():
     elif args.command == "backup":
         directory = Path(args.directory)
         directory.mkdir(parents=True, exist_ok=True)
-        name = "sync-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + ".sqlite3.gz"
+        name = "sync-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + ".sqlite3.gz"
         with tempfile.TemporaryDirectory(dir=directory) as temporary:
             snapshot = Path(temporary) / "snapshot.sqlite3"
-            with sqlite3.connect(repo.path) as source, sqlite3.connect(snapshot) as target:
+            with closing(sqlite3.connect(repo.path)) as source, closing(sqlite3.connect(snapshot)) as target:
                 source.backup(target)
                 if target.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                     raise RuntimeError("Backup integrity check failed")
+                master = read_master_key(repo.directory, target)
             pending = directory / (name + ".tmp")
             with snapshot.open("rb") as source, gzip.open(pending, "wb") as target:
                 shutil.copyfileobj(source, target)
+            # Publish the matching secret sidecar before marking SQLite ready.
+            # The key never appears in console output or inside the database.
+            if master is not None:
+                key_pending = Path(temporary) / "preferences-key"
+                key_pending.write_bytes(master)
+                os.chmod(key_pending, 0o600)
+                key_pending.replace(directory / (name + ".preferences-key"))
             pending.replace(directory / name)
         for old in sorted(directory.glob("sync-*.sqlite3.gz"))[:-3]:
             old.unlink()
+            (directory / (old.name + ".preferences-key")).unlink(missing_ok=True)
         print(str(directory / name))
 
 

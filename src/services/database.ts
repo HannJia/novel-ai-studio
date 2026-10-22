@@ -257,7 +257,7 @@ function initializeSchema(database: Database) {
       status TEXT DEFAULT '活跃',
       first_appear_chapter INTEGER,
       description TEXT, relationships TEXT, -- JSON
-      events TEXT, avatar_color TEXT      -- JSON
+      events TEXT, avatar_color TEXT, avatar_id TEXT
     );
 
     -- 剧情时间线事件
@@ -402,6 +402,9 @@ function initializeSchema(database: Database) {
   database.exec(schema)
   // Existing local databases predate planning version snapshots.
   try { database.run("ALTER TABLE novels ADD COLUMN writing_mode TEXT") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE characters ADD COLUMN avatar_id TEXT") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE novels ADD COLUMN chapter_length_policy TEXT") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE chapters ADD COLUMN content_review_coverage TEXT") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE knowledge_bases ADD COLUMN summary TEXT DEFAULT ''") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE knowledge_bases ADD COLUMN summary_level TEXT DEFAULT 'standard'") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE knowledge_bases ADD COLUMN summary_updated_at TEXT DEFAULT ''") } catch { /* already migrated */ }

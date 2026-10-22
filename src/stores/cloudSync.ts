@@ -13,7 +13,7 @@ import { readCloudState, readCloudConflicts, persistCloudState } from '@/service
 import { createProjectBackup, downloadProjectBackup } from '@/services/projectBackup'
 import { loadProjectChapterRevisions } from '@/services/db/chapterRevisions'
 import { retainProjectRestorePoint } from '@/services/database'
-import { cloudApplyBusy, appUpdateInstalling, flushEditorDrafts } from '@/services/appLifecycle'
+import { cloudApplyBusy, cloudPreferencesBusy, appUpdateInstalling, flushEditorDrafts } from '@/services/appLifecycle'
 import { chapterBackgroundQueue } from '@/services/aiTaskQueue'
 import { activeAiCount } from '@/services/aiActivity'
 import { projectTransferBusy } from '@/services/projectTransfer'
@@ -37,11 +37,13 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
   let timer: ReturnType<typeof setInterval> | undefined
   let scheduled: ReturnType<typeof setTimeout> | undefined
   const pendingConflicts = computed(() => conflicts.value.filter(item => !item.resolution))
+  const pendingUploads = computed(() => state.value.pendingUploads || [])
   const statusText = computed(() => {
     if (!session.value) return '未登录云同步'
     if (!state.value.enabled) return '云同步已暂停'
     if (busy.value) return '正在同步'
     if (error.value) return '同步未完成'
+    if (pendingUploads.value.length) return pendingUploads.value.length + ' 项本机内容待确认上传'
     if (pendingConflicts.value.length) return `${pendingConflicts.value.length} 项版本冲突`
     if (pendingDownloads.value) return `${pendingDownloads.value} 项云端更新待合并`
     return phase.value === 'synced' ? '已同步' : '等待同步'
@@ -108,7 +110,7 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
     }, 1000)
   }
   async function exclusively<T>(action: () => Promise<T>): Promise<T> {
-    if (busy.value || operation) throw new Error('请等待当前同步操作结束。')
+    if (busy.value || operation || cloudPreferencesBusy.value) throw new Error('请等待当前同步操作结束。')
     busy.value = true
     const task = Promise.resolve().then(action)
     operation = task
@@ -193,7 +195,7 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
   }
   async function syncNow() {
     if (running) return running
-    if (busy.value || operation || cloudApplyBusy.value || !session.value || !state.value.enabled) return
+    if (busy.value || operation || cloudApplyBusy.value || cloudPreferencesBusy.value || !session.value || !state.value.enabled) return
     const version = generation
     const auth = session.value
     const check = () => { if (generation !== version) throw new Error('同步已停止。') }
@@ -222,6 +224,10 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
       const updates = new Map<string, CloudRecord>()
       const newConflicts: SyncConflict[] = []
       const existing = new Set(pendingConflicts.value.map(item => item.key))
+      const approved = new Set(next.approvedUploads || [])
+      const acknowledgedBases = new Set(Object.keys(next.bases))
+      const pushCandidates: string[] = []
+      
       async function fetchRecord(key: string) {
         const response = await cloudRequest<{ records: CloudRecord[] }>(auth.endpoint, 'sync/pull', {
           token: auth.token, signal, body: { keys: [key] },
@@ -237,6 +243,8 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
           local: localPayload, remote: item.payload ?? null, remoteHash: item.hash,
           remoteVersion: item.version, createdAt: new Date().toISOString() })
       }
+      
+      // Phase 1: Fetch remote, collect download candidates, identify push needs
       for (const key of new Set([...local.keys(), ...Object.keys(next.bases), ...remote.keys()])) {
         check()
         if (localWorkBusy()) throw new Error('AI 或项目任务正在运行，已暂停同步，稍后自动重试。')
@@ -246,26 +254,19 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
         if (decision === 'same') {
           if (item) next.bases[key] = { hash: item.hash, version: item.version }
         } else if (decision === 'push') {
-          try {
-            const response = await cloudRequest<{ record: CloudRecord }>(auth.endpoint, 'sync/push', {
-              token: auth.token, signal, body: { key, baseVersion: next.bases[key]?.version || 0, payload: local.get(key) ?? null },
-            })
-            const accepted = checkedRecord(response.record)
-            if (accepted.key !== key || accepted.hash !== (hashes.get(key) ?? null)) throw new Error('云端写入结果校验失败。')
-            next.bases[key] = { hash: accepted.hash, version: accepted.version }
-            remote.set(key, accepted)
-          } catch (cause) {
-            if (!(cause instanceof CloudApiError) || cause.status !== 409) throw cause
-            conflict(key, await fetchRecord(key))
-          }
-        } else {
+          pushCandidates.push(key)
+        } else if (decision === 'pull') {
           const latest = await fetchRecord(key)
           const currentDecision = decideSync(hashes.get(key) ?? null, latest, next.bases[key])
           if (currentDecision === 'same') next.bases[key] = { hash: latest.hash, version: latest.version }
           else if (currentDecision === 'pull') updates.set(key, latest)
           else conflict(key, latest)
+        } else {
+          conflict(key, await fetchRecord(key))
         }
       }
+      
+      // Apply downloads first
       check()
       const canApply = updates.size > 0 && safeView() && !localWorkBusy()
       if (canApply) cloudApplyBusy.value = true
@@ -288,20 +289,117 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
         if (project) await retainProjectRestorePoint(JSON.stringify(current))
         check()
         pendingDownloads.value = updates.size - accepted.size
-        const locallyChanged = [...currentDocs.keys(), ...local.keys()].some(key => currentDocs.get(key) !== local.get(key))
-        const complete = !pendingDownloads.value && !pendingConflicts.value.length && !newConflicts.length && !locallyChanged
-        if (complete) next.lastSync = new Date().toISOString()
-        await persistCloudState(next, newConflicts, project)
-        if (project) {
-          useNovelStore().adoptImportedNovels(project.novels)
-          useKnowledgeStore().adoptImportedKnowledgeBases(project.knowledgeBases)
-          if (project.inspirationSessions) useInspirationSessionsStore().adopt(project.inspirationSessions)
+        
+        if (accepted.size > 0) {
+          await persistCloudState(next, newConflicts, project)
+          if (project) {
+            useNovelStore().adoptImportedNovels(project.novels)
+            useKnowledgeStore().adoptImportedKnowledgeBases(project.knowledgeBases)
+            if (project.inspirationSessions) useInspirationSessionsStore().adopt(project.inspirationSessions)
+          }
+          state.value = next
+          conflicts.value = await readCloudConflicts()
         }
+      } finally { cloudApplyBusy.value = false }
+      
+      // Phase 2: Push approved items after downloads applied
+      check()
+      if (pendingDownloads.value || cloudApplyBusy.value || localWorkBusy() || !safeView()) {
+        // Defer push, update pending list
+        await flush()
+        const freshSnapshot = await capture()
+        const freshLocal = projectDocuments(freshSnapshot)
+        const freshHashes = new Map<string, string | null>()
+        for (const [key, payload] of freshLocal) freshHashes.set(key, await hashPayload(payload))
+        
+        const newPending: Array<{ key: string; title: string; kind: 'novel' | 'knowledge' | 'inspiration' }> = []
+        let deferredPush = false
+        for (const key of pushCandidates) {
+          const freshDecision = decideSync(freshHashes.get(key) ?? null, remote.get(key), next.bases[key])
+          if (freshDecision === 'push') deferredPush = true
+          if (freshDecision === 'push' && !acknowledgedBases.has(key) && !approved.has(key)) {
+            const payload = freshLocal.get(key) ?? null
+            const kind = key.startsWith('novel:') ? 'novel' : key.startsWith('inspiration:') ? 'inspiration' : 'knowledge'
+            newPending.push({ key, title: documentTitle(key, payload), kind })
+          }
+        }
+        next.pendingUploads = newPending
+        const locallyChanged = [...freshLocal.keys(), ...local.keys()].some(key => freshLocal.get(key) !== local.get(key))
+        const complete = !deferredPush && !pendingDownloads.value && !pendingConflicts.value.length && !newConflicts.length && !locallyChanged && !newPending.length
+        if (complete) next.lastSync = new Date().toISOString()
+        await persistCloudState(next, newConflicts)
         state.value = next
         if (session.value?.user.id === auth.user.id) session.value.user.usedBytes = [...remote.values()].reduce((total, item) => total + item.bytes, 0)
         conflicts.value = await readCloudConflicts()
         phase.value = complete ? 'synced' : 'waiting'
-      } finally { cloudApplyBusy.value = false }
+        return
+      }
+      
+      // Actually push approved candidates
+      await flush()
+      const freshSnapshot = await capture()
+      const freshLocal = projectDocuments(freshSnapshot)
+      const freshHashes = new Map<string, string | null>()
+      for (const [key, payload] of freshLocal) freshHashes.set(key, await hashPayload(payload))
+      
+      const newPending: Array<{ key: string; title: string; kind: 'novel' | 'knowledge' | 'inspiration' }> = []
+      pushCandidates.sort((a, b) => Number(!a.startsWith('knowledge:')) - Number(!b.startsWith('knowledge:')))
+      let blockedUpload = false
+      for (const key of pushCandidates) {
+        check()
+        if (localWorkBusy() || !safeView()) { blockedUpload = true; break }
+        await flush()
+        const latestDocs = projectDocuments(await capture())
+        freshLocal.clear()
+        for (const [id, payload] of latestDocs) freshLocal.set(id, payload)
+        freshHashes.set(key, await hashPayload(freshLocal.get(key) ?? null))
+        check()
+        const freshDecision = decideSync(freshHashes.get(key) ?? null, remote.get(key), next.bases[key])
+        if (freshDecision !== 'push') continue
+        
+        if (!acknowledgedBases.has(key) && !approved.has(key)) {
+          const payload = freshLocal.get(key) ?? null
+          const kind = key.startsWith('novel:') ? 'novel' : key.startsWith('inspiration:') ? 'inspiration' : 'knowledge'
+          newPending.push({ key, title: documentTitle(key, payload), kind })
+          continue
+        }
+        
+        const outgoingPayload = freshLocal.get(key) ?? null
+        if (outgoingPayload !== null) {
+          const doc = parseCloudDocument(key, outgoingPayload)
+          const linked = doc.kind === 'novel' ? doc.novel.knowledgeBaseIds || [] : doc.kind === 'inspiration' ? doc.inspiration.knowledgeIds || [] : []
+          if (linked.some(id => freshLocal.has('knowledge:' + id) && !next.bases['knowledge:' + id]?.hash)) {
+            error.value = '部分作品引用的本机知识库尚未加入同步，请先选择相关知识库。'
+            blockedUpload = true
+            continue
+          }
+        }
+        if ((projectDocuments(await capture()).get(key) ?? null) !== outgoingPayload) { blockedUpload = true; continue }
+        check()
+        if (localWorkBusy() || !safeView()) { blockedUpload = true; break }
+        try {
+          const response = await cloudRequest<{ record: CloudRecord }>(auth.endpoint, 'sync/push', {
+            token: auth.token, signal, body: { key, baseVersion: next.bases[key]?.version || 0, payload: freshLocal.get(key) ?? null },
+          })
+          const accepted = checkedRecord(response.record)
+          if (accepted.key !== key || accepted.hash !== (freshHashes.get(key) ?? null)) throw new Error('云端写入结果校验失败。')
+          next.bases[key] = { hash: accepted.hash, version: accepted.version }
+          remote.set(key, accepted)
+        } catch (cause) {
+          if (!(cause instanceof CloudApiError) || cause.status !== 409) throw cause
+          conflict(key, await fetchRecord(key), freshLocal.get(key) ?? null)
+        }
+      }
+      
+      next.pendingUploads = newPending
+      const locallyChanged = [...freshLocal.keys(), ...local.keys()].some(key => freshLocal.get(key) !== local.get(key))
+      const complete = !blockedUpload && !pendingDownloads.value && !pendingConflicts.value.length && !newConflicts.length && !locallyChanged && !newPending.length
+      if (complete) next.lastSync = new Date().toISOString()
+      await persistCloudState(next, newConflicts)
+      state.value = next
+      if (session.value?.user.id === auth.user.id) session.value.user.usedBytes = [...remote.values()].reduce((total, item) => total + item.bytes, 0)
+      conflicts.value = await readCloudConflicts()
+      phase.value = complete ? 'synced' : 'waiting'
     })().catch(async cause => {
       if (generation !== version) return
       error.value = cause instanceof Error ? cause.message : '同步失败，本地内容已保留。'
@@ -318,6 +416,51 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
     })
     return running
   }
+  async function approveUploads(keys: string[]) {
+    await exclusively(async () => {
+      if (!session.value || !state.value.enabled) throw new Error('请先登录并启用云同步。')
+      if (!safeView() || localWorkBusy() || cloudApplyBusy.value) throw new Error('请返回书架或设置页，等待 AI 和项目任务结束后批准上传。')
+      
+      const pending = state.value.pendingUploads || []
+      const pendingKeys = new Set(pending.map(item => item.key))
+      const invalidKeys = keys.filter(key => !pendingKeys.has(key))
+      if (invalidKeys.length) throw new Error(`无效的待上传文档：${invalidKeys.join(', ')}`)
+      
+      await flush()
+      const snapshot = await capture()
+      const local = projectDocuments(snapshot)
+      
+      // Approve dependencies for novels and inspiration before persisting consent.
+      const approved = new Set([...(state.value.approvedUploads || []), ...keys])
+      
+      for (const key of keys) {
+        const payload = local.get(key)
+        if (!payload) continue
+        const doc = parseCloudDocument(key, payload)
+        if (doc.kind === 'knowledge') continue
+        const linked = doc.kind === 'novel' ? doc.novel.knowledgeBaseIds || [] : doc.inspiration.knowledgeIds || []
+        
+        for (const kbId of linked) {
+          const kbKey = `knowledge:${kbId}`
+          if (local.has(kbKey) && !state.value.bases[kbKey]?.hash && !approved.has(kbKey)) {
+            const label = doc.kind === 'novel' ? `小说 "${doc.novel.title}"` : `灵感会话 "${doc.inspiration.title}"`
+            throw new Error(`${label} 引用了未批准上传的本地知识库。请先批准相关知识库或解除引用。`)
+          }
+        }
+      }
+      
+      const next = JSON.parse(JSON.stringify(state.value)) as SyncState
+      next.approvedUploads = [...new Set([...(next.approvedUploads || []), ...keys])]
+      next.pendingUploads = (next.pendingUploads || []).filter(item => !keys.includes(item.key))
+      
+      await persistCloudState(next)
+      state.value = next
+      error.value = ''
+      phase.value = 'waiting'
+    })
+    await syncNow()
+  }
+
   async function resolveConflict(id: string, choice: 'local' | 'remote') {
     if (busy.value || localWorkBusy() || !safeView()) throw new Error('请在书架或设置页、没有 AI 任务运行时处理冲突。')
     if (!session.value) throw new Error('请先登录。')
@@ -411,7 +554,7 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
   }
   return {
     state, session, conflicts, initialized, busy, error, pendingDownloads, phase, endpoint,
-    pendingConflicts, statusText, initialize, authenticate, logout, setEnabled, syncNow,
-    schedule, resolveConflict, exportConflict, createInvite, recover, changePassword, flushBeforeClose, dispose,
+    pendingConflicts, pendingUploads, statusText, initialize, authenticate, logout, setEnabled, syncNow,
+    schedule, approveUploads, resolveConflict, exportConflict, createInvite, recover, changePassword, flushBeforeClose, dispose,
   }
 })

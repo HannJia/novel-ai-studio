@@ -11,7 +11,7 @@ function setup() {
   const content = ref('')
   const warning = vi.fn()
   const generation = useChapterAiGeneration({
-    content, writing: ref(false), statusText: ref(''), minWords: 2000, softWords: 2200, hardWords: 2400,
+    content, writing: ref(false), statusText: ref(''), lengthPolicy: ref({ minWords: 2000, targetWords: 2200, maxWords: 2400 }),
     onWarning: warning,
   })
   generation.beginGeneration()

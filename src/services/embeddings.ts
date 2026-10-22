@@ -7,6 +7,16 @@ export function embeddingEndpoint(baseUrl: string): string {
   return normalized.endsWith('/v1') ? `${normalized}/embeddings` : `${normalized}/v1/embeddings`
 }
 
+// Index identity excludes credentials, query parameters and fragments.
+export function embeddingSourceId(baseUrl: string): string {
+  try {
+    const endpoint = new URL(embeddingEndpoint(baseUrl))
+    return endpoint.origin + endpoint.pathname
+  } catch {
+    return ''
+  }
+}
+
 export function isRemoteEmbeddingEnabled(config?: Partial<EmbeddingConfig> | null): config is EmbeddingConfig {
   return Boolean(config?.enabled && config.baseUrl?.trim() && config.modelName?.trim())
 }

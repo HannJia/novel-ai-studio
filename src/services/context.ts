@@ -40,7 +40,6 @@ interface ContextBudget {
   summaryChapterCount: number
   summaryText: number
   lastParagraph: number
-  reviewContent: number
   reviewEvents: number
   semanticEvidence: number
 }
@@ -59,7 +58,6 @@ function getContextBudget(contextWindow = 8000): ContextBudget {
     summaryChapterCount: Math.min(Math.floor(contextWindow / 800), 15),
     summaryText: Math.min(Math.floor(contextWindow * 0.22), 1800),
     lastParagraph: Math.min(Math.floor(contextWindow * 0.08), 800),
-    reviewContent: Math.min(Math.floor(contextWindow * 0.5), 4000),
     reviewEvents: Math.min(Math.floor(contextWindow * 0.12), 900),
     semanticEvidence: Math.min(Math.floor(contextWindow * 0.16), 1500),
   }
@@ -513,7 +511,8 @@ export function buildReviewContext(
     chapterGuidance: writingContext.chapterGuidance || '暂无章节计划',
     recentEvents,
     previousSummary: writingContext.previousSummary || '暂无前章总结',
-    chapterContent: limitText(chapterContent, budget.reviewContent),
+    // Review callers split and track coverage; never silently substitute a prefix for the supplied body.
+    chapterContent,
     semanticEvidence: writingContext.semanticEvidence || '暂无可引用证据',
   }
 }

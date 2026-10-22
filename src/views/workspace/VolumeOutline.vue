@@ -6,13 +6,110 @@
         <p v-else class="embedded-description">承接全书大纲，规划每卷的目标、转折与角色变化</p>
       </div>
       <div class="header-actions" v-if="novel">
-        <n-button size="small" @click="generateVolumes" :loading="generating" :disabled="!novel.outline">
+        <n-button size="small" :disabled="generating || !!regeneratingId" @click="addManualVolume">+ 新增分卷</n-button>
+        <n-button size="small" @click="generateVolumes" :loading="generating" :disabled="!novel.outline || hasDrafts">
           AI 生成分卷规划
         </n-button>
-        <n-button v-if="props.embedded && volumes.length" size="small" type="primary" :disabled="generating || props.chapterPlanConfirmed" @click="emit('confirmed')">
+        <n-button v-if="props.embedded && volumes.length" size="small" type="primary" :disabled="generating || props.chapterPlanConfirmed || hasDrafts" @click="emit('confirmed')">
           {{ props.chapterPlanConfirmed ? '已确认并生成章节计划' : '确认分卷并生成章节计划' }}
         </n-button>
       </div>
+    </div>
+
+    <div v-if="volumes.length && !generating" class="volume-master-detail">
+      <aside class="volume-nav">
+        <button
+          v-for="vol in volumes"
+          :key="vol.id"
+          type="button"
+          class="volume-nav-item"
+          :aria-pressed="selectedVolumeId === vol.id"
+          :class="{ 'volume-nav-item-active': selectedVolumeId === vol.id }"
+          @click="selectVolume(vol.id)"
+        >
+          <span class="volume-nav-number">{{ String(vol.volumeIndex + 1).padStart(2, '0') }}</span>
+          <div class="volume-nav-content"><div class="volume-nav-title">
+            <strong>{{ vol.title }}</strong>
+          </div>
+          <div class="volume-nav-meta">
+            <span>{{ vol.estimatedChapters || '待定' }} 章</span>
+            <span>·</span>
+            <span>{{ vol.estimatedWordCount || '待定' }} 万字</span>
+          </div>
+          <p v-if="vol.summary" class="volume-nav-summary">{{ vol.summary.slice(0, 120) }}{{ vol.summary.length > 120 ? '…' : '' }}</p></div>
+        </button>
+      </aside>
+
+      <main class="volume-detail-panel">
+        <div v-if="selectedVolume" class="volume-detail-content">
+          <div class="volume-detail-header">
+            <div class="volume-detail-title-row">
+              <span class="volume-index">第{{ selectedVolume.volumeIndex + 1 }}卷</span>
+              <h3>{{ selectedVolume.title }}</h3>
+              <span v-if="selectedVolume.theme" class="volume-badge">{{ selectedVolume.theme }}</span>
+            </div>
+            <div class="volume-meta">
+              <span>预估 {{ selectedVolume.estimatedChapters || '待定' }} 章</span>
+              <span>·</span>
+              <span>{{ selectedVolume.estimatedWordCount || '待定' }} 万字</span>
+            </div>
+          </div>
+
+          <template v-if="editingId === selectedVolume.id">
+            <div class="edit-form">
+              <label>卷名</label>
+              <n-input v-model:value="editForm.title" size="small" />
+              <label>主题</label>
+              <n-input v-model:value="editForm.theme" size="small" />
+              <label>剧情概要</label>
+              <n-input v-model:value="editForm.summary" type="textarea" :rows="4" size="small" />
+              <label>关键转折点</label>
+              <n-input v-model:value="editForm.keyTurningPoints" type="textarea" :rows="2" size="small" />
+              <label>角色变化</label>
+              <n-input v-model:value="editForm.characterChanges" type="textarea" :rows="2" size="small" />
+              <label>预估章节数</label>
+              <n-input-number v-model:value="editForm.estimatedChapters" :min="1" :precision="0" size="small" />
+              <label>预估字数（万字）</label>
+              <n-input-number v-model:value="editForm.estimatedWordCount" :min="0.1" :precision="3" size="small" />
+              <div class="edit-actions">
+                <n-button size="small" @click="cancelEdit">取消</n-button>
+                <n-button size="small" type="primary" @click="saveEdit(selectedVolume.id)">保存</n-button>
+              </div>
+            </div>
+          </template>
+
+          <template v-else>
+            <div class="detail-section" v-if="selectedVolume.summary">
+              <h4>剧情概要</h4>
+              <div class="volume-summary" v-html="renderMd(selectedVolume.summary)"></div>
+            </div>
+            <div class="detail-section" v-if="selectedVolume.keyTurningPoints">
+              <h4>关键转折点</h4>
+              <p>{{ selectedVolume.keyTurningPoints }}</p>
+            </div>
+            <div class="detail-section" v-if="selectedVolume.characterChanges">
+              <h4>角色变化</h4>
+              <p>{{ selectedVolume.characterChanges }}</p>
+            </div>
+            <section v-if="selectedVolumeChapters.length" class="volume-chapter-outline">
+              <h4>已创建章节（{{ selectedVolumeChapters.length }} 章）</h4>
+              <ol><li v-for="chapter in selectedVolumeChapters" :key="chapter.id"><span>第 {{ chapter.chapterIndex + 1 }} 章</span><strong>{{ chapter.title || '未命名章节' }}</strong><p v-if="chapter.summary">{{ chapter.summary }}</p></li></ol>
+            </section>
+            <div class="volume-actions">
+              <n-button size="small" @click="startEdit(selectedVolume)">编辑</n-button>
+              <n-button v-if="hasEstimateConflict(selectedVolume)" size="small" @click="syncEstimates(selectedVolume)">从概要同步预估</n-button>
+              <n-button v-if="selectedVolume.versions?.length" size="small" @click="openVersionModal(selectedVolume)">版本 {{ selectedVolume.versions.length }}</n-button>
+              <n-button size="small" :loading="regeneratingId === selectedVolume.id" @click="regenerateVolume(selectedVolume)">局部重生成</n-button>
+              <n-popconfirm @positive-click="removeVolume(selectedVolume.id)">
+                <template #trigger>
+                  <n-button size="small" type="error" quaternary>删除</n-button>
+                </template>
+                确定删除此分卷？
+              </n-popconfirm>
+            </div>
+          </template>
+        </div>
+      </main>
     </div>
 
     <!-- 无总大纲提示 -->
@@ -42,81 +139,7 @@
       <div class="typing-cursor">▌</div>
     </div>
 
-    <!-- 分卷列表 -->
-    <div v-if="volumes.length && !generating" class="volume-list">
-      <div
-        v-for="vol in volumes"
-        :key="vol.id"
-        class="volume-card paper-panel"
-      >
-        <div class="volume-card-header" @click="toggleExpand(vol.id)">
-          <div class="volume-title-row">
-            <span class="volume-index">第{{ vol.volumeIndex + 1 }}卷</span>
-            <h3 class="volume-title">{{ vol.title }}</h3>
-            <span class="volume-badge" v-if="vol.theme">{{ vol.theme }}</span>
-          </div>
-          <div class="volume-meta">
-            <span>预估 {{ vol.estimatedChapters || '待定' }} 章</span>
-            <span>·</span>
-            <span>{{ vol.estimatedWordCount || '待定' }} 万字</span>
-            <span class="expand-icon">{{ expandedIds.has(vol.id) ? '▲' : '▼' }}</span>
-          </div>
-        </div>
 
-        <div v-if="expandedIds.has(vol.id)" class="volume-detail">
-          <!-- 编辑模式 -->
-          <template v-if="editingId === vol.id">
-            <div class="edit-form">
-              <label>卷名</label>
-              <n-input v-model:value="editForm.title" size="small" />
-              <label>主题</label>
-              <n-input v-model:value="editForm.theme" size="small" />
-              <label>剧情概要</label>
-              <n-input v-model:value="editForm.summary" type="textarea" :rows="4" size="small" />
-              <label>关键转折点</label>
-              <n-input v-model:value="editForm.keyTurningPoints" type="textarea" :rows="2" size="small" />
-              <label>角色变化</label>
-              <n-input v-model:value="editForm.characterChanges" type="textarea" :rows="2" size="small" />
-              <label>预估章节数</label>
-              <n-input-number v-model:value="editForm.estimatedChapters" :min="1" :precision="0" size="small" />
-              <label>预估字数（万字）</label>
-              <n-input-number v-model:value="editForm.estimatedWordCount" :min="0.1" :precision="3" size="small" />
-              <div class="edit-actions">
-                <n-button size="small" @click="editingId = ''">取消</n-button>
-                <n-button size="small" type="primary" @click="saveEdit(vol.id)">保存</n-button>
-              </div>
-            </div>
-          </template>
-          <!-- 展示模式 -->
-          <template v-else>
-            <div class="detail-section" v-if="vol.summary">
-              <h4>剧情概要</h4>
-              <div class="volume-summary" v-html="renderMd(vol.summary)"></div>
-            </div>
-            <div class="detail-section" v-if="vol.keyTurningPoints">
-              <h4>关键转折点</h4>
-              <p>{{ vol.keyTurningPoints }}</p>
-            </div>
-            <div class="detail-section" v-if="vol.characterChanges">
-              <h4>角色变化</h4>
-              <p>{{ vol.characterChanges }}</p>
-            </div>
-            <div class="volume-actions">
-              <n-button size="small" @click="startEdit(vol)">编辑</n-button>
-              <n-button v-if="hasEstimateConflict(vol)" size="small" @click="syncEstimates(vol)">从概要同步预估</n-button>
-              <n-button v-if="vol.versions?.length" size="small" @click="openVersionModal(vol)">版本 {{ vol.versions.length }}</n-button>
-              <n-button size="small" :loading="regeneratingId === vol.id" @click="regenerateVolume(vol)">局部重生成</n-button>
-              <n-popconfirm @positive-click="removeVolume(vol.id)">
-                <template #trigger>
-                  <n-button size="small" type="error" quaternary>删除</n-button>
-                </template>
-                确定删除此分卷？
-              </n-popconfirm>
-            </div>
-          </template>
-        </div>
-      </div>
-    </div>
 
     <n-modal v-model:show="showVersionModal" preset="card" title="分卷规划版本对比" style="width: min(760px, calc(100vw - 32px));">
       <div v-if="versionVolume" class="version-dialog">
@@ -137,7 +160,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, reactive, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { NButton, NEmpty, NInput, NInputNumber, NModal, NPopconfirm, NSelect, useMessage } from 'naive-ui'
 import { useNovelStore } from '@/stores/novel'
@@ -168,13 +191,17 @@ const volumes = computed(() => novel.value?.volumes || [])
 
 const generating = ref(false)
 const streamContent = ref('')
-const expandedIds = ref(new Set<string>())
+const selectedVolumeId = ref('')
+const selectedVolume = computed(() => volumes.value.find(vol => vol.id === selectedVolumeId.value))
+const selectedVolumeChapters = computed(() => selectedVolume.value ? (novel.value?.chapters || []).filter(chapter => chapter.volumeIndex === selectedVolume.value!.volumeIndex).sort((a, b) => a.chapterIndex - b.chapterIndex) : [])
 const editingId = ref('')
 const regeneratingId = ref('')
 const showVersionModal = ref(false)
 const versionVolume = ref<Volume | null>(null)
 const selectedVersionId = ref('')
 const editForm = ref({ title: '', theme: '', summary: '', keyTurningPoints: '', characterChanges: '', estimatedChapters: 1, estimatedWordCount: 0.225 })
+const volumeDrafts = reactive(new Map<string, typeof editForm.value>())
+const hasDrafts = computed(() => !!editingId.value || volumeDrafts.size > 0)
 const versionOptions = computed(() => (versionVolume.value?.versions || []).slice().reverse().map(version => ({
   label: `${version.label} · ${new Date(version.savedAt).toLocaleString('zh-CN')}`,
   value: version.id,
@@ -184,12 +211,41 @@ const versionDiff = computed<PlanningDiff[]>(() => {
   return versionVolume.value ? comparePlanningVersions(version, versionVolume.value) : []
 })
 
-function toggleExpand(id: string) {
-  if (expandedIds.value.has(id)) {
-    expandedIds.value.delete(id)
-  } else {
-    expandedIds.value.add(id)
+function selectVolume(id: string) {
+  if (id === selectedVolumeId.value) return
+  if (editingId.value) {
+    volumeDrafts.set(editingId.value, { ...editForm.value })
+    editingId.value = ''
   }
+  selectedVolumeId.value = id
+  const draft = volumeDrafts.get(id)
+  if (draft) {
+    editForm.value = { ...draft }
+    editingId.value = id
+  }
+}
+
+function cancelEdit() {
+  volumeDrafts.delete(editingId.value)
+  editingId.value = ''
+}
+
+function initializeSelection() {
+  if (volumes.value.length && !selectedVolumeId.value) {
+    selectedVolumeId.value = volumes.value[0].id
+  }
+}
+
+function addManualVolume() {
+  if (!novel.value || generating.value || regeneratingId.value) return
+  const volume: Volume = {
+    id: crypto.randomUUID(), volumeIndex: Math.max(-1, ...volumes.value.map(item => item.volumeIndex)) + 1,
+    title: '新分卷', theme: '', summary: '', keyTurningPoints: '', characterChanges: '',
+    estimatedChapters: 1, estimatedWordCount: 0.225,
+  }
+  novelStore.setVolumes(novelId.value, [...volumes.value, volume])
+  novelStore.setChapterPlanConfirmed(novelId.value, false)
+  startEdit(volume)
 }
 
 // AI 生成分卷规划
@@ -266,6 +322,8 @@ function syncEstimates(volume: Volume) {
 
 // 编辑分卷
 function startEdit(vol: Volume) {
+  selectVolume(vol.id)
+  if (editingId.value === vol.id) return
   editingId.value = vol.id
   editForm.value = {
     title: vol.title,
@@ -284,9 +342,19 @@ function saveEdit(volId: string) {
     return
   }
   novelStore.updateVolume(novelId.value, volId, editForm.value)
+  volumeDrafts.delete(volId)
   editingId.value = ''
   msg.success('已保存')
 }
+
+watch(volumes, () => {
+  initializeSelection()
+  if (selectedVolumeId.value && !volumes.value.find(vol => vol.id === selectedVolumeId.value)) {
+    selectedVolumeId.value = volumes.value[0]?.id || ''
+  }
+  for (const id of volumeDrafts.keys()) if (!volumes.value.some(volume => volume.id === id)) volumeDrafts.delete(id)
+  if (editingId.value && !volumes.value.some(volume => volume.id === editingId.value)) editingId.value = ''
+}, { immediate: true })
 
 function openVersionModal(volume: Volume) {
   versionVolume.value = volume
@@ -425,34 +493,139 @@ function removeVolume(volId: string) {
   50% { opacity: 0; }
 }
 
-/* 分卷卡片 */
-.volume-list {
+@media (max-width: 960px) {
+  .volume-master-detail {
+    grid-template-columns: 1fr;
+  }
+
+  .volume-nav {
+    position: static;
+    max-height: none;
+    grid-row: 1;
+  }
+
+  .volume-detail-panel {
+    grid-row: 2;
+  }
+}
+
+.volume-master-detail {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.volume-nav {
   display: flex;
   flex-direction: column;
-  gap: var(--space-md);
+  gap: 8px;
+  position: sticky;
+  top: calc(56px + 16px);
+  max-height: calc(100vh - 56px - 32px);
+  overflow-y: auto;
 }
 
-.volume-card {
-  overflow: hidden;
+.volume-nav-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-color-card);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.volume-card-header {
+.volume-nav-item:hover {
+  border-color: var(--color-primary);
+}
+
+.volume-nav-item-active {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary);
+}
+
+.volume-nav-title {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  cursor: pointer;
-  padding: 4px 0;
-  transition: opacity var(--transition-fast);
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-.volume-card-header:hover {
-  opacity: 0.8;
+.volume-nav-index {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-primary);
+  background: var(--color-primary-light);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
 }
 
-.volume-title-row {
+.volume-nav-title strong {
+  font-family: var(--font-family-serif);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-color-primary);
+}
+
+.volume-nav-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-color-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.volume-nav-summary {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-color-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.volume-detail-panel {
+  min-width: 0;
+}
+
+.volume-detail-content {
+  padding: 20px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-color-card);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.volume-detail-header {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-color-light);
+}
+
+.volume-detail-title-row {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.volume-detail-title-row h3 {
+  margin: 0;
+  font-family: var(--font-family-serif);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-color-primary);
 }
 
 .volume-index {
@@ -464,17 +637,11 @@ function removeVolume(volId: string) {
   border-radius: var(--radius-sm);
 }
 
-.volume-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-color-primary);
-}
-
 .volume-badge {
   font-size: 11px;
   color: var(--text-color-tertiary);
   background: var(--bg-color-secondary);
-  padding: 1px 8px;
+  padding: 2px 8px;
   border-radius: 100px;
 }
 
@@ -484,18 +651,7 @@ function removeVolume(volId: string) {
   gap: 6px;
   font-size: 12px;
   color: var(--text-color-tertiary);
-}
-
-.expand-icon {
-  font-size: 10px;
-  margin-left: 4px;
-}
-
-/* 详情 */
-.volume-detail {
-  margin-top: var(--space-md);
-  padding-top: var(--space-md);
-  border-top: 1px solid var(--border-color-light);
+  font-variant-numeric: tabular-nums;
 }
 
 .detail-section {
@@ -503,10 +659,12 @@ function removeVolume(volId: string) {
 }
 
 .detail-section h4 {
-  font-size: 14px;
+  font-family: var(--font-family-serif);
+  font-size: 15px;
   font-weight: 600;
+  line-height: 1.4;
   color: var(--text-color-primary);
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .detail-section p {
@@ -536,7 +694,7 @@ function removeVolume(volId: string) {
 }
 
 .edit-form label {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-color-secondary);
 }
@@ -547,4 +705,25 @@ function removeVolume(volId: string) {
   gap: 8px;
   margin-top: 8px;
 }
+.volume-master-detail { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 24px; }
+.volume-nav { gap: 16px; }
+.volume-nav-item { display: flex; gap: 16px; min-height: 150px; padding: 22px; }
+.volume-nav-number { flex: 0 0 auto; font: 600 32px/1.3 var(--font-family-serif); color: var(--color-accent); }
+.volume-nav-item-active .volume-nav-number { color: var(--color-primary); }
+.volume-nav-content { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.volume-nav-title strong { font-size: 20px; line-height: 1.5; overflow-wrap: anywhere; }
+.volume-nav-meta { font-size: 13px; }
+.volume-nav-summary { font-size: 14px; line-height: 1.8; -webkit-line-clamp: 3; }
+.volume-detail-content { padding: 24px; }
+.volume-detail-title-row h3 { font-size: 25px; }
+.detail-section { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 16px; align-items: start; border: 1px solid var(--border-color-light); border-radius: var(--radius-md); padding: 18px; }
+.detail-section h4 { font-size: 16px; color: var(--text-color-primary); margin: 0; }
+.detail-section p, .detail-section .volume-summary { font-size: 14px; line-height: 1.8; min-width: 0; overflow-wrap: anywhere; }
+.volume-chapter-outline { padding: 20px 0; border-top: 1px solid var(--border-color-light); }
+.volume-chapter-outline h4 { font: 600 17px var(--font-family-serif); margin-bottom: 16px; }
+.volume-chapter-outline ol { list-style: none; display: grid; gap: 12px; }
+.volume-chapter-outline li { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 4px 12px; color: var(--text-color-secondary); font-size: 13px; }
+.volume-chapter-outline li p { grid-column: 2; }
+@media (max-width: 900px) { .volume-master-detail { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 550px) { .volume-nav-item, .volume-detail-content { padding: 16px; } .detail-section { grid-template-columns: minmax(0, 1fr); padding: 14px; } }
 </style>

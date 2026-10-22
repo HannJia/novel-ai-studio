@@ -1,5 +1,9 @@
 <template>
   <section class="inspiration-chat">
+    <div class="inspiration-workspace">
+      <main class="inspiration-conversation paper-panel">
+        <header class="inspiration-heading"><h2>从一个想法开始</h2><p>和墨笺一起梳理灵感，把模糊的想法变成清晰的故事。</p></header>
+        <details ref="historyDetails" class="inspiration-options"><summary>对话选项 · 历史与参考资料</summary>
     <div class="inspiration-search-toolbar">
       <button class="inspiration-search-toggle" :class="{ enabled: webSearch }" :aria-pressed="webSearch"
         title="开启或关闭联网搜索，下条灵感消息生效" @click="webSearch = !webSearch">联网{{ webSearch ? '开' : '关' }}</button>
@@ -24,6 +28,8 @@
         <template #icon><n-icon><add-outline /></n-icon></template>新建知识条目
       </n-button>
     </div>
+
+        </details>
     <aside v-if="latestPrompt" class="inspiration-sticky-prompt" aria-label="本轮问题">
       <div class="inspiration-sticky-header">
         <strong>本轮问题</strong>
@@ -36,6 +42,7 @@
       <p id="inspiration-current-prompt" class="inspiration-sticky-text" :class="{ expanded: promptExpanded }">{{ latestPrompt }}</p>
     </aside>
     <div ref="historyElement" class="inspiration-history" tabindex="0" aria-live="polite" aria-label="灵感对话">
+      <div v-if="!history.length && !busy" class="inspiration-empty-guide"><n-icon :size="38"><bulb-outline /></n-icon><h3>写下故事的第一点灵感</h3><p>人物、场景、一句台词，都可以成为起点。</p><div><button v-for="prompt in ['先帮我构思一个主角', '一起确定故事的背景', '从一个核心冲突开始']" :key="prompt" type="button" @click="input = input.trim() ? input + '\n' + prompt : prompt">{{ prompt }}</button></div></div>
       <article v-for="(item, index) in history" :key="index" :data-message-index="index"
         class="inspiration-message" :class="item.role">
         <strong>{{ item.role === 'user' ? '我' : 'AI' }}</strong>
@@ -84,20 +91,27 @@
           </n-button>
         </div>
         <n-button v-if="retryAvailable && !busy" @click="respond">重试回复</n-button>
-        <n-button :loading="extracting" :disabled="busy || !history.some(item => item.role === 'user')" @click="extract">
+
+      </div>
+    </div>
+
+      </main>
+      <InspirationSettingsSummary :form="form" :busy="busy" :extracting="extracting" :can-extract="history.some(item => item.role === 'user')" @draft-change="value => emit('draft-change', value)" @history="openHistory">
+        <n-button block type="primary" size="large" class="summary-extract" :loading="extracting" :disabled="busy || !history.some(item => item.role === 'user')" @click="extract">
           <template #icon><n-icon><checkmark-outline /></n-icon></template>{{ extracting ? '整理中' : '整理设定并检查' }}
         </n-button>
-      </div>
+      </InspirationSettingsSummary>
     </div>
     <SaveChatKnowledge :key="selectedSessionId || 'new'" v-model:show="showKnowledgeDraft" :content="knowledgeDraft" :preferred-ids="knowledgeIds"
       @saved="knowledgeSaved" />
+
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NButton, NIcon, NInput, NSelect } from 'naive-ui'
-import { AddOutline, CheckmarkOutline, SaveOutline, SendOutline, StopOutline } from '@vicons/ionicons5'
+import { AddOutline, BulbOutline, CheckmarkOutline, SaveOutline, SendOutline, StopOutline } from '@vicons/ionicons5'
 import { useConfigStore } from '@/stores/config'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import {
@@ -114,6 +128,7 @@ import { renderMd } from '@/utils/markdown'
 import { formatChatReply } from '@/utils/chatPresentation'
 import ChatSearchEvidence from '@/components/ChatSearchEvidence.vue'
 import SaveChatKnowledge from '@/components/SaveChatKnowledge.vue'
+import InspirationSettingsSummary from '@/components/InspirationSettingsSummary.vue'
 import { knowledgeDraftWithSources } from '@/services/softwareAssistantContext'
 import type { ChatSearchRecord } from '@/types/chat'
 import { useInspirationSessionsStore } from '@/stores/inspirationSessions'
@@ -123,6 +138,7 @@ const props = defineProps<{ form: CreateWizardForm; active: boolean }>()
 const emit = defineEmits<{
   apply: [form: CreateWizardForm, history: InspirationMessage[]]
   'history-change': [history: InspirationMessage[]]
+  'draft-change': [form: CreateWizardForm]
 }>()
 const config = useConfigStore()
 const knowledge = useKnowledgeStore()
@@ -131,6 +147,12 @@ const history = ref<InspirationMessage[]>([])
 const savedSessions = computed(() => sessionsStore.sessions)
 const selectedSessionId = ref<string | null>(null)
 const historyElement = ref<HTMLElement | null>(null)
+const historyDetails = ref<HTMLDetailsElement | null>(null)
+async function openHistory() {
+  if (historyDetails.value) historyDetails.value.open = true
+  await nextTick()
+  historyDetails.value?.querySelector<HTMLInputElement>('.inspiration-session-select input')?.focus()
+}
 const input = ref('')
 const selectedKnowledgeIds = ref<string[] | null>(null)
 const knowledgeIds = computed<string[]>({
@@ -448,17 +470,17 @@ onBeforeUnmount(() => { persistCurrentHistory(); stop() })
 .inspiration-sticky-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
   overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.6; }
 .inspiration-sticky-text.expanded { display: block; max-height: min(100px, 12vh); overflow-y: auto; overscroll-behavior: contain; }
-.inspiration-message { width: fit-content; min-width: 0; max-width: 88%; padding: 14px 16px; margin: 12px 0;
+.inspiration-message { width: fit-content; min-width: 0; max-width: min(720px, 88%); padding: 14px 16px; margin: 12px 0;
   border: 1px solid var(--border-color); border-radius: var(--radius-lg); overflow-wrap: anywhere; }
 .inspiration-message > strong { display: block; margin-bottom: 4px; color: var(--text-color-secondary); font-size: 12px; letter-spacing: 0.04em; }
-.inspiration-message > div { line-height: 1.85; font-size: 14px; overflow-x: auto; }
+.inspiration-message > div { line-height: 1.85; font-size: 15px; overflow-x: auto; }
 /* 用户侧：淡朱砂底 */
 .inspiration-message.user { margin-left: auto; background: var(--color-primary-light);
   border-color: color-mix(in srgb, var(--color-primary) 28%, var(--border-color)); }
 .inspiration-message.user > strong { color: var(--color-primary); text-align: right; }
 .inspiration-message.user > div { text-align: left; }
 /* AI 侧：宣纸卡片 + 黛青左线 */
-.inspiration-message.assistant { margin-right: auto; max-width: 94%; background: var(--bg-color-paper);
+.inspiration-message.assistant { margin-right: auto; max-width: min(720px, 94%); background: var(--bg-color-paper);
   border-left: 3px solid var(--color-accent); box-shadow: var(--shadow-sm); }
 .inspiration-message.assistant > strong { color: var(--color-accent); font-family: var(--font-family-serif); }
 .inspiration-message :deep(p + p) { margin-top: 10px; }
@@ -490,4 +512,33 @@ onBeforeUnmount(() => { persistCurrentHistory(); stop() })
   .inspiration-message { padding: 10px 12px; }
   .inspiration-sticky-prompt { padding: 6px 10px; }
 }
+
+/* Approved split layout: conversation and real story settings. */
+.inspiration-chat { flex: 1; min-height: 0; width: 100%; max-width: 1520px; margin: 0 auto; padding: 0 32px 24px; display: flex; box-sizing: border-box; }
+.inspiration-workspace { flex: 1; display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(320px, 1fr); gap: 16px; width: 100%; min-height: 0; }
+.inspiration-conversation { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 24px; }
+.inspiration-heading h2 { font-size: 30px; margin: 0 0 6px; }
+.inspiration-heading p { color: var(--text-color-secondary); font-size: 14px; line-height: 1.7; }
+.inspiration-options { flex-shrink: 0; margin: 12px 0; color: var(--text-color-secondary); font-size: 12px; }
+.inspiration-options summary { cursor: pointer; padding: 4px 0; }
+.inspiration-options .inspiration-search-toolbar { padding-top: 10px; }
+.inspiration-history { flex: 1; min-height: 100px; padding: 4px 0 16px; }
+.inspiration-message { max-width: 88%; margin: 18px 0; padding: 16px 18px; }
+.inspiration-message.user { background: var(--color-primary-light); border-color: transparent; }
+.inspiration-message.assistant { max-width: calc(100% - 42px); margin-left: 42px; position: relative; border-left: 1px solid var(--border-color); box-shadow: none; }
+.inspiration-message.assistant::before { content: '墨'; position: absolute; top: 4px; left: -42px; display: grid; place-items: center; width: 30px; height: 32px; border-radius: 50%; background: var(--color-primary); color: var(--text-color-inverse); font: 20px var(--font-family-serif); }
+.inspiration-message.assistant > strong { display: none; }
+.inspiration-composer { margin: auto 0 0; padding: 12px; }
+.inspiration-composer :deep(.n-input) { background: transparent; }
+.inspiration-workspace > :deep(.inspiration-settings) { min-height: 0; overflow-y: auto; }
+.inspiration-sticky-prompt { margin: 0 0 8px; padding: 8px 12px; background: var(--bg-color-secondary); }
+@media (max-width: 1100px) { .inspiration-chat { padding: 0 20px 20px; } .inspiration-workspace { grid-template-columns: minmax(0, 1fr) 300px; } .inspiration-conversation { padding: 18px; } }
+@media (max-width: 850px) { .inspiration-chat { display: block; overflow-y: auto; padding: 0 12px 20px; } .inspiration-workspace { grid-template-columns: 1fr; } .inspiration-conversation { min-height: 620px; height: calc(100dvh - 160px); max-height: 850px; padding: 16px; } .inspiration-heading h2 { font-size: 26px; } }
+.inspiration-empty-guide { margin: auto; max-width: 440px; text-align: center; padding: 28px; color: var(--text-color-secondary); }
+.inspiration-empty-guide > .n-icon { color: var(--color-accent); margin-bottom: 16px; }
+.inspiration-empty-guide h3 { font-size: 24px; color: var(--text-color-primary); margin-bottom: 8px; }
+.inspiration-empty-guide p { font-size: 14px; line-height: 1.8; }
+.inspiration-empty-guide > div { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 24px; }
+.inspiration-empty-guide button { padding: 8px 12px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-color-card); color: var(--color-accent); font: 13px var(--font-family); cursor: pointer; }
+.inspiration-empty-guide button:hover { border-color: var(--color-accent); }
 </style>

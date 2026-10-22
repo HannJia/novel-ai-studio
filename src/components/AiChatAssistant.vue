@@ -1,8 +1,13 @@
 <template>
-  <div class="ai-chat-wrapper" id="ai-chat-assistant">
+  <Teleport :to="host || 'body'" :disabled="!host">
+  <div class="ai-chat-wrapper" :class="{ embedded: host }" id="ai-chat-assistant">
     <!-- 浮动按钮 -->
     <button
+      v-if="!host"
       class="chat-fab"
+      :aria-label="showChat ? '收起 AI 对话助手' : '打开 AI 对话助手'"
+      :aria-expanded="showChat"
+      aria-controls="ai-chat-window"
       @click="toggleChat"
       :class="{ 'fab-active': showChat, 'fab-busy': thinking && !showChat }"
       :title="thinking && !showChat ? 'AI 对话助手：后台处理中，点击展开' : unread ? 'AI 对话助手：有新回复' : 'AI 对话助手'"
@@ -12,15 +17,15 @@
 
     <!-- 聊天窗口 -->
     <transition name="chat-slide">
-      <div v-if="showChat" class="chat-window paper-panel" :class="{ expanded }">
+      <div v-if="host || showChat" id="ai-chat-window" class="chat-window paper-panel" :class="{ expanded: expanded && !host }" role="region" aria-label="AI 对话助手">
         <div class="chat-header">
-          <h3>AI 对话助手</h3>
+          <h3 v-if="!host">AI 对话助手</h3>
           <div class="chat-header-actions">
             <button class="chat-search-btn" :class="{ enabled: webSearch }" :aria-pressed="webSearch"
               :title="webSearch ? '关闭联网搜索（下条消息生效）' : '开启联网搜索（下条消息生效）'"
               @click="toggleSearch">联网{{ webSearch ? '开' : '关' }}</button>
-            <button class="chat-icon-btn" @click="expanded = !expanded" :title="expanded ? '还原窗口' : '放大窗口'" :aria-label="expanded ? '还原窗口' : '放大窗口'">{{ expanded ? '❐' : '⛶' }}</button>
-            <button class="chat-icon-btn" @click="toggleChat" title="收起窗口（继续后台运行）" aria-label="收起窗口">−</button>
+            <button v-if="!host" class="chat-icon-btn" @click="expanded = !expanded" :title="expanded ? '还原窗口' : '放大窗口'" :aria-label="expanded ? '还原窗口' : '放大窗口'">{{ expanded ? '❐' : '⛶' }}</button>
+            <button v-if="!host" class="chat-icon-btn" @click="toggleChat" title="收起窗口（继续后台运行）" aria-label="收起窗口">−</button>
             <button class="chat-icon-btn" :disabled="thinking" @click="clearHistory" :title="thinking ? '请先停止请求再清空记录' : '清空记录'">清空</button>
           </div>
         </div>
@@ -84,7 +89,7 @@
             :rows="2"
             placeholder="输入问题或修改建议..."
             :maxlength="12000"
-            @keydown.enter.ctrl.prevent="sendMessage"
+            @keydown.enter.ctrl="handleSendKeydown"
             size="small"
           />
           <n-button v-if="thinking" size="small" @click="stop">停止</n-button>
@@ -103,6 +108,7 @@
     <SaveChatKnowledge :key="novelId" v-model:show="showKnowledgeDraft" :content="knowledgeDraft"
       :preferred-ids="novel?.knowledgeBaseIds || []" @saved="knowledgeSaved" />
   </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -121,6 +127,7 @@ import { formatChatReply } from '@/utils/chatPresentation'
 const props = defineProps<{
   novelId: string
   chapterId?: string
+  host?: HTMLElement | null
 }>()
 
 const dialog = useDialog()
@@ -168,13 +175,29 @@ async function copyContent(text: string) {
   try { await navigator.clipboard.writeText(text) }
   catch { error.value = '复制失败，请选中文本手动复制。' }
 }
+function handleSendKeydown(event: KeyboardEvent) {
+  if (event.isComposing || event.keyCode === 229) return
+  event.preventDefault()
+  void sendMessage()
+}
 
 watch(showChat, (val) => {
   if (val) scrollToBottom()
 })
+let previousScrollTop: number | null = null
+watch(() => props.host, () => {
+  if (messagesRef.value) previousScrollTop = messagesRef.value.scrollTop
+  nextTick(() => {
+    if (props.host && messagesRef.value) {
+      if (previousScrollTop !== null) messagesRef.value.scrollTop = previousScrollTop
+      else scrollToBottom()
+      if (props.host.getBoundingClientRect().height > 0) unread.value = false
+    }
+  })
+})
 watch(() => [messages.value.length, streamText.value, thinking.value], scrollToBottom)
 watch(() => messages.value[messages.value.length - 1]?.id, () => {
-  if (!showChat.value && messages.value[messages.value.length - 1]?.role === 'assistant') unread.value = true
+  if (!showChat.value && !props.host?.getBoundingClientRect().height && messages.value[messages.value.length - 1]?.role === 'assistant') unread.value = true
 })
 watch(() => props.novelId, () => { unread.value = false; showKnowledgeDraft.value = false })
 
@@ -257,15 +280,16 @@ function wholeBookAnalysis() {
   position: absolute;
   bottom: 64px;
   right: 0;
-  width: min(420px, calc(100vw - 32px));
-  height: min(600px, calc(100dvh - 110px));
+  width: min(440px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  height: min(640px, calc(100dvh - 110px));
   display: flex;
   flex-direction: column;
   border-radius: var(--radius-lg);
-  box-shadow: 0 8px 40px rgba(0,0,0,0.15);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
 }
-.chat-window.expanded { width: min(900px, calc(100vw - 32px)); height: calc(100dvh - 110px); }
+.chat-window.expanded { width: min(880px, calc(100vw - 24px)); max-width: calc(100vw - 24px); height: calc(100dvh - 110px); }
 .fab-busy { animation: busy-pulse 1.8s ease-in-out infinite; }
 @keyframes busy-pulse { 50% { box-shadow: 0 0 0 5px var(--color-primary-light); } }
 
@@ -346,8 +370,8 @@ function wholeBookAnalysis() {
 /* 消息气泡 */
 .chat-msg {
   display: flex;
-  gap: 8px;
-  max-width: 85%;
+  gap: 10px;
+  max-width: 88%;
 }
 
 .chat-msg.user {
@@ -356,22 +380,34 @@ function wholeBookAnalysis() {
 }
 
 .msg-avatar {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 600;
   flex-shrink: 0;
   background: var(--bg-color-secondary);
+  color: var(--text-color-secondary);
+}
+
+.chat-msg.user .msg-avatar {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.chat-msg.assistant .msg-avatar {
+  background: var(--color-accent-light);
+  color: var(--color-accent);
 }
 
 .msg-content {
-  padding: 8px 12px;
+  padding: 10px 14px;
   border-radius: 12px;
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 14px;
+  line-height: 1.7;
   color: var(--text-color-primary);
 }
 
@@ -382,7 +418,9 @@ function wholeBookAnalysis() {
 }
 
 .chat-msg.assistant .msg-content {
-  background: var(--bg-color-secondary);
+  background: var(--bg-color-paper);
+  border: 1px solid var(--border-color-light);
+  border-left: 3px solid var(--color-accent);
   border-bottom-left-radius: 4px;
 }
 
@@ -469,4 +507,9 @@ function wholeBookAnalysis() {
   color: var(--color-primary);
   background: var(--color-primary-light);
 }
+.ai-chat-wrapper.embedded { position: static; inset: auto; z-index: auto; width: 100%; height: 100%; min-height: 0; }
+.embedded .chat-window { position: static; inset: auto; width: 100%; max-width: none; height: 100%; max-height: none; border: 0; border-radius: 0; box-shadow: none; }
+.embedded .chat-messages { min-height: 0; }
+.embedded .chat-header { justify-content: flex-end; padding: 10px 16px; }
+.embedded .chat-input-area { padding: 12px; }
 </style>

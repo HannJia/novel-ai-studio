@@ -1,8 +1,10 @@
-import { beforeAll, describe, expect, it } from 'vitest'
-import { syncSemanticIndexForNovel } from './semanticIndex'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { queryPersistedSemanticEvidence, syncSemanticIndexForNovel } from './semanticIndex'
+import { embeddingSourceId } from './embeddings'
 import type { Novel } from '@/types/novel'
 
 const memory = new Map<string, string>()
+afterEach(() => vi.unstubAllGlobals())
 
 beforeAll(() => {
   Object.defineProperty(globalThis, 'window', { value: { electronAPI: undefined }, configurable: true })
@@ -42,6 +44,36 @@ function largeNovel(): Novel {
 }
 
 describe('语义索引增量同步', () => {
+  it('rebuilds vectors after changing endpoint with the same model, and never queries incompatible vectors', async () => {
+    const novel = largeNovel()
+    novel.id = 'embedding-endpoint-change'
+    novel.chapters = novel.chapters.slice(0, 2)
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const inputs = JSON.parse(String(init.body)).input as string[]
+      return new Response(JSON.stringify({ data: inputs.map((_, index) => ({ index, embedding: [1, 0, 0] })) }), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const firstConfig = { enabled: true, baseUrl: 'https://vectors-a.example.test', apiKey: '', modelName: 'same-vector-model', batchSize: 16 }
+    const secondConfig = { ...firstConfig, baseUrl: 'https://vectors-b.example.test/v1/' }
+    const first = await syncSemanticIndexForNovel(novel, [], firstConfig)
+    expect(first.provider).toBe('remote')
+    expect(first.embeddedCount).toBe(first.recordCount)
+    fetchMock.mockClear()
+    const compatible = await syncSemanticIndexForNovel(novel, [], { ...firstConfig, baseUrl: 'https://vectors-a.example.test/v1/' })
+    expect(compatible.embeddedCount).toBe(0)
+    expect(fetchMock).not.toHaveBeenCalled()
+    const fallback = await queryPersistedSemanticEvidence(novel.id, '调查', 8, secondConfig)
+    expect(fallback.length).toBeGreaterThan(0)
+    expect(fetchMock).not.toHaveBeenCalled()
+    const rebuilt = await syncSemanticIndexForNovel(novel, [], secondConfig)
+    expect(rebuilt.embeddedCount).toBe(rebuilt.recordCount)
+    expect(fetchMock).toHaveBeenCalled()
+    const evidence = await queryPersistedSemanticEvidence(novel.id, '调查', 8, secondConfig)
+    expect(evidence.length).toBeGreaterThan(0)
+    expect((evidence[0].metadata?._embedding as { endpointId?: string })?.endpointId).toBe('https://vectors-b.example.test/v1/embeddings')
+    expect(embeddingSourceId('https://user:synthetic@example.test/v1/?query=ignored#fragment')).not.toContain('synthetic')
+  })
+
   it('二次同步不重算未变化记录，只处理单章修改和删除', async () => {
     const novel = largeNovel()
     const first = await syncSemanticIndexForNovel(novel)

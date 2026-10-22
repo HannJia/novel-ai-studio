@@ -5,10 +5,16 @@
   <transition name="slide-right">
     <div v-if="open && (hasContent || summary || loading)" class="review-sidebar">
       <div class="review-sidebar-header">
-        <div class="review-header-title"><div v-if="loading" class="ai-spinner"></div><strong>{{ loading ? '审查进行中...' : '审查面板' }}</strong></div>
+        <div class="review-header-title"><div v-if="loading" class="ai-spinner"></div><strong>{{ loading ? '审查进行中…' : '本章审查' }}</strong></div>
         <button class="close-btn" title="关闭审查面板" @click="emit('close')">✕</button>
       </div>
       <div class="review-sidebar-body">
+        <p class="review-intro">结合人物、情节与叙事节奏，查看本章审查结果。</p>
+        <p v-if="contentReview" class="review-verdict" :class="`review-verdict--${loading ? 'unknown' : reviewVerdict}`" role="status">{{ loading ? '正在审查，结论尚未完成' : reviewVerdict === 'passed' ? '报告结论：可通过' : reviewVerdict === 'changes-required' ? '报告结论：需要修改' : '报告结论：待确认结论' }}</p>
+        <section v-if="coverageStatus" class="review-section">
+          <div class="review-section-title">审核覆盖范围</div>
+          <p class="review-section-content" role="status">{{ coverageStatus }}</p>
+        </section>
         <section v-if="endingCheck" class="review-section ending-check-section">
           <div class="review-section-title">章节结尾检查 · {{ endingCheck.isComplete ? '已通过' : '需要收尾' }}</div>
           <div class="review-section-content">
@@ -43,7 +49,13 @@
               <div class="action-row"><n-button size="small" type="primary" :disabled="aiWriting || completing || !editableReview.trim()" @click="emit('rewrite', editableReview, 'targeted')">局部修正</n-button><n-button size="small" :disabled="aiWriting || completing || !editableReview.trim()" @click="emit('rewrite', editableReview, 'full')">整章修订</n-button></div>
             </div>
             <p v-if="reviewStatus" class="review-status" role="status">{{ reviewStatus }}</p>
-            <div class="banned-content" v-html="renderedContentReview"></div>
+            <div class="review-cards">
+              <article v-for="(section, index) in reviewCards" :key="index" class="review-card">
+                <h4><span class="review-card-mark" aria-hidden="true">{{ index + 1 }}</span>{{ section.title }}</h4>
+                <p>{{ section.content }}</p>
+              </article>
+            </div>
+            <details class="review-full-report" :open="reviewCards.length === 0"><summary>完整审查报告</summary><div class="banned-content" v-html="renderedContentReview"></div></details>
           </div>
         </section>
 
@@ -83,6 +95,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { NButton } from 'naive-ui'
 import { contentReviewVerdict } from '@/services/contentReview'
 import type { ChapterEndingCheck } from '@/services/chapterEnding'
@@ -91,15 +104,39 @@ import type { ChapterRevision } from '@/types/novel'
 
 type SectionKey = 'summary' | 'contentReview' | 'localScan' | 'aiReview' | 'continuity'
 
-defineProps<{
+const props = defineProps<{
   open: boolean; hasContent: boolean; summary: string; loading: boolean; endingCheck: ChapterEndingCheck | null
   pendingRevision: ChapterRevision | null; revisionLoading: boolean; contentReview: string; renderedContentReview: string
   editableReview: string; aiWriting: boolean; completing: boolean; allowRewrite: boolean
   localScanResults: Array<{ word: BannedWordEntry; count: number; positions: number[] }>
   continuityAlerts: Array<{ id: string; level: 'warning' | 'info'; title: string; detail: string; evidence: string }>
   bannedResult: string; renderedBannedResult: string; expanded: Record<SectionKey, boolean>
-  reviewStatus?: string; actionLabel?: string; actionDisabled?: boolean; actionLoading?: boolean
+  reviewStatus?: string; coverageStatus?: string; actionLabel?: string; actionDisabled?: boolean; actionLoading?: boolean
 }>()
+
+const reviewVerdict = computed(() => contentReviewVerdict(props.contentReview))
+const reviewCards = computed(() => {
+  const sections: Array<{ title: string; content: string }> = []
+  let title = ''
+  let lines: string[] = []
+  const clean = (text: string) => text.replace(/\*\*(.*?)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1')
+  const flush = () => {
+    if (!title || !lines.join('').trim()) return
+    if (/六维度|维度简评/.test(title)) {
+      for (const line of lines) {
+        const match = line.match(/^\s*\d+[.、)）]\s*([^：:]+)[：:]\s*(.+)$/)
+        if (match) sections.push({ title: clean(match[1]), content: clean(match[2]) })
+      }
+    } else if (!/结论|审查报告/.test(title)) sections.push({ title: clean(title), content: clean(lines.join('\n').trim()) })
+  }
+  for (const line of props.contentReview.split(/\r?\n/)) {
+    const heading = line.match(/^\s*#{1,6}\s+(.+)$/) || line.match(/^\s*\*\*(.+?)\*\*[：:]?\s*$/)
+    if (heading) { flush(); title = heading[1]; lines = [] }
+    else lines.push(line)
+  }
+  flush()
+  return sections
+})
 
 const emit = defineEmits<{
   toggle: []; close: []; clear: []; 'approve-revision': []; 'reject-revision': []
@@ -118,7 +155,7 @@ const emit = defineEmits<{
 .review-sidebar-header { justify-content: space-between; min-height: 54px; flex-shrink: 0; padding: 0 16px; border-bottom: 1px solid var(--border-color-light); }
 .close-btn { border: 0; background: none; color: var(--text-color-tertiary); cursor: pointer; }
 .review-sidebar-body { flex: 1; min-height: 0; overflow: auto; padding: 14px; }
-.review-sidebar-footer { display: flex; flex-shrink: 0; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 90px 10px 14px; border-top: 1px solid var(--border-color-light); }
+.review-sidebar-footer { display: flex; flex-shrink: 0; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; padding: 14px 18px; border-top: 1px solid var(--border-color-light); }
 .review-status { color: var(--color-primary); font-weight: 600; }
 .review-section { margin-bottom: 10px; border: 1px solid var(--border-color-light); border-radius: var(--radius-md); overflow: hidden; }
 .review-section-title { width: 100%; display: flex; justify-content: space-between; gap: 8px; padding: 10px; border: 0; background: var(--bg-color-secondary); color: var(--text-color-primary); font-weight: 600; text-align: left; }
@@ -141,6 +178,21 @@ const emit = defineEmits<{
 .review-loading-hint { padding: 18px; text-align: center; color: var(--text-color-tertiary); }
 .ai-spinner { width: 16px; height: 16px; border: 2px solid var(--border-color); border-top-color: var(--color-primary); border-radius: 50%; animation: spin .8s linear infinite; }
 .banned-content :deep(p) { margin: 5px 0; }
+.review-intro { color: var(--text-color-tertiary); line-height: 1.7; font-size: 13px; margin: 0 0 16px; }
+.review-verdict { padding: 10px 12px; border-radius: var(--radius-md); background: var(--bg-color-secondary); color: var(--text-color-secondary); font-size: 13px; margin: 0 0 16px; }
+.review-verdict--passed { background: var(--color-accent-light); color: var(--color-accent); }
+.review-verdict--changes-required { background: var(--color-primary-light); color: var(--color-primary); }
+.review-cards { display: grid; gap: 12px; }
+.review-card { padding: 18px; border: 1px solid var(--border-color-light); border-radius: var(--radius-lg); background: var(--bg-color-paper); }
+.review-card h4 { display: flex; align-items: center; gap: 8px; font: 600 17px var(--font-family-serif); color: var(--text-color-primary); margin: 0 0 10px; }
+.review-card-mark { font: 12px var(--font-family); color: var(--color-accent); }
+.review-card p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.85; margin: 0; }
+.review-full-report { margin-top: 14px; padding: 12px; border: 1px solid var(--border-color-light); border-radius: var(--radius-md); }
+.review-full-report summary { cursor: pointer; color: var(--text-color-tertiary); }
+.review-full-report .banned-content { padding-top: 12px; }
+.review-section:has(.review-cards) { border: 0; }
+.review-section:has(.review-cards) > .review-section-title { background: transparent; padding: 0 0 12px; }
+.review-section:has(.review-cards) > .review-section-content { padding: 0; }
 .slide-right-enter-active, .slide-right-leave-active { transition: transform .2s ease, opacity .2s ease; }
 .slide-right-enter-from, .slide-right-leave-to { transform: translateX(100%); opacity: 0; }
 @keyframes spin { to { transform: rotate(360deg); } }

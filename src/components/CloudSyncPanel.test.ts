@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { reactive } from 'vue'
-import { NRadioGroup } from 'naive-ui'
+import { NCheckbox, NRadioGroup, NSwitch } from 'naive-ui'
 import CloudSyncPanel from './CloudSyncPanel.vue'
 
 const holder = vi.hoisted(() => ({ store: null as any }))
@@ -10,6 +10,7 @@ vi.mock('@/stores/cloudSync', () => ({ useCloudSyncStore: () => holder.store }))
 vi.mock('naive-ui', async original => ({ ...await original<object>(), useDialog: () => ({ warning: vi.fn() }) }))
 beforeEach(() => {
   holder.store = reactive({ session: null, error: '', busy: false, state: { binding: null, enabled: false }, endpoint: 'https://example.test',
+    pendingUploads: [], setEnabled: vi.fn().mockResolvedValue(undefined), approveUploads: vi.fn().mockResolvedValue(undefined),
     conflicts: [], pendingConflicts: [], authenticate: vi.fn().mockResolvedValue(''), recover: vi.fn().mockResolvedValue({ recoveryCode: 'test-recovery' }),
     changePassword: vi.fn().mockImplementation(async () => { holder.store.session = null }) })
 })
@@ -21,6 +22,37 @@ function mountPanel() {
   } } })
 }
 describe('cloud password forms', () => {
+  it('can start the first download without selecting or approving local uploads', async () => {
+    holder.store.session = { user: { username: 'author', usedBytes: 0, quotaBytes: 100, role: 'user' } }
+    const wrapper = mountPanel()
+    const toggle = wrapper.findComponent(NSwitch)
+    expect(toggle.props('disabled')).toBe(false)
+    toggle.vm.$emit('update:value', true)
+    await flushPromises()
+    expect(holder.store.setEnabled).toHaveBeenCalledWith(true)
+    expect(holder.store.approveUploads).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('首次开启先下载云端内容')
+    wrapper.unmount()
+  })
+  it('approves only checked local works and requires a fresh selection afterwards', async () => {
+    holder.store.session = { user: { username: 'author', usedBytes: 0, quotaBytes: 100, role: 'user' } }
+    holder.store.state.enabled = true
+    holder.store.pendingUploads = [
+      { key: 'novel:first', title: '第一本', kind: 'novel' },
+      { key: 'novel:second', title: '第二本', kind: 'novel' },
+    ]
+    const wrapper = mountPanel()
+    const approveButton = () => wrapper.findAll('button').find(button => button.text() === '将所选内容加入云同步')!
+    expect(approveButton().attributes('disabled')).toBeDefined()
+    wrapper.findAllComponents(NCheckbox)[0].vm.$emit('update:checked', true)
+    await flushPromises()
+    expect(approveButton().attributes('disabled')).toBeUndefined()
+    await approveButton().trigger('click')
+    await flushPromises()
+    expect(holder.store.approveUploads).toHaveBeenCalledExactlyOnceWith(['novel:first'])
+    expect(approveButton().attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
   it.each([false, true])('does not expose a server address or editable server control (signed in=%s)', signedIn => {
     if (signedIn) holder.store.session = { endpoint: 'https://example.test', user: { username: 'author', usedBytes: 0, quotaBytes: 100, role: 'user' } }
     const wrapper = mountPanel()

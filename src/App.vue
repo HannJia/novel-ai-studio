@@ -2,7 +2,7 @@
   <n-config-provider class="app-provider" :locale="zhCN" :date-locale="dateZhCN" :theme="isDark ? darkTheme : undefined" :theme-overrides="themeStore.themeOverrides">
     <n-message-provider>
       <n-dialog-provider>
-        <div class="app-shell" :inert="projectTransferBusy || appUpdateInstalling || cloudApplyBusy">
+        <div class="app-shell" :inert="settingsOpen || projectTransferBusy || appUpdateInstalling || (cloudApplyBusy && !cloudConfigApplying)">
           <AppHeader @open-settings="settingsOpen = true" />
           <SaveStatusBar />
           <AppUpdateNotice />
@@ -21,9 +21,9 @@
         </div>
         <div v-if="projectTransferBusy" class="project-transfer-overlay" role="status">正在安全导入项目，请勿关闭软件…</div>
         <div v-if="appUpdateInstalling" class="project-transfer-overlay" role="status">正在保存并准备安装更新，请勿关闭软件…</div>
-        <div v-if="cloudApplyBusy" class="project-transfer-overlay" role="status">正在安全合并云端内容，请勿关闭软件…</div>
+        <div v-if="cloudApplyBusy && !cloudConfigApplying" class="project-transfer-overlay" role="status">正在安全合并云端内容，请勿关闭软件…</div>
         <ExitConfirmDialog />
-        <div v-if="settingsOpen" class="settings-overlay" role="dialog" aria-modal="true" aria-label="设置">
+        <div v-if="settingsOpen" ref="settingsDialog" class="settings-overlay" role="dialog" aria-modal="true" aria-label="设置" @keydown="onSettingsKeydown">
           <div class="settings-overlay-shell">
             <button class="settings-overlay-close" type="button" title="关闭设置" aria-label="关闭设置" @click="settingsOpen = false">
               <n-icon :size="30"><close-outline /></n-icon>
@@ -39,7 +39,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { NConfigProvider, NMessageProvider, NDialogProvider, NIcon, darkTheme, zhCN, dateZhCN } from 'naive-ui'
 import { CloseOutline } from '@vicons/ionicons5'
 import AppHeader from '@/components/AppHeader.vue'
@@ -47,13 +47,39 @@ import SaveStatusBar from '@/components/SaveStatusBar.vue'
 import AppUpdateNotice from '@/components/AppUpdateNotice.vue'
 import ExitConfirmDialog from '@/components/ExitConfirmDialog.vue'
 import SettingsView from '@/views/SettingsView.vue'
-import { appUpdateInstalling, cloudApplyBusy } from '@/services/appLifecycle'
+import { appUpdateInstalling, cloudApplyBusy, cloudConfigApplying } from '@/services/appLifecycle'
 import { projectTransferBusy } from '@/services/projectTransfer'
 import { useThemeStore } from '@/stores/theme'
 
 const themeStore = useThemeStore()
 const isDark = computed(() => themeStore.isDark)
 const settingsOpen = ref(false)
+const settingsDialog = ref<HTMLElement | null>(null)
+let settingsReturnFocus: HTMLElement | null = null
+watch(settingsOpen, async open => {
+  if (open) settingsReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  await nextTick()
+  if (open && settingsOpen.value) settingsDialog.value?.querySelector<HTMLButtonElement>('.settings-overlay-close')?.focus()
+  else if (!settingsOpen.value && settingsReturnFocus?.isConnected) settingsReturnFocus.focus()
+})
+
+function onSettingsKeydown(event: KeyboardEvent) {
+  if (event.defaultPrevented) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    settingsOpen.value = false
+  } else if (event.key === 'Tab') {
+    const controls = Array.from(settingsDialog.value?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])') || [])
+      .filter(element => element.tabIndex >= 0 && element.getClientRects().length > 0)
+    const first = controls[0], last = controls[controls.length - 1]
+    if (first && last && ((event.shiftKey && document.activeElement === first) || (!event.shiftKey && document.activeElement === last))) {
+      event.preventDefault()
+      const target = event.shiftKey ? last : first
+      target.focus()
+    }
+  }
+}
 
 onMounted(() => {
   themeStore.initTheme()

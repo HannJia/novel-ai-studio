@@ -1,5 +1,9 @@
 <template>
   <div class="page-container fade-in" id="settings-page">
+
+
+    <div class="settings-layout">
+    <nav class="settings-nav" role="tablist" @keydown="handleSettingsNavKeydown" aria-label="设置导航">
     <div class="settings-header">
       <button v-if="!props.overlay" class="back-btn" @click="handleClose">
         <n-icon :size="20"><arrow-back-outline /></n-icon>
@@ -7,29 +11,70 @@
       </button>
       <h1 class="page-title">设置</h1>
     </div>
-
-    <div class="settings-layout">
-    <nav v-if="sectionIndex.length > 1" class="settings-index" aria-label="设置分区">
       <button
-        v-for="(item, index) in sectionIndex"
-        :key="item"
         type="button"
-        class="settings-index-item"
-        :class="{ 'settings-index-item--active': activeSection === index }"
-        @click="scrollToSection(index)"
-      >{{ item }}</button>
+        role="tab"
+        class="settings-nav-item"
+        :aria-selected="activeTab === 'cloud'"
+        :tabindex="activeTab === 'cloud' ? 0 : -1"
+        @click="activeTab = 'cloud'"
+      ><n-icon :size="21"><cloud-outline /></n-icon><span>云同步</span></button>
+      <button
+        type="button"
+        role="tab"
+        class="settings-nav-item"
+        :aria-selected="activeTab === 'models'"
+        :tabindex="activeTab === 'models' ? 0 : -1"
+        @click="activeTab = 'models'"
+      ><n-icon :size="21"><hardware-chip-outline /></n-icon><span>模型配置</span></button>
+      <button
+        type="button"
+        role="tab"
+        class="settings-nav-item"
+        :aria-selected="activeTab === 'workflow'"
+        :tabindex="activeTab === 'workflow' ? 0 : -1"
+        @click="activeTab = 'workflow'"
+      ><n-icon :size="21"><git-network-outline /></n-icon><span>AI 工作流</span></button>
+      <button
+        type="button"
+        role="tab"
+        class="settings-nav-item"
+        :aria-selected="activeTab === 'retrieval'"
+        :tabindex="activeTab === 'retrieval' ? 0 : -1"
+        @click="activeTab = 'retrieval'"
+      ><n-icon :size="21"><search-outline /></n-icon><span>语义检索</span></button>
+      <button
+        type="button"
+        role="tab"
+        class="settings-nav-item"
+        :aria-selected="activeTab === 'skills'"
+        :tabindex="activeTab === 'skills' ? 0 : -1"
+        @click="activeTab = 'skills'"
+      ><n-icon :size="21"><document-text-outline /></n-icon><span>写作技能</span></button>
+      <button
+        type="button"
+        role="tab"
+        class="settings-nav-item"
+        :aria-selected="activeTab === 'about'"
+        :tabindex="activeTab === 'about' ? 0 : -1"
+        @click="activeTab = 'about'"
+      ><n-icon :size="21"><information-circle-outline /></n-icon><span>关于与更新</span></button>
     </nav>
-    <div ref="settingsContentRef" class="settings-content">
-      <CloudSyncPanel />
+    <div class="settings-content">
+      <section v-show="activeTab === 'cloud'" class="settings-section cloud-settings-section">
+        <CloudSyncPanel />
+      </section>
       <!-- 模型配置 -->
-      <section class="settings-section paper-panel">
+      <section v-show="activeTab === 'models'" class="settings-section paper-panel">
         <div class="section-header">
-          <h3>模型配置</h3>
+          <div><h2 class="section-title">模型配置</h2><p class="section-desc">统一管理写作、对话与语义检索模型。</p></div>
           <n-button type="primary" size="small" @click="openAddModel" id="add-model-btn">
             + 添加模型
           </n-button>
         </div>
 
+        <div class="model-workbench">
+          <div class="model-catalogue">
         <!-- 模型列表 -->
         <div v-if="configStore.models.length === 0" class="empty-models">
           <p>还没有配置任何 AI 模型</p>
@@ -40,12 +85,14 @@
             v-for="model in configStore.models"
             :key="model.id"
             class="model-card"
+            :class="{ 'model-card--selected': editingModel === model.id && showAddModel }"
           >
             <div class="model-info">
-              <div class="model-name">{{ model.modelName }}</div>
+              <button type="button" class="model-name model-select" :aria-label="`编辑模型 ${model.modelName}`" @click="editModel(model)">{{ model.modelName }}</button>
               <div v-if="model.name && model.name !== model.modelName" class="model-detail">备注：{{ model.name }}</div>
               <div class="model-detail">{{ maskKey(model.apiKey) }}</div>
               <div class="model-badges">
+                <span class="badge" :class="model.kind === 'embedding' ? 'badge-vector' : 'badge-outline'">{{ model.kind === 'embedding' ? '向量模型' : '写作／对话' }}</span>
                 <span v-if="configStore.assignments.outline === model.id" class="badge badge-outline">大纲</span>
                 <span v-if="configStore.assignments.writing === model.id" class="badge badge-writing">写作</span>
                 <span v-if="configStore.assignments.review === model.id" class="badge badge-review">审查</span>
@@ -54,9 +101,9 @@
             </div>
             <div class="model-actions">
               <n-button size="tiny" quaternary @click="testModel(model)" :loading="testingId === model.id">
-                {{ testingId === model.id ? '测试中...' : '测试对话' }}
+                {{ testingId === model.id ? '测试中...' : model.kind === 'embedding' ? '测试向量' : '测试对话' }}
               </n-button>
-              <n-button size="tiny" quaternary @click="editModel(model)" title="打开模型设置，单独测试搜索能力">
+              <n-button v-if="model.kind !== 'embedding'" size="tiny" quaternary @click="editModel(model)" title="打开模型设置，单独测试搜索能力">
                 <template #icon><n-icon><globe-outline /></n-icon></template>测试联网
               </n-button>
               <n-button size="tiny" quaternary @click="editModel(model)">编辑</n-button>
@@ -64,173 +111,18 @@
             </div>
           </div>
         </div>
-      </section>
-
-      <!-- 模型用途分配 -->
-      <section v-if="configStore.models.length > 0" class="settings-section paper-panel">
-        <h3>任务分配</h3>
-        <p class="section-desc">为不同 AI 任务指定使用的模型</p>
-        <div class="assignment-grid">
-          <div class="assignment-item">
-            <label>大纲生成</label>
-            <n-select
-              :value="configStore.assignments.outline"
-              :options="modelOptions"
-              @update:value="(v: string) => configStore.setAssignment('outline', v)"
-              placeholder="选择模型"
-            />
           </div>
-          <div class="assignment-item">
-            <label>正文写作</label>
-            <n-select
-              :value="configStore.assignments.writing"
-              :options="modelOptions"
-              @update:value="(v: string) => configStore.setAssignment('writing', v)"
-              placeholder="选择模型"
-            />
-          </div>
-          <div class="assignment-item">
-            <label>章节审查</label>
-            <n-select
-              :value="configStore.assignments.review"
-              :options="modelOptions"
-              @update:value="(v: string) => configStore.setAssignment('review', v)"
-              placeholder="选择模型"
-            />
-          </div>
-          <div class="assignment-item chat-assignment">
-            <label>对话 / 联网模型</label>
-            <n-select
-              :value="configStore.assignments.chat"
-              :options="chatModelOptions"
-              @update:value="(v: string) => configStore.setAssignment('chat', v)"
-              aria-label="对话 / 联网模型"
-              placeholder="默认跟随大纲模型"
-            />
-            <p class="assignment-hint">用于灵感对话和右下角对话窗口。联网开关只控制是否搜索；大纲生成、设定整理仍使用大纲模型。所选模型的接口需支持联网协议。</p>
-          </div>
-        </div>
-      </section>
-
-      <section class="settings-section paper-panel">
-        <h3>AI 工作流</h3>
-        <p class="section-desc">控制生成后的自动检查次数与后台 AI 调用量。章节结尾完整性检查在所有模式下都会保留。</p>
-        <n-select
-          :value="configStore.aiWorkflowMode"
-          :options="workflowModeOptions"
-          @update:value="configStore.setAiWorkflowMode"
-        />
-        <div class="setting-inline-toggle">
-          <div>
-            <strong>PDF 视觉识别</strong>
-            <p class="section-desc">默认关闭。开启后，PDF 没有文字层的页面可以调用视觉模型，可能消耗额度；关闭时请使用本地 OCR。</p>
-          </div>
-          <n-switch :value="configStore.pdfVisionEnabled" aria-label="允许 PDF 视觉识别" @update:value="configStore.setPdfVisionEnabled" />
-        </div>
-      </section>
-
-      <section class="settings-section paper-panel security-section" :class="`security-${configStore.securityStatus.storage}`">
-        <h3>密钥存储</h3>
-        <p v-if="configStore.securityStatus.storage === 'encrypted'" class="section-desc">
-          接口密钥已由操作系统安全存储加密后写入本机配置文件。
-        </p>
-        <p v-else-if="configStore.securityStatus.storage === 'local-development'" class="section-desc">
-          当前是本机开发环境，接口密钥会保存在本机浏览器配置中，方便调试使用。不要在共享电脑或公开地址中使用此模式。
-        </p>
-        <p v-else class="section-desc">
-          当前环境不提供系统加密。接口密钥只在本次应用会话中保留，关闭应用或浏览器标签后需要重新填写，持久化配置不会写入明文密钥。
-        </p>
-      </section>
-
-      <!-- 真实向量记忆 -->
-      <section class="settings-section paper-panel">
-        <div class="section-header">
-          <div>
-            <h3>语义检索增强（可选）</h3>
-          </div>
-          <n-switch :value="embeddingForm.enabled" aria-label="启用语义检索增强" @update:value="handleEmbeddingEnabledChange" />
-        </div>
-        <div v-if="embeddingForm.enabled" class="embedding-form">
-          <div class="embedding-grid">
-            <div class="form-item span-2">
-              <label>向量服务接口地址</label>
-              <n-input v-model:value="embeddingForm.baseUrl" placeholder="http://127.0.0.1:11434" />
-            </div>
-            <div class="form-item">
-              <label>模型名称</label>
-              <n-input v-model:value="embeddingForm.modelName" placeholder="bge-m3" />
-            </div>
-            <div class="form-item">
-              <label>批量大小</label>
-              <n-input-number v-model:value="embeddingForm.batchSize" :min="1" :max="64" />
-            </div>
-            <div class="form-item span-2">
-              <label>接口密钥（本地服务可留空）</label>
-              <n-input v-model:value="embeddingForm.apiKey" type="password" show-password-on="click" placeholder="可选" />
-            </div>
-          </div>
-          <p class="privacy-note">启用后，章节摘要、角色、事件、弧线和已绑定知识条目会发送到该接口生成向量。</p>
-          <div class="section-actions">
-            <n-button :loading="testingEmbedding" @click="handleTestEmbedding">测试连接</n-button>
-            <n-button type="primary" :disabled="!embeddingForm.baseUrl.trim() || !embeddingForm.modelName.trim()" @click="saveEmbedding">保存向量配置</n-button>
-          </div>
-        </div>
-        <div v-else class="disabled-hint">当前检索：本地混合检索。结构化记忆、故事时钟与数值计算正常启用。</div>
-      </section>
-
-      <!-- 写作 Skill -->
-      <section class="settings-section paper-panel">
-        <div class="section-header">
-          <div>
-            <h3>写作技能</h3>
-            <p class="section-desc section-desc-inline">按任务自动注入的可复用写作规则</p>
-          </div>
-          <n-button type="primary" size="small" @click="openSkillModal()">添加技能</n-button>
-        </div>
-        <div class="skill-list">
-          <div v-for="skill in configStore.skills" :key="skill.id" class="skill-row">
-            <n-switch :value="skill.enabled" @update:value="value => configStore.updateSkill(skill.id, { enabled: value })" />
-            <div class="skill-info">
-              <div class="skill-name">
-                <strong>{{ skill.name }}</strong>
-                <n-tag size="small" :type="skill.builtIn ? 'info' : 'default'">{{ skill.builtIn ? '内置' : '自定义' }}</n-tag>
-                <n-tag size="small">{{ skillTaskLabel(skill.task) }}</n-tag>
-              </div>
-              <p>{{ skill.description }}</p>
-            </div>
-            <div class="model-actions">
-              <n-button size="small" quaternary circle :title="`查看和编辑${skill.name}`" :aria-label="`查看和编辑${skill.name}`" @click="openSkillModal(skill)">
-                <template #icon><n-icon><create-outline /></n-icon></template>
-              </n-button>
-              <n-button v-if="!skill.builtIn" size="tiny" quaternary type="error" @click="handleDeleteSkill(skill.id)">删除</n-button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="settings-section paper-panel">
-        <h3>软件更新</h3>
-        <AppUpdatePanel />
-      </section>
-
-      <!-- 关于 -->
-      <section class="settings-section paper-panel about-section">
-        <h3>关于</h3>
-        <p>墨笺 · AI 小说写作 v{{ appVersion }}</p>
-        <p class="hint">使用 Electron + Vue 3 + TypeScript 构建</p>
-      </section>
-    </div>
-    </div>
-
-    <!-- 添加/编辑模型弹窗 -->
-    <n-modal
-      v-model:show="showAddModel"
-      preset="dialog"
-      :title="editingModel ? '编辑模型' : '添加模型'"
-      style="width: min(520px, calc(100vw - 32px));"
-      @update:show="handleModelModalVisibility"
-    >
+    <section v-if="showAddModel" class="model-editor" aria-label="编辑模型配置">
+      <div class="section-header">
+        <h3>{{ editingModel ? '编辑配置' : '添加模型' }}</h3>
+        <n-button size="small" quaternary @click="closeModelModal">收起</n-button>
+      </div>
       <div class="model-form">
+        <div class="form-item">
+          <label>模型类型</label>
+          <n-select v-model:value="modelForm.kind" :options="modelKindOptions" aria-label="模型类型" />
+          <p class="model-discovery-hint">按接口实际支持的能力选择。向量模型用于语义检索。</p>
+        </div>
         <div class="form-item">
           <label>配置备注（选填）</label>
           <n-input v-model:value="modelForm.name" placeholder="如：主用接口 / 备用接口；留空使用模型 ID" />
@@ -303,7 +195,9 @@
           </p>
           <p v-if="modelDiscoveryError" class="model-discovery-error">{{ modelDiscoveryError }}</p>
         </div>
-        <div class="form-item">
+        <details v-if="modelForm.kind !== 'embedding'" class="model-advanced">
+          <summary>高级参数与联网测试</summary>
+          <div class="form-item">
           <label>对话联网协议</label>
           <n-select v-model:value="modelForm.chatSearchProtocol" :options="chatSearchProtocolOptions" />
           <p class="model-discovery-hint">在灵感对话或右下角对话窗口开启“联网”时使用。接口密钥和模型列表不代表搜索权限；中转接口需支持所选协议。</p>
@@ -323,8 +217,9 @@
             <n-input-number v-model:value="modelForm.maxTokens" :min="256" :max="128000" :step="256" />
           </div>
         </div>
+        </details>
       </div>
-      <template #action>
+      <div class="model-editor-actions">
         <n-button @click="closeModelModal">取消</n-button>
         <n-button
           v-if="selectedModelNames.length > 1"
@@ -343,10 +238,166 @@
         >
           {{ editingModel ? '保存' : '添加' }}
         </n-button>
-      </template>
-    </n-modal>
+      </div>
+    </section>
 
-    <n-modal v-model:show="showSkillModal" preset="card" :title="editingSkill ? '编辑技能' : '添加技能'" style="width: min(620px, calc(100vw - 32px));">
+          <div v-else class="model-editor-empty"><h3>统一管理模型</h3><p>选择一个模型编辑配置，或添加新的写作、对话与向量模型。</p><n-button secondary @click="openAddModel">添加模型</n-button></div>
+        </div>
+      </section>
+
+      <!-- 模型用途分配 -->
+      <section v-show="activeTab === 'models' && configStore.models.length > 0" id="model-task-assignments" tabindex="-1" class="settings-section paper-panel">
+        <h3 class="subsection-title">任务分配</h3>
+        <p class="section-desc">为不同 AI 任务指定使用的模型</p>
+        <div class="assignment-grid">
+          <div class="assignment-item">
+            <label>大纲生成</label>
+            <n-select
+              :value="configStore.assignments.outline"
+              :options="modelOptions"
+              @update:value="(v: string) => configStore.setAssignment('outline', v)"
+              placeholder="选择模型"
+            />
+          </div>
+          <div class="assignment-item">
+            <label>正文写作</label>
+            <n-select
+              :value="configStore.assignments.writing"
+              :options="modelOptions"
+              @update:value="(v: string) => configStore.setAssignment('writing', v)"
+              placeholder="选择模型"
+            />
+          </div>
+          <div class="assignment-item">
+            <label>章节审查</label>
+            <n-select
+              :value="configStore.assignments.review"
+              :options="modelOptions"
+              @update:value="(v: string) => configStore.setAssignment('review', v)"
+              placeholder="选择模型"
+            />
+          </div>
+          <div class="assignment-item chat-assignment">
+            <label>对话 / 联网模型</label>
+            <n-select
+              :value="configStore.assignments.chat"
+              :options="chatModelOptions"
+              @update:value="(v: string) => configStore.setAssignment('chat', v)"
+              aria-label="对话 / 联网模型"
+              placeholder="默认跟随大纲模型"
+            />
+            <p class="assignment-hint">用于灵感对话和右下角对话窗口。联网开关只控制是否搜索；大纲生成、设定整理仍使用大纲模型。所选模型的接口需支持联网协议。</p>
+          </div>
+          <div class="assignment-item embedding-assignment">
+            <label>语义检索</label>
+            <n-select :value="configStore.assignments.embedding || ''" :options="embeddingModelOptions" aria-label="语义检索模型" placeholder="选择向量模型" @update:value="(v: string) => configStore.setAssignment('embedding', v)" />
+            <p class="assignment-hint">使用支持 Embedding 的向量模型。</p>
+          </div>
+        </div>
+      </section>
+
+      <section v-show="activeTab === 'workflow'" class="settings-section paper-panel">
+        <h2 class="section-title">AI 工作流</h2>
+        <p class="section-desc">控制生成后的自动检查次数与后台 AI 调用量。章节结尾完整性检查在所有模式下都会保留。</p>
+        <div class="workflow-cards">
+          <button
+            v-for="mode in workflowModes"
+            :key="mode.value"
+            type="button"
+            class="workflow-card"
+            :class="{ 'workflow-card--active': configStore.aiWorkflowMode === mode.value }"
+            @click="configStore.setAiWorkflowMode(mode.value)"
+          >
+            <span class="workflow-symbol"><n-icon :size="30"><component :is="mode.value === 'fast' ? FlashOutline : mode.value === 'strict' ? ShieldCheckmarkOutline : ScaleOutline" /></n-icon></span>
+            <h4>{{ mode.title }}</h4>
+            <p>{{ mode.description }}</p>
+          </button>
+        </div>
+        <section class="workflow-preview paper-panel"><h3>{{ workflowModes.find(mode => mode.value === configStore.aiWorkflowMode)?.title }}模式的流程</h3><p>根据当前模式执行正文生成与检查，结果仍由作者查看。</p><div class="workflow-steps"><article v-for="(step, index) in workflowSteps" :key="step.title"><span class="workflow-step-number">{{ index + 1 }}</span><div><h4>{{ step.title }}</h4><p>{{ step.description }}</p></div></article></div><small aria-live="polite">结尾复核最多补写 <strong class="workflow-rounds-value">{{ workflowPolicy.endingContinuationAttempts }} 轮</strong>；内容审查最多处理 <strong class="workflow-rounds-value">{{ workflowPolicy.reviewRewriteCycles }} 轮</strong>。</small></section>
+        <div class="setting-inline-toggle">
+          <div>
+            <strong>PDF 视觉识别</strong>
+            <p class="section-desc">默认关闭。开启后，PDF 没有文字层的页面可以调用视觉模型，可能消耗额度；关闭时请使用本地 OCR。</p>
+          </div>
+          <n-switch :value="configStore.pdfVisionEnabled" aria-label="允许 PDF 视觉识别" @update:value="configStore.setPdfVisionEnabled" />
+        </div>
+      </section>
+
+      <div v-show="activeTab === 'models'" class="security-section model-security-status" :class="`security-${configStore.securityStatus.storage}`">
+        <p v-if="configStore.securityStatus.storage === 'encrypted'" class="security-status">
+          接口密钥已由操作系统安全存储加密后写入本机配置文件。
+        </p>
+        <p v-else-if="configStore.securityStatus.storage === 'local-development'" class="security-status">
+          API 密钥保存在当前浏览器的本地配置中；桌面版使用操作系统加密保存。如需跨设备同步，可在"云端配置"中单独开启。
+        </p>
+        <p v-else class="security-status">
+          当前环境不提供系统加密。接口密钥只在本次应用会话中保留，关闭应用或浏览器标签后需要重新填写，持久化配置不会写入明文密钥。
+        </p>
+      </div>
+
+      <!-- 语义检索复用任务分配，不重复保存连接信息 -->
+      <section v-show="activeTab === 'retrieval'" class="settings-section paper-panel">
+        <div class="section-header">
+          <div>
+            <h2 class="section-title">语义检索增强 <span class="optional-label">可选</span></h2>
+            <p class="section-desc">按含义查找相关资料，为写作提供上下文。</p>
+          </div>
+          <n-switch :value="configStore.embedding.enabled" :disabled="!assignedEmbeddingModel" aria-label="启用语义检索增强" @update:value="handleEmbeddingEnabledChange" />
+        </div>
+        <div class="retrieval-model-status">
+          <div>
+            <span class="setting-label">当前向量模型</span>
+            <strong>{{ assignedEmbeddingModel?.name || assignedEmbeddingModel?.modelName || '尚未分配' }}</strong>
+            <p class="section-desc">{{ assignedEmbeddingModel?.modelName || '在模型配置的任务分配中选择向量模型，接口与密钥自动复用。' }}</p>
+          </div>
+          <n-button secondary @click="openTaskAssignments">前往任务分配</n-button>
+        </div>
+        <section class="retrieval-howto"><h3>使用方式</h3><div><article><strong>1 · 整理资料</strong><p>将设定与参考资料整理到知识库，并挂载到作品。</p></article><article><strong>2 · 建立索引</strong><p>在项目记忆中同步索引，按需生成资料向量。</p></article><article><strong>3 · 按需检索</strong><p>写作与检索时，根据问题寻找相关资料。</p></article></div></section>
+        <details class="retrieval-advanced">
+          <summary>高级设置</summary>
+          <div class="form-item">
+            <label>批量大小</label>
+            <n-input-number v-model:value="embeddingForm.batchSize" :min="1" :max="64" aria-label="向量批量大小" />
+          </div>
+          <p class="section-desc">每次处理的资料分段数。切换向量服务或模型后，资料索引会在下次使用时更新。</p>
+          <div class="section-actions">
+            <n-button :loading="testingEmbedding" :disabled="!assignedEmbeddingModel" @click="handleTestEmbedding">测试连接</n-button>
+            <n-button type="primary" @click="saveEmbedding">保存设置</n-button>
+          </div>
+        </details>
+        <p v-if="!configStore.embedding.enabled" class="disabled-hint">当前使用本地混合检索，结构化记忆与故事时钟正常可用。</p>
+      </section>
+
+      <!-- 写作 Skill -->
+      <section v-show="activeTab === 'skills'" class="settings-section paper-panel">
+        <div class="section-header">
+          <div>
+            <h2 class="section-title">写作技能</h2>
+            <p class="section-desc section-desc-inline">按任务自动注入的可复用写作规则</p>
+          </div>
+          <n-button type="primary" size="small" @click="openSkillModal()">添加技能</n-button>
+        </div>
+        <div class="skill-workbench">
+        <div class="skill-list">
+          <div v-for="skill in configStore.skills" :key="skill.id" class="skill-row" :class="{ selected: showSkillModal && editingSkill === skill.id }">
+            <n-switch :value="skill.enabled" :aria-label="`启用${skill.name}`" @update:value="value => configStore.updateSkill(skill.id, { enabled: value })" />
+            <div class="skill-info">
+              <div class="skill-name">
+                <button type="button" class="skill-select" @click="openSkillModal(skill)">{{ skill.name }}</button>
+                <n-tag size="small" :type="skill.builtIn ? 'info' : 'default'">{{ skill.builtIn ? '内置' : '自定义' }}</n-tag>
+                <n-tag size="small">{{ skillTaskLabel(skill.task) }}</n-tag>
+              </div>
+              <p>{{ skill.description }}</p>
+            </div>
+            <div class="model-actions">
+              <n-button size="small" quaternary circle :title="`查看和编辑${skill.name}`" :aria-label="`查看和编辑${skill.name}`" @click="openSkillModal(skill)">
+                <template #icon><n-icon><create-outline /></n-icon></template>
+              </n-button>
+              <n-button v-if="!skill.builtIn" size="tiny" quaternary type="error" @click="handleDeleteSkill(skill.id)">删除</n-button>
+            </div>
+          </div>
+        </div>
+          <section v-if="showSkillModal" class="skill-editor paper-panel" aria-label="编辑技能"><h3>{{ editingSkill ? '编辑技能' : '添加技能' }}</h3>
       <div class="model-form">
         <div class="form-item">
           <label>名称</label>
@@ -365,14 +416,37 @@
           <n-input v-model:value="skillForm.instructions" aria-label="技能执行规则" type="textarea" :rows="8" :maxlength="1500" show-count />
         </div>
       </div>
-      <template #footer>
+
         <div class="section-actions">
           <n-button v-if="configStore.skills.find(item => item.id === editingSkill)?.builtIn" @click="restoreSkill">恢复内置规则</n-button>
           <n-button @click="showSkillModal = false">取消</n-button>
           <n-button type="primary" :disabled="!skillForm.name.trim() || !skillForm.instructions.trim()" @click="saveSkill">保存</n-button>
         </div>
-      </template>
-    </n-modal>
+
+          </section>
+          <div v-else class="skill-editor-empty">选择一项技能查看和编辑规则，或添加新的写作技能。</div>
+        </div>
+      </section>
+
+      <!-- 关于 -->
+      <section v-show="activeTab === 'about'" class="settings-section paper-panel about-section">
+        <h2 class="section-title">关于墨笺</h2>
+        <div class="about-brand"><span class="seal">墨</span><div><h3>墨笺</h3><p class="about-version">版本 v{{ appVersion }}</p></div></div>
+        <p class="about-desc">本地优先的 AI 长篇小说写作工具。创作内容保存在本机，可按需开启云同步。</p>
+        <div class="about-features"><article><span><n-icon :size="28"><create-outline /></n-icon></span><div><h4>作者主笔</h4><p>尊重创作意图，随时编辑故事与正文。</p></div></article><article><span><n-icon :size="28"><hardware-chip-outline /></n-icon></span><div><h4>AI 辅助</h4><p>为构思、写作与审查提供支持。</p></div></article><article><span><n-icon :size="28"><document-text-outline /></n-icon></span><div><h4>知识库与剧情记忆</h4><p>整理人物、世界观和情节，让长篇创作更连贯。</p></div></article></div>
+        <section class="about-update" aria-labelledby="about-update-title"><h3 id="about-update-title" class="about-help-title">软件更新</h3><AppUpdatePanel /></section>
+        <h3 class="about-help-title">信息与帮助</h3>
+        <nav class="about-links" aria-label="信息与帮助">
+          <a href="https://github.com/HannJia/novel-ai-studio" target="_blank" rel="noopener noreferrer"><strong>项目主页</strong><small>了解墨笺的更新动态与相关资源。</small><span aria-hidden="true">↗</span></a>
+          <a href="https://github.com/HannJia/novel-ai-studio#readme" target="_blank" rel="noopener noreferrer"><strong>使用说明</strong><small>查看功能介绍与使用方法。</small><span aria-hidden="true">↗</span></a>
+          <a href="https://github.com/HannJia/novel-ai-studio/issues" target="_blank" rel="noopener noreferrer"><strong>问题反馈</strong><small>提交使用中遇到的问题与建议。</small><span aria-hidden="true">↗</span></a>
+        </nav>
+        <p class="about-backup-note">项目备份可在书架导出。</p>
+      </section>
+    </div>
+    </div>
+
+
   </div>
 </template>
 
@@ -380,10 +454,11 @@
 import CloudSyncPanel from '@/components/CloudSyncPanel.vue'
 import AppUpdatePanel from '@/components/AppUpdatePanel.vue'
 import ModelSearchTest from '@/components/ModelSearchTest.vue'
-import { ref, computed, reactive, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, reactive, nextTick, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NIcon, NInput, NInputNumber, NSelect, NModal, NSwitch, NTag, useMessage, useDialog } from 'naive-ui'
-import { ArrowBackOutline, GlobeOutline, CreateOutline } from '@vicons/ionicons5'
+import { NButton, NIcon, NInput, NInputNumber, NSelect, NSwitch, NTag, useMessage, useDialog } from 'naive-ui'
+import { CloudOutline, HardwareChipOutline, GitNetworkOutline, SearchOutline, DocumentTextOutline, InformationCircleOutline, ArrowBackOutline, GlobeOutline, CreateOutline, FlashOutline, ShieldCheckmarkOutline, ScaleOutline } from '@vicons/ionicons5'
+import { getAiWorkflowPolicy } from '@/services/aiWorkflow'
 import { createBuiltInSkills } from '@/data/skills'
 import { useConfigStore, type ModelConfig } from '@/stores/config'
 import { listAvailableModels, openAiV1BaseUrl, testConnection, type AvailableModel } from '@/services/ai'
@@ -391,7 +466,6 @@ import { testEmbeddingConnection } from '@/services/embeddings'
 import { chatSearchProtocolOptions } from '@/services/chatSearch'
 import type { ChatSearchProtocol } from '@/types/chat'
 import type { WritingSkill, WritingSkillTask } from '@/types/skill'
-import type { AiWorkflowMode } from '@/services/aiWorkflow'
 import { version as appVersion } from '../../package.json'
 
 const configStore = useConfigStore()
@@ -401,36 +475,27 @@ const route = useRoute()
 const router = useRouter()
 const props = defineProps<{ overlay?: boolean }>()
 
-// 右侧分区索引：读取实际渲染的分区标题，分区增减时自动同步
-const settingsContentRef = ref<HTMLElement | null>(null)
-const sectionIndex = ref<string[]>([])
-const activeSection = ref(0)
-let sectionObserver: IntersectionObserver | null = null
+const activeTab = ref('cloud')
 
-function sectionElements(): HTMLElement[] {
-  return Array.from(settingsContentRef.value?.children || []).filter((el): el is HTMLElement => el instanceof HTMLElement)
+function handleSettingsNavKeydown(event: KeyboardEvent) {
+  const buttons = Array.from((event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('.settings-nav-item'))
+  const index = buttons.indexOf(event.target as HTMLButtonElement)
+  if (index < 0 || !['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1
+    : (index + (['ArrowDown', 'ArrowRight'].includes(event.key) ? 1 : -1) + buttons.length) % buttons.length
+  buttons[next]?.click()
+  buttons[next]?.focus()
 }
 
-function refreshSectionIndex() {
-  sectionIndex.value = sectionElements().map(el => el.querySelector('h3')?.textContent?.trim() || '').filter(Boolean)
-  sectionObserver?.disconnect()
-  if (typeof IntersectionObserver === 'undefined') return
-  sectionObserver = new IntersectionObserver(entries => {
-    const visible = entries.filter(entry => entry.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0]
-    if (visible) activeSection.value = sectionElements().indexOf(visible.target as HTMLElement)
-  }, { rootMargin: '-10% 0px -70% 0px' })
-  sectionElements().forEach(el => sectionObserver?.observe(el))
+async function openTaskAssignments() {
+  activeTab.value = 'models'
+  await nextTick()
+  const target = document.getElementById('model-task-assignments')
+  target?.scrollIntoView?.({ block: 'nearest' })
+  target?.focus()
 }
 
-function scrollToSection(index: number) {
-  activeSection.value = index
-  sectionElements()[index]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-}
-
-onMounted(() => nextTick(refreshSectionIndex))
-onBeforeUnmount(() => sectionObserver?.disconnect())
-// “任务分配”分区在有模型时才渲染
-watch(() => configStore.models.length > 0, () => nextTick(refreshSectionIndex))
 const emit = defineEmits<{
   close: []
 }>()
@@ -461,11 +526,19 @@ const selectedModelNames = ref<string[]>([])
 const modelDiscoveryLoading = ref(false)
 const modelDiscoveryError = ref('')
 let modelDiscoveryController: AbortController | null = null
+onBeforeUnmount(() => modelDiscoveryController?.abort())
 const testingEmbedding = ref(false)
 const showSkillModal = ref(false)
 const editingSkill = ref<string | null>(null)
 
-const embeddingForm = reactive({ ...configStore.embedding })
+const embeddingForm = reactive({ batchSize: configStore.embedding.batchSize })
+const assignedEmbeddingModel = computed(() => configStore.getModelForTask('embedding'))
+watch(() => configStore.embedding.batchSize, value => { embeddingForm.batchSize = value })
+const modelKindOptions = [{ label: '写作／对话', value: 'chat' }, { label: '向量模型（Embedding）', value: 'embedding' }]
+const embeddingModelOptions = computed(() => [
+  { label: '暂不分配', value: '' },
+  ...configStore.models.filter(model => model.kind === 'embedding').map(model => ({ label: model.name || model.modelName, value: model.id })),
+])
 const skillTaskOptions = [
   { label: '全部 AI 任务', value: 'all' },
   { label: '大纲与规划', value: 'planning' },
@@ -473,15 +546,23 @@ const skillTaskOptions = [
   { label: '章节审查', value: 'review' },
   { label: '结构化分析', value: 'analysis' },
 ]
-const workflowModeOptions: Array<{ label: string; value: AiWorkflowMode }> = [
-  { label: '均衡：完整生成、自检与结尾复核', value: 'balanced' },
-  { label: '快速：减少计划、自检和后台调用', value: 'fast' },
-  { label: '严谨：增加结尾补写与审查轮次', value: 'strict' },
+const workflowModes = [
+  { value: 'fast' as const, title: '精简', description: '减少计划、自检和后台调用，更快完成写作任务' },
+  { value: 'balanced' as const, title: '均衡', description: '完整生成、自检与结尾复核，平衡质量与效率' },
+  { value: 'strict' as const, title: '严谨', description: '增加结尾补写与审查轮次，加强完整性检查' },
 ]
+const workflowPolicy = computed(() => getAiWorkflowPolicy(configStore.aiWorkflowMode))
+const workflowSteps = computed(() => [
+  ...(workflowPolicy.value.createWritingPlan ? [{ title: '拟定计划', description: '结合设定与前文安排本章推进。' }] : []),
+  { title: '生成正文', description: '依据任务与上下文生成初稿。' },
+  ...(workflowPolicy.value.selfCheckDraft ? [{ title: '自检', description: '检查明显问题并校正正文。' }] : []),
+  { title: '结尾复核', description: '检查章尾完整性，再进入后续审查。' },
+])
 const skillForm = reactive({ name: '', description: '', task: 'writing' as WritingSkillTask, instructions: '' })
 
 // 模型表单
 const modelForm = reactive({
+  kind: 'chat' as 'chat' | 'embedding',
   name: '',
   baseUrl: '',
   apiKey: '',
@@ -501,7 +582,7 @@ const searchTestModel = computed<ModelConfig>(() => ({
 const modelOptions = computed(() => {
   const counts = new Map<string, number>()
   for (const model of configStore.models) counts.set(model.modelName, (counts.get(model.modelName) || 0) + 1)
-  return configStore.models.map(model => ({
+  return configStore.models.filter(model => model.kind !== 'embedding').map(model => ({
     label: counts.get(model.modelName)! > 1 && model.name && model.name !== model.modelName
       ? `${model.modelName}（备注：${model.name}）`
       : model.modelName,
@@ -523,7 +604,7 @@ const isFormValid = computed(() =>
   Boolean(
     modelForm.baseUrl.trim()
     && modelForm.modelName.trim()
-    && (modelForm.apiKey.trim() || (editingModel.value && configStore.models.some(model => model.id === editingModel.value && model.apiKey))),
+    && (modelForm.kind === 'embedding' || modelForm.apiKey.trim() || (editingModel.value && configStore.models.some(model => model.id === editingModel.value && model.apiKey))),
   )
 )
 const isBatchFormValid = computed(() =>
@@ -538,8 +619,10 @@ function maskKey(key: string): string {
 
 // 编辑模型
 function editModel(model: ModelConfig) {
+  activeTab.value = 'models'
   editingModel.value = model.id
   Object.assign(modelForm, {
+    kind: model.kind || 'chat',
     name: model.name,
     baseUrl: model.baseUrl,
     apiKey: model.apiKey,
@@ -556,6 +639,7 @@ function editModel(model: ModelConfig) {
 }
 
 function openAddModel() {
+  activeTab.value = 'models'
   resetForm()
   availableModels.value = []
   selectedModelNames.value = []
@@ -629,7 +713,7 @@ function handleSaveModel() {
     ? configStore.models.find(model => model.id === editingModel.value)
     : null
   const apiKey = modelForm.apiKey.trim() || existingModel?.apiKey || ''
-  if (!apiKey) return
+  if (!apiKey && modelForm.kind !== 'embedding') return
   const config = { ...modelForm, apiKey, name: modelForm.name.trim() || modelName, modelName }
   if (editingModel.value) {
     configStore.updateModel(editingModel.value, config)
@@ -667,6 +751,7 @@ function handleBatchSaveModels() {
       continue
     }
     configStore.addModel({
+      kind: modelForm.kind,
       name: model.id,
       baseUrl,
       apiKey,
@@ -696,15 +781,6 @@ function closeModelModal() {
   showAddModel.value = false
 }
 
-function handleModelModalVisibility(visible: boolean) {
-  if (!visible) {
-    modelDiscoveryController?.abort()
-    modelDiscoveryController = null
-    modelDiscoveryLoading.value = false
-  }
-  showAddModel.value = visible
-}
-
 // 删除模型
 function handleDeleteModel(id: string) {
   dialog.warning({
@@ -722,12 +798,19 @@ function handleDeleteModel(id: string) {
 // 测试连接
 async function testModel(model: ModelConfig) {
   testingId.value = model.id
-  const result = await testConnection(model)
-  testingId.value = null
-  if (result.ok) {
-    message.success(result.message)
-  } else {
-    message.error(result.message)
+  try {
+    if (model.kind === 'embedding') {
+      const result = await testEmbeddingConnection({ enabled: true, baseUrl: model.baseUrl, apiKey: model.apiKey, modelName: model.modelName, batchSize: 1 })
+      message.success(`连接成功：${result.dimensions} 维，${result.latency} ms`)
+    } else {
+      const result = await testConnection(model)
+      if (result.ok) message.success(result.message)
+      else message.error(result.message)
+    }
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '连接测试失败')
+  } finally {
+    testingId.value = null
   }
 }
 
@@ -736,6 +819,7 @@ function resetForm() {
   editingModel.value = null
   selectedModelNames.value = []
   Object.assign(modelForm, {
+    kind: 'chat',
     name: '',
     baseUrl: '',
     apiKey: '',
@@ -749,28 +833,23 @@ function resetForm() {
 
 function saveEmbedding() {
   configStore.updateEmbeddingConfig({
-    enabled: embeddingForm.enabled,
-    baseUrl: embeddingForm.baseUrl.trim(),
-    apiKey: embeddingForm.apiKey.trim(),
-    modelName: embeddingForm.modelName.trim(),
     batchSize: Math.min(64, Math.max(1, Math.round(embeddingForm.batchSize || 16))),
   })
   message.success('向量记忆配置已保存')
 }
 
 function handleEmbeddingEnabledChange(enabled: boolean) {
-  embeddingForm.enabled = enabled
   configStore.updateEmbeddingConfig({ enabled })
 }
 
 async function handleTestEmbedding() {
-  if (!embeddingForm.baseUrl.trim() || !embeddingForm.modelName.trim()) {
-    message.warning('请先填写接口地址和模型名称')
+  if (!assignedEmbeddingModel.value) {
+    message.warning('请先在任务分配中选择向量模型')
     return
   }
   testingEmbedding.value = true
   try {
-    const result = await testEmbeddingConnection({ ...embeddingForm, enabled: true })
+    const result = await testEmbeddingConnection({ ...configStore.embedding, enabled: true })
     message.success(`连接成功：${result.dimensions} 维，${result.latency} ms`)
   } catch (error) {
     message.error(error instanceof Error ? error.message : '向量服务连接失败')
@@ -793,6 +872,9 @@ function openSkillModal(skill?: WritingSkill) {
   } : { name: '', description: '', task: 'writing', instructions: '' })
   showSkillModal.value = true
 }
+watch(activeTab, tab => {
+  if (tab === 'skills' && !showSkillModal.value && configStore.skills.length) openSkillModal(configStore.skills[0])
+})
 
 async function saveSkill() {
   const data = {
@@ -860,85 +942,102 @@ function handleDeleteSkill(id: string) {
 .settings-layout {
   display: flex;
   align-items: flex-start;
-  gap: 36px;
-  max-width: 1080px;
+  gap: 32px;
+  width: 100%;
+  max-width: 1440px;
+}
+
+.settings-nav {
+  position: sticky;
+  top: 0;
+  flex: 0 0 176px;
+  flex-direction: column;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--bg-color);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color-light);
+  width: 176px;
+}
+
+.settings-nav-item {
+  padding: 13px 16px;
+  text-align: left;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-color-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.settings-nav-item:hover {
+  color: var(--text-color-primary);
+  background: var(--bg-color-hover);
+}
+
+.settings-nav-item[aria-selected="true"] {
+  color: var(--color-primary);
+  background: var(--bg-color-card);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.settings-nav-item:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+@media (max-width: 760px) {
+  .settings-layout { flex-direction: column; gap: 18px; }
+  .settings-nav {
+    position: static;
+    flex: none;
+    flex-direction: row;
+    max-width: 100%;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .settings-nav::-webkit-scrollbar {
+    height: 4px;
+  }
 }
 
 .settings-content {
   flex: 1;
   min-width: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: var(--space-lg);
-  max-width: 820px;
-}
-
-.settings-content > * {
-  scroll-margin-top: 16px;
-}
-
-/* 分区索引 */
-.settings-index {
-  position: sticky;
-  top: 0;
-  order: 2;
-  flex-shrink: 0;
-  width: 168px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-left: 14px;
-  border-left: 1px solid var(--border-color);
-}
-
-.settings-index-item {
-  position: relative;
-  padding: 7px 10px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: none;
-  font: inherit;
-  font-size: 13px;
-  color: var(--text-color-secondary);
-  text-align: left;
-  cursor: pointer;
-  transition: color var(--transition-fast), background-color var(--transition-fast);
-}
-
-.settings-index-item:hover {
-  color: var(--text-color-primary);
-  background: var(--bg-color-hover);
-}
-
-.settings-index-item--active {
-  color: var(--color-primary);
-  font-weight: 600;
-}
-
-.settings-index-item--active::before {
-  content: '';
-  position: absolute;
-  left: -15px;
-  top: 8px;
-  bottom: 8px;
-  width: 2px;
-  background: var(--color-primary);
-}
-
-.settings-index-item:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 1px;
-}
-
-@media (max-width: 1100px) {
-  .settings-index { display: none; }
+  max-width: none;
 }
 
 .settings-section {
   padding: var(--space-lg);
 }
+.cloud-settings-section { padding: 0; }
+.about-brand { display: flex; align-items: center; gap: 16px; margin: 20px 0; }
+.about-brand > .seal { width: 52px; height: 56px; font-size: 32px; }
+.about-brand h3 { font-size: 30px; }
+.about-features { display: grid; gap: 12px; margin: 24px 0; color: var(--text-color-secondary); }
+.about-links { display: grid; margin-top: 24px; }
+.about-links a { display: flex; justify-content: space-between; padding: 16px 0; border-top: 1px solid var(--border-color-light); }
 
-.settings-section h3 {
+.section-title {
+  font-family: var(--font-family-serif);
+  font-size: 28px;
+  font-weight: 600;
+  margin-bottom: var(--space-lg);
+  color: var(--text-color-primary);
+}
+
+.subsection-title {
   font-size: 17px;
   font-weight: 700;
   margin-bottom: var(--space-md);
@@ -1034,6 +1133,7 @@ function handleDeleteSkill(id: string) {
 
 .model-badges {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   margin-top: 6px;
 }
@@ -1046,7 +1146,7 @@ function handleDeleteSkill(id: string) {
 }
 
 .badge-outline {
-  background: rgba(32, 128, 240, 0.1);
+  background: var(--color-accent-light);
   color: var(--color-info);
 }
 
@@ -1069,7 +1169,7 @@ function handleDeleteSkill(id: string) {
 /* 用途分配 */
 .assignment-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: var(--space-md);
 }
 
@@ -1080,7 +1180,7 @@ function handleDeleteSkill(id: string) {
   min-width: 0;
 }
 
-.chat-assignment { grid-column: 1 / -1; }
+.chat-assignment { grid-column: auto; }
 .assignment-hint { margin: 0; color: var(--text-color-tertiary); font-size: 12px; line-height: 1.6; }
 
 .assignment-item label {
@@ -1133,14 +1233,83 @@ function handleDeleteSkill(id: string) {
   gap: var(--space-md);
 }
 
-.about-section p {
-  font-size: 14px;
+.about-version {
+  font-family: var(--font-family-mono);
+  font-size: 15px;
   color: var(--text-color-secondary);
+  margin: 8px 0;
 }
 
-.about-section .hint {
+.about-desc {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-color-secondary);
+  margin-top: 16px;
+}
+
+.workflow-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.workflow-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border: 2px solid var(--border-color-light);
+  border-radius: var(--radius-md);
+  background: var(--bg-color);
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.workflow-card:hover {
+  border-color: var(--border-color-hover);
+  background: var(--bg-color-hover);
+}
+
+.workflow-card--active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+.workflow-card h4 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-color-primary);
+  margin: 0;
+}
+
+.workflow-card p {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-color-secondary);
+  margin: 0;
+}
+
+.workflow-card:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.security-status {
   font-size: 12px;
+  line-height: 1.6;
   color: var(--text-color-tertiary);
+  padding: 12px;
+  background: var(--bg-color-card);
+  border-radius: var(--radius-sm);
+  margin: 0;
+}
+
+@media (max-width: 680px) {
+  .workflow-cards {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 680px) {
@@ -1151,4 +1320,107 @@ function handleDeleteSkill(id: string) {
   .skill-row { grid-template-columns: auto minmax(0, 1fr); padding: 10px 0; }
   .skill-row .model-actions { grid-column: 2; }
 }
+.model-workbench { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 24px; align-items: start; }
+.model-catalogue { min-width: 0; }
+.model-catalogue .model-card { flex-direction: column; align-items: stretch; padding: 16px; }
+.model-card--selected { border-color: var(--color-primary); background: var(--color-primary-light); }
+.model-select { display: block; width: 100%; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.model-editor { min-width: 0; padding: 20px; background: var(--bg-color-paper); border: 1px solid var(--border-color-light); border-radius: var(--radius-lg); }
+.model-editor .model-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.model-editor .model-form > .form-item:nth-child(n+3), .model-advanced { grid-column: 1 / -1; }
+.model-advanced summary { cursor: pointer; color: var(--text-color-secondary); padding: 8px 0; }
+.model-advanced .form-row { margin-top: 14px; }
+.section-header .section-title { margin-bottom: 0; }
+.model-editor h3 { font-size: 21px; }
+.model-editor-empty { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 16px; min-height: 300px; padding: 28px; border: 1px dashed var(--border-color); border-radius: var(--radius-lg); }
+.model-editor-empty p { color: var(--text-color-secondary); }
+.model-editor-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+.model-security-status { margin-top: -12px; }
+.model-security-status .security-status { background: none; padding: 0 4px; }
+.badge-vector { color: var(--color-accent); background: var(--color-accent-light); }
+.optional-label { font: 12px var(--font-family); color: var(--text-color-secondary); padding: 3px 8px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); vertical-align: middle; }
+.retrieval-model-status { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 24px 0; }
+.retrieval-model-status strong { display: block; margin-top: 8px; overflow-wrap: anywhere; }
+.setting-label { font-size: 13px; color: var(--text-color-secondary); }
+.retrieval-advanced { border-top: 1px solid var(--border-color-light); padding-top: 16px; }
+.retrieval-advanced summary { cursor: pointer; color: var(--text-color-secondary); }
+.retrieval-advanced .form-item { max-width: 240px; margin: 20px 0 12px; }
+.workflow-card { font-family: var(--font-family); }
+.workflow-card h4 { font-family: var(--font-family-serif); font-size: 20px; }
+@media (max-width: 1100px) {
+  .model-workbench { grid-template-columns: 1fr; }
+  .model-editor-empty { min-height: 150px; }
+  .assignment-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 680px) {
+  .retrieval-model-status { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .model-editor { padding: 16px; }
+  .model-editor .model-form { grid-template-columns: 1fr; }
+  .assignment-grid { grid-template-columns: 1fr; }
+}
+
+.settings-nav-item { display: flex; align-items: center; gap: 14px; }
+.settings-nav-item[aria-selected="true"] { border-left: 3px solid var(--color-primary); background: var(--color-primary-light); }
+.skill-workbench { display: grid; grid-template-columns: minmax(250px, 0.8fr) minmax(0, 1.3fr); gap: 24px; align-items: start; }
+.skill-list { gap: 12px; }
+.skill-row { position: relative; display: flex; flex-wrap: wrap; align-items: flex-start; padding: 18px; border: 1px solid var(--border-color); border-radius: 9px; background: var(--bg-color-paper); gap: 12px; }
+.skill-row.selected { border-color: var(--color-primary); background: var(--color-primary-light); }
+.skill-info { flex: 1; min-width: 100px; }
+.skill-select { font: 600 20px var(--font-family-serif); color: var(--text-color-primary); border: 0; background: transparent; padding: 0; text-align: left; cursor: pointer; }
+.skill-row .model-actions { flex-basis: 100%; justify-content: flex-end; }
+.skill-editor { padding: 24px; min-width: 0; }
+.skill-editor h3 { font-size: 23px; margin-bottom: 24px; }
+.skill-editor .section-actions { margin-top: 20px; }
+.skill-editor-empty { padding: 32px; color: var(--text-color-secondary); border: 1px dashed var(--border-color); border-radius: 9px; }
+@media (max-width: 1000px) { .skill-workbench { grid-template-columns: 1fr; } .skill-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .skill-list { grid-template-columns: 1fr; } .settings-nav-item { gap: 8px; } }
+.settings-header { display: flex; flex-direction: column-reverse; align-items: flex-start; gap: 8px; margin: 0 0 22px; padding: 8px 12px; }
+.settings-header .page-title { font-size: 22px; }
+.settings-header .back-btn { font-size: 12px; padding: 0; }
+.settings-nav { border: 0; box-shadow: none; background: none; }
+.skill-row { position: relative; align-items: flex-start; padding: 22px; }
+.skill-row :deep(.n-switch) { order: 2; margin-left: auto; }
+.skill-info { min-width: 0; }
+.skill-select { font-size: 22px; }
+.skill-info p { margin-top: 10px; font-size: 14px; line-height: 1.7; }
+.skill-row .model-actions { position: absolute; right: 16px; bottom: 12px; }
+.skill-editor { padding: 24px; }
+.skill-editor h3 { font-size: 25px; margin-bottom: 24px; }
+@media (max-width: 760px) { .settings-header { display: none; } .skill-row { padding: 16px; } }
+.workflow-card { position: relative; min-height: 180px; display: grid; grid-template-columns: 60px minmax(0, 1fr); gap: 8px 18px; padding: 24px; align-content: start; }
+.workflow-symbol { grid-row: span 2; display: grid; place-items: center; width: 60px; height: 60px; border-radius: 50%; background: var(--color-accent-light); color: var(--color-accent); }
+.workflow-card--active .workflow-symbol { color: var(--color-primary); background: var(--color-primary-light); }
+.workflow-card h4 { font-size: 22px; }
+.workflow-card p { line-height: 1.8; font-size: 14px; }
+.workflow-preview { margin-top: 20px; padding: 24px; }
+.workflow-preview h3, .retrieval-howto h3 { font-size: 23px; margin-bottom: 10px; }
+.workflow-preview > p, .workflow-preview > small, .retrieval-howto p { font-size: 14px; line-height: 1.8; color: var(--text-color-secondary); }
+.workflow-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 16px; margin: 22px 0; }
+.workflow-steps article { display: flex; align-items: flex-start; gap: 12px; padding: 18px; border: 1px solid var(--border-color-light); border-radius: var(--radius-md); }
+.workflow-step-number { flex: 0 0 30px; display: grid; place-items: center; height: 30px; border-radius: 50%; background: var(--color-accent-light); color: var(--color-accent); }
+.workflow-steps h4 { font-size: 16px; margin-bottom: 6px; }
+.workflow-steps p { font-size: 13px; color: var(--text-color-secondary); }
+.retrieval-howto { padding: 24px 0; margin-top: 20px; border-top: 1px solid var(--border-color-light); }
+.retrieval-howto > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+.retrieval-howto article { padding: 12px 0; }
+.retrieval-howto strong { font-size: 16px; }
+@media (max-width: 900px) { .workflow-card { min-height: 140px; grid-template-columns: 48px minmax(0, 1fr); padding: 18px; } .workflow-symbol { width: 48px; height: 48px; } .retrieval-howto > div { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
+.about-brand { padding: 4px 0; margin: 12px 0; }
+.about-brand .seal { width: 56px; height: 64px; font-size: 38px; }
+.about-brand h3 { font-size: 34px; }
+.about-desc { font: 600 18px/1.7 var(--font-family-serif); max-width: none; }
+.about-features { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; padding: 18px 0; margin: 18px 0; border-top: 1px solid var(--border-color-light); }
+.about-features article { display: flex; gap: 12px; align-items: flex-start; }
+.about-features article > span { display: grid; place-items: center; flex: 0 0 40px; height: 40px; border-radius: 50%; background: var(--bg-color-hover); }
+.about-features h4 { font: 600 18px var(--font-family-serif); margin-bottom: 6px; }
+.about-features p { font-size: 14px; margin: 0; }
+.about-help-title { font-size: 24px; padding: 20px 0 10px; border-top: 1px solid var(--border-color-light); }
+.about-links a { display: grid; grid-template-columns: 140px minmax(0, 1fr) 24px; align-items: center; color: var(--text-color-primary); }
+.about-links small { color: var(--text-color-secondary); font-size: 14px; }
+.about-backup-note { margin-top: 20px; font-size: 13px; color: var(--text-color-secondary); }
+@media (max-width: 650px) { .about-links a { grid-template-columns: minmax(0, 1fr) 24px; gap: 6px; } .about-links small { grid-column: 1; grid-row: 2; } .about-links a > span { grid-column: 2; grid-row: 1 / 3; } }
+.workflow-rounds-value { color: var(--color-primary); font-size: 17px; font-variant-numeric: tabular-nums; margin: 0 3px; }
+.about-update { margin: 16px 0; padding: 16px 0 0; border-top: 1px solid var(--border-color-light); }
+.about-update > .about-help-title { border: 0; padding: 0 0 12px; }
+@media (max-width: 900px) { .about-features { grid-template-columns: 1fr; gap: 16px; } }
 </style>

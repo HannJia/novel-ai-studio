@@ -1,6 +1,8 @@
 import { queryAll, execute, initDb, runTransaction } from '../database'
 import type { EventLogEntry, Novel } from '@/types/novel'
 import { upsertRow } from './upsert'
+import { resolveChapterLengthPolicy } from '../chapterLength'
+import { normalizeStoredReviewCoverage } from '../chapterReviewAcceptance'
 
 function normalizeImportance(value: unknown): 1 | 2 | 3 | 4 | 5 {
   return Math.min(5, Math.max(1, Number(value) || 3)) as 1 | 2 | 3 | 4 | 5
@@ -36,11 +38,20 @@ interface NovelRow {
   target_min: number; target_max: number; current_word_count: number
   writing_style: string; settings: string; outline: string; synopsis: string
   writing_mode?: string
+  chapter_length_policy?: string
   chat_web_search?: number
   inspiration_history?: string
   knowledge_base_ids: string; chapter_plans?: string; story_state_proposals?: string; story_clock?: string
   chapter_plan_confirmed?: number
   status: string; created_at: string; updated_at: string
+}
+
+function parseLengthPolicy(value?: string): Novel['chapterLengthPolicy'] {
+  try { return value ? resolveChapterLengthPolicy(JSON.parse(value)) : undefined } catch { return undefined }
+}
+
+function parseReviewCoverage(value?: string): Novel['chapters'][number]['contentReviewCoverage'] {
+  try { return normalizeStoredReviewCoverage(JSON.parse(value || 'null')) } catch { return undefined }
 }
 
 function rowToNovel(row: NovelRow): Novel {
@@ -71,6 +82,7 @@ function rowToNovel(row: NovelRow): Novel {
     currentWordCount: row.current_word_count,
     writingStyle: JSON.parse(row.writing_style || '{}'),
     writingMode: row.writing_mode === 'ai' || row.writing_mode === 'manual' ? row.writing_mode : undefined,
+    chapterLengthPolicy: parseLengthPolicy(row.chapter_length_policy),
     chatWebSearchEnabled: row.chat_web_search === 1,
     settings: JSON.parse(row.settings || '{}'),
     outline: row.outline || '',
@@ -128,6 +140,7 @@ export async function loadAllNovelsFromDb(): Promise<Novel[]> {
       bannedReview: r.banned_review || '',
       contentReview: r.content_review || '',
       contentReviewSignature: r.content_review_signature || '',
+      contentReviewCoverage: parseReviewCoverage(r.content_review_coverage),
       reviewRewriteBlockedSignature: r.review_rewrite_blocked_signature || '',
       sceneNotes: JSON.parse(r.scene_notes || '[]'),
       versions: JSON.parse(r.versions || '[]'),
@@ -153,7 +166,8 @@ export async function loadAllNovelsFromDb(): Promise<Novel[]> {
       description: r.description,
       relationships: JSON.parse(r.relationships || '[]'),
       events: JSON.parse(r.events || '[]'),
-      avatarColor: r.avatar_color
+      avatarColor: r.avatar_color,
+      ...(r.avatar_id ? { avatarId: r.avatar_id } : {}),
     }))
 
     // 载入对话
@@ -253,7 +267,7 @@ export async function saveNovelToDb(novel: Novel) {
 // Synchronous SQL writer, also used by a single whole-project import transaction.
 export function writeNovelRows(novel: Novel) {
     // 1. 更新主表
-    upsertRow('novels', 'id, title, genre, sub_genre, genre_label, sub_genre_label, tags, target_min, target_max, current_word_count, writing_style, settings, outline, synopsis, knowledge_base_ids, chapter_plans, chapter_plan_confirmed, story_state_proposals, story_clock, status, created_at, updated_at, writing_mode, chat_web_search, inspiration_history', [
+    upsertRow('novels', 'id, title, genre, sub_genre, genre_label, sub_genre_label, tags, target_min, target_max, current_word_count, writing_style, settings, outline, synopsis, knowledge_base_ids, chapter_plans, chapter_plan_confirmed, story_state_proposals, story_clock, status, created_at, updated_at, writing_mode, chat_web_search, inspiration_history, chapter_length_policy', [
       novel.id, novel.title, novel.genre, novel.subGenre, novel.genreLabel, novel.subGenreLabel,
       JSON.stringify(novel.tags), novel.targetWordCountMin, novel.targetWordCountMax, novel.currentWordCount,
       JSON.stringify(novel.writingStyle), JSON.stringify(novel.settings), novel.outline, novel.synopsis,
@@ -261,6 +275,7 @@ export function writeNovelRows(novel: Novel) {
       JSON.stringify(novel.storyStateProposals || []), JSON.stringify(novel.storyClock || {}), novel.status, novel.createdAt, novel.updatedAt, novel.writingMode || null,
       novel.chatWebSearchEnabled ? 1 : 0,
       JSON.stringify(novel.inspirationHistory || []),
+      novel.chapterLengthPolicy ? JSON.stringify(resolveChapterLengthPolicy(novel.chapterLengthPolicy)) : null,
     ])
 
     // 2. 分卷：只写入有变化的行 + 删除已移除的
@@ -283,7 +298,7 @@ export function writeNovelRows(novel: Novel) {
       execute('DELETE FROM chapters WHERE id = ?', [id])
     }
     for (const c of novel.chapters) {
-      upsertRow('chapters', 'id, novel_id, volume_index, chapter_index, title, content, summary, banned_review, content_review, content_review_signature, review_rewrite_blocked_signature, scene_notes, versions, word_count, story_days_elapsed, story_day, status, created_at, updated_at', [c.id, novel.id, c.volumeIndex, c.chapterIndex, c.title, c.content, c.summary, c.bannedReview || '', c.contentReview || '', c.contentReviewSignature || '', c.reviewRewriteBlockedSignature || '', JSON.stringify(c.sceneNotes || []), JSON.stringify(c.versions || []), c.wordCount, c.storyDaysElapsed || 0, c.storyDay ?? null, c.status, c.createdAt, c.updatedAt])
+      upsertRow('chapters', 'id, novel_id, volume_index, chapter_index, title, content, summary, banned_review, content_review, content_review_signature, content_review_coverage, review_rewrite_blocked_signature, scene_notes, versions, word_count, story_days_elapsed, story_day, status, created_at, updated_at', [c.id, novel.id, c.volumeIndex, c.chapterIndex, c.title, c.content, c.summary, c.bannedReview || '', c.contentReview || '', c.contentReviewSignature || '', c.contentReviewCoverage ? JSON.stringify(c.contentReviewCoverage) : null, c.reviewRewriteBlockedSignature || '', JSON.stringify(c.sceneNotes || []), JSON.stringify(c.versions || []), c.wordCount, c.storyDaysElapsed || 0, c.storyDay ?? null, c.status, c.createdAt, c.updatedAt])
     }
 
     // 4. 角色：只写入有变化的行 + 删除已移除的
@@ -294,7 +309,7 @@ export function writeNovelRows(novel: Novel) {
       execute('DELETE FROM characters WHERE id = ?', [id])
     }
     for (const c of novel.characters) {
-      upsertRow('characters', 'id, novel_id, name, aliases, identity, personality, power_level, faction, status, first_appear_chapter, description, relationships, events, avatar_color', [c.id, novel.id, c.name, JSON.stringify(c.aliases), c.identity, c.personality, c.powerLevel, c.faction, c.status, c.firstAppearChapter, c.description, JSON.stringify(c.relationships), JSON.stringify(c.events), c.avatarColor])
+      upsertRow('characters', 'id, novel_id, name, aliases, identity, personality, power_level, faction, status, first_appear_chapter, description, relationships, events, avatar_color, avatar_id', [c.id, novel.id, c.name, JSON.stringify(c.aliases), c.identity, c.personality, c.powerLevel, c.faction, c.status, c.firstAppearChapter, c.description, JSON.stringify(c.relationships), JSON.stringify(c.events), c.avatarColor, c.avatarId || null])
     }
 
     // 5. 对话：只写入有变化的行 + 删除已移除的

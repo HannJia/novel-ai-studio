@@ -5,6 +5,7 @@ import { genres } from '@/data/genres'
 import { loadAllNovelsFromDb, saveNovelToDb, deleteNovelFromDb } from '@/services/db/novels'
 import { createRevisionPersistence } from './revisionPersistence'
 import { countNovelWords } from '@/utils/format'
+import { resolveChapterLengthPolicy, type ChapterLengthPolicy } from '@/services/chapterLength'
 import { createChapterRevision, getChapterRevision, listChapterRevisions, updateChapterRevisionStatus } from '@/services/db/chapterRevisions'
 import {
   buildDataPanelAutomationSuggestions,
@@ -238,6 +239,13 @@ export const useNovelStore = defineStore('novel', () => {
     touchNovel(novel, new Date().toISOString())
   }
 
+  function setChapterLengthPolicy(id: string, value: ChapterLengthPolicy) {
+    const novel = getNovel(id)
+    if (!novel) return
+    novel.chapterLengthPolicy = resolveChapterLengthPolicy(value)
+    touchNovel(novel, new Date().toISOString())
+  }
+
   function updateOutline(id: string, outline: string) {
     const novel = novels.value.find(n => n.id === id)
     if (novel) {
@@ -269,6 +277,7 @@ export const useNovelStore = defineStore('novel', () => {
       bannedReview: chapterData.bannedReview || '',
       contentReview: chapterData.contentReview || '',
       contentReviewSignature: chapterData.contentReviewSignature || '',
+      contentReviewCoverage: chapterData.contentReviewCoverage,
       reviewRewriteBlockedSignature: chapterData.reviewRewriteBlockedSignature || '',
       sceneNotes: chapterData.sceneNotes || [],
       versions: chapterData.versions || [],
@@ -359,11 +368,12 @@ export const useNovelStore = defineStore('novel', () => {
     const previous = {
       content: chapter.content, status: chapter.status,
       contentReviewSignature: chapter.contentReviewSignature,
+      contentReviewCoverage: chapter.contentReviewCoverage,
       reviewRewriteBlockedSignature: chapter.reviewRewriteBlockedSignature,
     }
     updateChapter(novelId, chapterId, {
       content: revision.proposedContent, status: 'writing',
-      contentReviewSignature: '', reviewRewriteBlockedSignature: '',
+      contentReviewSignature: '', contentReviewCoverage: undefined, reviewRewriteBlockedSignature: '',
     })
     try {
       await saveNovelNow(novelId)
@@ -582,6 +592,7 @@ export const useNovelStore = defineStore('novel', () => {
       relationships: charData.relationships || [],
       events: charData.events || [],
       avatarColor: colors[novel.characters.length % colors.length],
+      ...(charData.avatarId ? { avatarId: charData.avatarId } : {}),
     }
     novel.characters.push(char)
     touchNovel(novel, new Date().toISOString())
@@ -1321,6 +1332,7 @@ export const useNovelStore = defineStore('novel', () => {
     updateTitle,
     updateOutline,
     setWritingMode,
+    setChapterLengthPolicy,
     setStatus,
     addChapter,
     updateChapter,

@@ -40,15 +40,15 @@
     </div>
 
     <!-- 预览模式 + AI 修改 -->
-    <div v-else>
+    <div v-else class="outline-reading-container">
       <div class="outline-preview paper-panel">
         <div class="rendered-content" v-html="renderedContent"></div>
       </div>
 
       <!-- AI 局部修改面板 -->
-      <div v-if="novel?.outline" class="ai-modify-panel paper-panel">
+      <aside v-if="novel?.outline" class="ai-modify-panel paper-panel">
         <div class="modify-header">
-          <span>AI 局部修改</span>
+          <h3>AI 助手</h3><span class="outline-assistant-tab">局部修改</span>
         </div>
         <n-input
           v-model:value="modifyInstruction"
@@ -65,7 +65,7 @@
           :disabled="!modifyInstruction.trim()"
           style="margin-top:6px;align-self:flex-end;"
         >
-          {{ modifying ? 'AI 修改中...' : '应用修改' }}
+          {{ modifying ? 'AI 修改中...' : '生成修改建议' }}
         </n-button>
         <div v-if="modifyPreview" class="modify-preview">
           <div class="modify-label">修改预览：</div>
@@ -75,7 +75,7 @@
             <n-button size="tiny" type="primary" @click="acceptModify">采纳修改</n-button>
           </div>
         </div>
-      </div>
+      </aside>
     </div>
   </div>
 </template>
@@ -196,14 +196,25 @@ function acceptModify() {
 .empty-outline p { font-size: 14px; color: var(--text-color-tertiary); margin-bottom: 8px; }
 
 /* 预览 */
-.outline-preview {
-  line-height: 1.8;
-  font-size: 14.5px;
+.outline-reading-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
 }
 
-.rendered-content :deep(h2) { font-size: 20px; margin: 24px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border-color-light); color: var(--color-primary); }
-.rendered-content :deep(h3) { font-size: 17px; margin: 18px 0 8px; }
-.rendered-content :deep(h4) { font-size: 15px; margin: 14px 0 6px; }
+.outline-preview {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  line-height: 1.85;
+  font-size: 16px;
+  font-family: var(--font-family-serif);
+  color: var(--text-color-primary);
+}
+
+.rendered-content :deep(h2) { font-family: var(--font-family-serif); font-size: 22px; font-weight: 700; margin: 28px 0 14px; padding-bottom: 10px; border-bottom: 2px solid var(--border-color); color: var(--color-primary); letter-spacing: 0.02em; }
+.rendered-content :deep(h3) { font-family: var(--font-family-serif); font-size: 19px; font-weight: 700; margin: 20px 0 10px; color: var(--text-color-primary); }
+.rendered-content :deep(h4) { font-family: var(--font-family-serif); font-size: 17px; font-weight: 600; margin: 16px 0 8px; color: var(--text-color-primary); }
 .rendered-content :deep(strong) { color: var(--color-primary); }
 .rendered-content :deep(li) { margin-left: 20px; margin-bottom: 4px; }
 
@@ -222,11 +233,16 @@ function acceptModify() {
 
 /* AI 局部修改面板 */
 .ai-modify-panel {
-  margin-top: var(--space-md);
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--bg-color-secondary);
 }
 
 .modify-header {
@@ -264,4 +280,14 @@ function acceptModify() {
   justify-content: flex-end;
   margin-top: 8px;
 }
+
+.outline-reading-container { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; }
+.outline-preview { width: 100%; max-width: 820px; margin: 0; font-size: 17px; padding: 28px; }
+.ai-modify-panel { position: sticky; top: 0; width: 100%; max-width: none; margin: 0; padding: 20px; }
+.modify-header { display: flex; flex-direction: column; align-items: stretch; gap: 16px; }
+.modify-header h3 { font-size: 22px; }
+.outline-assistant-tab { padding-bottom: 12px; border-bottom: 2px solid var(--color-primary); color: var(--color-primary); text-align: center; }
+.ai-modify-panel > :deep(.n-button) { align-self: stretch !important; margin-top: 12px !important; }
+@media (max-width: 1100px) { .outline-reading-container { grid-template-columns: minmax(0, 1fr) 280px; } }
+@media (max-width: 900px) { .outline-reading-container { grid-template-columns: 1fr; } .ai-modify-panel { position: static; } }
 </style>

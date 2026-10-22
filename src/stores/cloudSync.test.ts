@@ -7,6 +7,7 @@ import { useInspirationSessionsStore } from './inspirationSessions'
 import { parseInspirationSession } from '@/services/inspirationSessions'
 import { useCloudSyncStore } from './cloudSync'
 import { canonicalJson, emptySyncState, hashPayload, type CloudRecord } from '@/services/cloudSyncModel'
+import { cloudPreferencesBusy } from '@/services/appLifecycle'
 
 const memory = vi.hoisted(() => ({
   state: null as any, conflicts: [] as any[], records: new Map<string, any>(), userId: 'owner',
@@ -83,6 +84,7 @@ beforeEach(async () => {
   memory.failSave = false
   memory.expired = false
   memory.requests = []
+  cloudPreferencesBusy.value = false
   setActivePinia(createPinia())
   await useNovelStore().initStore()
   await useKnowledgeStore().initStore()
@@ -90,7 +92,7 @@ beforeEach(async () => {
   sync = useCloudSyncStore()
   await sync.initialize()
 })
-afterEach(() => { sync.dispose(); vi.useRealTimers(); vi.restoreAllMocks() })
+afterEach(() => { sync.dispose(); cloudPreferencesBusy.value = false; vi.useRealTimers(); vi.restoreAllMocks() })
 
 function addBook() {
   const store = useNovelStore()
@@ -100,6 +102,7 @@ function addBook() {
 async function loginAndEnable() {
   await sync.authenticate('login', 'owner', 'not-a-real-password')
   await sync.setEnabled(true)
+  if (sync.pendingUploads.length) await sync.approveUploads(sync.pendingUploads.map(item => item.key))
 }
 async function remoteEdit(key: string, title: string | null) {
   const old = memory.records.get(key)!
@@ -110,7 +113,131 @@ async function remoteEdit(key: string, title: string | null) {
   memory.records.set(key, record)
 }
 
+describe('首次下载与本机内容确认', () => {
+  async function seedRemote() {
+    const book = addBook()
+    book.title = '云端作品'
+    const key = 'novel:' + book.id
+    const payload = canonicalJson({ kind: 'novel', novel: book, chapterRevisions: [] })
+    memory.records.set(key, { key, payload, hash: await hashPayload(payload), version: 1, bytes: payload.length, updatedAt: Date.now() })
+    useNovelStore().adoptImportedNovels([])
+    return book.id
+  }
+  it('empty new machines download cloud works without issuing a write', async () => {
+    const id = await seedRemote()
+    await sync.authenticate('login', 'owner', 'fixture-password')
+    await sync.setEnabled(true)
+    expect(useNovelStore().getNovel(id)?.title).toBe('云端作品')
+    expect(memory.requests.filter(item => item.path === 'sync/push')).toHaveLength(0)
+    expect(sync.pendingUploads).toHaveLength(0)
+    expect(sync.error).toBe('')
+  })
+  it('downloads first and uploads only the selected local works', async () => {
+    const remoteId = await seedRemote()
+    const first = addBook(), second = addBook()
+    await sync.authenticate('login', 'owner', 'fixture-password')
+    await sync.setEnabled(true)
+    expect(useNovelStore().getNovel(remoteId)).toBeDefined()
+    expect(sync.pendingUploads).toHaveLength(2)
+    expect(memory.records.size).toBe(1)
+    await sync.approveUploads(['novel:' + first.id])
+    expect(memory.records.has('novel:' + first.id)).toBe(true)
+    expect(memory.records.has('novel:' + second.id)).toBe(false)
+    expect(sync.pendingUploads.map(item => item.key)).toEqual(['novel:' + second.id])
+    const calls = memory.requests.map(item => item.path)
+    expect(calls.indexOf('sync/pull')).toBeLessThan(calls.indexOf('sync/push'))
+  })
+  it('keeps unapproved content local through repeated sync, toggle and restart', async () => {
+    const book = addBook()
+    await sync.authenticate('login', 'owner', 'fixture-password')
+    await sync.setEnabled(true)
+    await sync.syncNow()
+    await sync.setEnabled(false); await sync.setEnabled(true)
+    sync.dispose()
+    setActivePinia(createPinia())
+    await useNovelStore().initStore(); await useKnowledgeStore().initStore(); await useInspirationSessionsStore().initialize()
+    useNovelStore().adoptImportedNovels([JSON.parse(JSON.stringify(book))])
+    sync = useCloudSyncStore(); await sync.initialize(); await sync.syncNow()
+    expect(memory.records.size).toBe(0)
+    expect(sync.pendingUploads.map(item => item.key)).toEqual(['novel:' + book.id])
+  })
+  it('retains both versions of same-ID works on first comparison', async () => {
+    const id = await seedRemote()
+    const doc = JSON.parse(memory.records.get('novel:' + id).payload)
+    doc.novel.title = '本机离线版本'
+    useNovelStore().adoptImportedNovels([doc.novel])
+    await sync.authenticate('login', 'owner', 'fixture-password'); await sync.setEnabled(true)
+    expect(sync.pendingConflicts).toHaveLength(1)
+    expect(sync.pendingConflicts[0].local).toContain('本机离线版本')
+    expect(sync.pendingConflicts[0].remote).toContain('云端作品')
+    expect(memory.requests.some(item => item.path === 'sync/push')).toBe(false)
+  })
+  it('requires explicit knowledge-library approval before uploading a linked novel', async () => {
+    const kb = useKnowledgeStore().createKB('本机资料')
+    const novel = addBook(); novel.knowledgeBaseIds = [kb.id]
+    await sync.authenticate('login', 'owner', 'fixture-password'); await sync.setEnabled(true)
+    await expect(sync.approveUploads(['novel:' + novel.id])).rejects.toThrow('知识库')
+    expect(memory.records.size).toBe(0)
+    await sync.approveUploads(['novel:' + novel.id, 'knowledge:' + kb.id])
+    expect(sync.error).toBe('')
+    expect(memory.records.has('knowledge:' + kb.id)).toBe(true)
+    expect(memory.records.get('novel:' + novel.id).payload).toContain(kb.id)
+  })
+  it('failed initial pulls leave local-only works unapproved and preserve local content', async () => {
+    await seedRemote(); const local = addBook()
+    memory.onPull = () => { throw Error('下载失败') }
+    await sync.authenticate('login', 'owner', 'fixture-password'); await sync.setEnabled(true)
+    expect(sync.error).toContain('下载失败')
+    expect(useNovelStore().getNovel(local.id)).toBeDefined()
+    expect(memory.records.has('novel:' + local.id)).toBe(false)
+    expect(sync.state.approvedUploads).toEqual([])
+  })
+  it('requires knowledge approval for inspiration before remembering any upload consent', async () => {
+    const kb = useKnowledgeStore().createKB('本机资料')
+    useInspirationSessionsStore().upsert(parseInspirationSession({ id: 'linked-idea', title: '参考资料的灵感',
+      updatedAt: '2026-10-18T00:00:00Z', messages: [{ role: 'user', content: '合成测试' }], knowledgeIds: [kb.id] }))
+    await sync.authenticate('login', 'owner', 'fixture-password')
+    await sync.setEnabled(true)
+    await expect(sync.approveUploads(['inspiration:linked-idea'])).rejects.toThrow('知识库')
+    expect(sync.state.approvedUploads).toEqual([])
+    expect(memory.records.size).toBe(0)
+    await sync.approveUploads(['inspiration:linked-idea', 'knowledge:' + kb.id])
+    expect(sync.error).toBe('')
+    expect(memory.records.has('knowledge:' + kb.id)).toBe(true)
+    expect(memory.records.has('inspiration:linked-idea')).toBe(true)
+  })
+  it('does not treat a knowledge tombstone as approval of a restored local library', async () => {
+    const kb = useKnowledgeStore().createKB('本机恢复的资料')
+    const key = 'knowledge:' + kb.id
+    // An acknowledged deletion exists, but this local copy has never been approved.
+    sync.state.bases[key] = { version: 1, hash: null }
+    memory.records.set(key, { key, version: 1, hash: null, payload: null, bytes: 0, updatedAt: Date.now() })
+    const novel = addBook(); novel.knowledgeBaseIds = [kb.id]
+    await sync.authenticate('login', 'owner', 'fixture-password')
+    await expect(sync.approveUploads(['novel:' + novel.id])).rejects.toThrow('启用云同步')
+    // Check preflight without allowing an intervening sync to recreate the library.
+    sync.state.enabled = true
+    sync.state.pendingUploads = [{ key: 'novel:' + novel.id, title: novel.title, kind: 'novel' }]
+    await expect(sync.approveUploads(['novel:' + novel.id])).rejects.toThrow('知识库')
+    expect(sync.state.approvedUploads).toEqual([])
+    expect(memory.requests.some(item => item.path === 'sync/push')).toBe(false)
+  })
+})
+
 describe('云同步状态机', () => {
+  it('serializes project operations against silent preference network synchronization', async () => {
+    addBook()
+    await loginAndEnable()
+    memory.requests = []
+    cloudPreferencesBusy.value = true
+    await sync.syncNow()
+    await expect(sync.logout()).rejects.toThrow('等待')
+    expect(memory.requests).toHaveLength(0)
+    expect(sync.session).not.toBeNull()
+    cloudPreferencesBusy.value = false
+    await sync.syncNow()
+    expect(memory.requests.some(item => item.path.startsWith('sync/manifest'))).toBe(true)
+  })
   it('uploads a whole unfinished conversation and restores remote drafts without any model credentials', async () => {
     const store = useInspirationSessionsStore()
     store.upsert(parseInspirationSession({ id: 'idea', title: '未成书', updatedAt: '2026-09-18T00:00:00Z',
@@ -144,6 +271,9 @@ describe('云同步状态机', () => {
     expect(memory.records.size).toBe(0)
     expect(sync.state.binding).toBeNull()
     await sync.setEnabled(true)
+    expect(memory.records.size).toBe(0)
+    expect(sync.pendingUploads).toHaveLength(1)
+    await sync.approveUploads(sync.pendingUploads.map(item => item.key))
     expect(memory.records.has(`novel:${novel.id}`)).toBe(true)
     expect(sync.state.binding?.userId).toBe('owner')
     expect(sync.error).toBe('')
@@ -173,6 +303,25 @@ describe('云同步状态机', () => {
     window.location.hash = '#/settings'
     await sync.syncNow()
     expect(useNovelStore().getNovel(novel.id)?.title).toBe('远端')
+  })
+  it('does not report synced or advance lastSync while an acknowledged upload is deferred', async () => {
+    const novel = addBook()
+    await loginAndEnable()
+    const lastSync = sync.state.lastSync
+    const remoteVersion = memory.records.get('novel:' + novel.id).version
+    memory.requests = []
+    vi.setSystemTime(Date.now() + 60000)
+    useNovelStore().getNovel(novel.id)!.title = '编辑器中的未上传修改'
+    window.location.hash = `#/workspace/${novel.id}/editor/chapter`
+    await sync.syncNow()
+    expect(sync.phase).toBe('waiting')
+    expect(sync.state.lastSync).toBe(lastSync)
+    expect(memory.requests.some(item => item.path === 'sync/push')).toBe(false)
+    expect(memory.records.get('novel:' + novel.id).version).toBe(remoteVersion)
+    window.location.hash = '#/'
+    await sync.syncNow()
+    expect(memory.records.get('novel:' + novel.id).payload).toContain('编辑器中的未上传修改')
+    expect(sync.error).toBe('')
   })
   it('preserves both versions of simultaneous edits without overwriting either', async () => {
     const novel = addBook()

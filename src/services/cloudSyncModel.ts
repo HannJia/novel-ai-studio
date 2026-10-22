@@ -10,7 +10,14 @@ export interface CloudUser { id: string; username: string; role: 'user' | 'admin
 export interface CloudSession { endpoint: string; token: string; expiresAt: number; user: CloudUser }
 export interface CloudRecord { key: string; version: number; hash: string | null; bytes: number; updatedAt: number; payload?: string | null }
 export interface SyncBase { version: number; hash: string | null }
-export interface SyncState { binding: SyncBinding | null; enabled: boolean; bases: Record<string, SyncBase>; lastSync: string }
+export interface SyncState { 
+  binding: SyncBinding | null
+  enabled: boolean
+  bases: Record<string, SyncBase>
+  lastSync: string
+  approvedUploads?: string[]
+  pendingUploads?: Array<{ key: string; title: string; kind: 'novel' | 'knowledge' | 'inspiration' }>
+}
 export interface SyncConflict {
   id: string; key: string; title: string; local: string | null; remote: string | null
   remoteVersion: number; remoteHash: string | null; createdAt: string; resolution?: 'local' | 'remote'
@@ -19,7 +26,14 @@ export type SyncDocument =
   | { kind: 'novel'; novel: Novel; chapterRevisions: ChapterRevision[] }
   | { kind: 'knowledge'; knowledge: KnowledgeBase }
   | { kind: 'inspiration'; inspiration: InspirationSession }
-export const emptySyncState = (): SyncState => ({ binding: null, enabled: false, bases: {}, lastSync: '' })
+export const emptySyncState = (): SyncState => ({ 
+  binding: null, 
+  enabled: false, 
+  bases: {}, 
+  lastSync: '',
+  approvedUploads: [],
+  pendingUploads: []
+})
 
 export function normalizeSyncEndpoint(raw: string): string {
   let url: URL

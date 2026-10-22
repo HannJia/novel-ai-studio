@@ -7,23 +7,35 @@
       </div>
       <div class="header-actions">
         <n-dropdown trigger="click" :options="exportOptions" @select="exportDataPanels">
-          <n-button secondary>
+          <n-button tertiary>
             <template #icon><n-icon><download-outline /></n-icon></template>
             导出
           </n-button>
         </n-dropdown>
         <n-button type="primary" @click="openEditor()">
-          <template #icon><n-icon><add-outline /></n-icon></template>
+          <template #icon><span style="font-size:16px">+</span></template>
           新建数据
         </n-button>
       </div>
     </header>
 
     <div class="data-summary">
-      <span><strong>{{ dataPanels.length }}</strong> 个数据对象</span>
-      <span><strong>{{ totalFieldCount }}</strong> 个字段</span>
-      <span><strong>{{ pendingChangeCount }}</strong> 条待确认变更</span>
-      <span><strong>{{ automationRuleCount }}</strong> 条自动规则</span>
+      <div class="summary-card">
+        <strong>{{ dataPanels.length }}</strong>
+        <span>数据对象</span>
+      </div>
+      <div class="summary-card">
+        <strong>{{ totalFieldCount }}</strong>
+        <span>字段</span>
+      </div>
+      <div class="summary-card">
+        <strong>{{ pendingChangeCount }}</strong>
+        <span>待确认变更</span>
+      </div>
+      <div class="summary-card">
+        <strong>{{ automationRuleCount }}</strong>
+        <span>自动规则</span>
+      </div>
     </div>
 
     <section class="story-clock-panel">
@@ -52,8 +64,13 @@
             v-for="item in filteredItems"
             :key="item.id"
             class="data-object-card"
+            role="button"
+            tabindex="0"
+            :aria-label="`查看${item.name}的变化记录`"
             :class="{ selected: selectedItemId === item.id }"
             @click="selectedItemId = item.id"
+            @keydown.enter.self.prevent="selectedItemId = item.id"
+            @keydown.space.self.prevent="selectedItemId = item.id"
           >
             <div class="object-card-header">
               <div>
@@ -100,6 +117,13 @@
       </section>
 
       <aside class="timeline-section">
+        <section v-if="selectedItem" class="selected-data-detail">
+          <div class="selected-data-title"><h3>{{ selectedItem.name }}</h3><n-tag size="small">{{ selectedItem.category }}</n-tag></div>
+          <p v-if="selectedItem.relatedKeywords.length" class="selected-data-keywords">{{ selectedItem.relatedKeywords.join(' · ') }}</p>
+          <div class="selected-data-header"><h4>基础信息</h4><n-button size="small" text @click="openEditor(selectedItem)">编辑</n-button></div>
+          <dl class="selected-data-fields"><div v-for="field in selectedItem.fields" :key="field.id"><dt>{{ field.name }}</dt><dd>{{ field.value }}{{ field.unit ? ' ' + field.unit : '' }}</dd></div></dl>
+          <EquipmentSummary :item="selectedItem" :items="dataPanels" />
+        </section>
         <div class="timeline-header">
           <div>
             <h3>变化时间线</h3>
@@ -177,7 +201,7 @@ import {
   NButton, NDropdown, NEmpty, NForm, NFormItem, NIcon, NInput, NInputNumber, NModal,
   NPopconfirm, NSelect, NTag, useMessage,
 } from 'naive-ui'
-import { AddOutline, CreateOutline, DownloadOutline, TrashOutline, TimeOutline } from '@vicons/ionicons5'
+import { CreateOutline, DownloadOutline, TrashOutline, TimeOutline } from '@vicons/ionicons5'
 import { useNovelStore } from '@/stores/novel'
 import DataPanelFieldEditor from '@/components/data-panel/DataPanelFieldEditor.vue'
 import EquipmentFieldEditor from '@/components/data-panel/EquipmentFieldEditor.vue'
@@ -253,6 +277,11 @@ const automationRuleCount = computed(() => dataPanels.value.reduce(
 ))
 const latestChapterIndex = computed(() => Math.max(-1, ...(novel.value?.chapters || []).map(chapter => chapter.chapterIndex)))
 const selectedItem = computed(() => dataPanels.value.find(item => item.id === selectedItemId.value))
+let initialDataSelection = false
+watch(() => dataPanels.value.map(item => item.id), ids => {
+  if (!initialDataSelection && ids.length) { selectedItemId.value = ids[0]; initialDataSelection = true }
+  else if (selectedItemId.value && !ids.includes(selectedItemId.value)) selectedItemId.value = ids[0] || ''
+}, { immediate: true })
 const filteredItems = computed(() => {
   const recent = recentFilter.value === 'all' || recentFilter.value === 'never'
     ? recentFilter.value
@@ -424,7 +453,7 @@ function exportDataPanels(key: string) {
   justify-content: space-between;
 }
 
-.data-header { gap: 16px; }
+.data-header { gap: 16px; flex-wrap: wrap; }
 .header-actions, .icon-actions, .modal-actions { gap: 8px; }
 .modal-actions { justify-content: flex-end; }
 .change-actions { display: flex; gap: 8px; margin-top: 8px; }
@@ -440,17 +469,15 @@ function exportDataPanels(key: string) {
 
 .data-summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  color: var(--text-color-tertiary);
-  font-size: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
+  gap: 12px;
 }
 
-.data-summary span {
+.summary-card {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 10px 14px;
+  gap: 4px;
+  padding: 14px 16px;
   background: var(--bg-color-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
@@ -511,21 +538,28 @@ function exportDataPanels(key: string) {
   }
 }
 
-.data-summary strong {
+.summary-card strong {
   color: var(--text-color-primary);
   font-family: var(--font-family-serif);
-  font-size: 20px;
+  font-size: 24px;
   font-weight: 600;
-  line-height: 1.2;
+  line-height: 1.1;
   font-variant-numeric: tabular-nums;
 }
-.data-summary span:nth-child(3) strong { color: var(--color-primary); }
+.summary-card span {
+  color: var(--text-color-tertiary);
+  font-size: 12px;
+}
+.summary-card:nth-child(3) strong { color: var(--color-primary); }
 
 .filter-bar {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) 160px 160px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 160px) minmax(0, 160px);
   gap: 10px;
   padding: 16px 0;
+}
+@media (max-width: 640px) {
+  .filter-bar { grid-template-columns: 1fr; }
 }
 
 .data-layout {
@@ -537,13 +571,13 @@ function exportDataPanels(key: string) {
 
 .object-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 14px;
 }
 
 .data-object-card {
   min-width: 0;
-  padding: 14px 16px;
+  padding: 16px 18px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   background: var(--bg-color-card);
@@ -553,6 +587,7 @@ function exportDataPanels(key: string) {
 }
 
 .data-object-card:hover { border-color: var(--border-color-hover); box-shadow: var(--shadow-hover); }
+.data-object-card:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 
 .data-object-card.selected {
   border-color: var(--color-primary);
@@ -619,4 +654,23 @@ function exportDataPanels(key: string) {
   .filter-bar, .object-grid, .form-grid { grid-template-columns: 1fr; }
   .span-2 { grid-column: auto; }
 }
+
+.data-summary { display: flex; flex-wrap: wrap; gap: 20px; margin: 8px 0 16px; }
+.summary-card { display: inline-flex; flex-direction: row; align-items: baseline; gap: 6px; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.summary-card strong { font-size: 17px; }
+.data-layout { grid-template-columns: minmax(0, 1fr) minmax(300px, 36%); }
+.object-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.selected-data-detail { padding-bottom: 24px; margin-bottom: 24px; border-bottom: 1px solid var(--border-color); }
+.selected-data-title { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.selected-data-title h3 { font-size: 25px; }
+.selected-data-keywords { margin: 12px 0; color: var(--text-color-secondary); font-size: 13px; }
+.selected-data-header { display: flex; align-items: center; justify-content: space-between; margin: 18px 0 8px; }
+.selected-data-fields { border: 1px solid var(--border-color-light); border-radius: 6px; overflow: hidden; }
+.selected-data-fields > div { display: grid; grid-template-columns: minmax(80px, 1fr) minmax(0, 1.2fr); padding: 10px; border-bottom: 1px solid var(--border-color-light); gap: 12px; font-size: 13px; }
+.selected-data-fields > div:last-child { border-bottom: 0; }
+.selected-data-fields dt { color: var(--text-color-secondary); }
+.selected-data-fields dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 1200px) { .object-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1000px) { .data-layout { grid-template-columns: 1fr; } .object-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .timeline-section { position: static; } }
+@media (max-width: 650px) { .object-grid { grid-template-columns: 1fr; } }
 </style>

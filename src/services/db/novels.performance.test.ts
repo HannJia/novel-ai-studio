@@ -44,6 +44,26 @@ function largeNovel(): Novel {
 }
 
 describe('large novel SQLite persistence', () => {
+  it('round-trips chapter length policy and failed coverage without recounting manuscripts', async () => {
+    const novel = largeNovel()
+    novel.id = 'length-coverage-roundtrip'
+    novel.dataPanelChanges = []
+    novel.chapterLengthPolicy = { minWords: 3000, targetWords: 3500, maxWords: 4000 }
+    novel.currentWordCount = 777
+    novel.chapters = [{ id: 'length-chapter', volumeIndex: 0, chapterIndex: 0, title: '原稿', content: '原稿，AI！\n保留空白。', summary: '',
+      wordCount: 777, status: 'writing', createdAt: novel.createdAt, updatedAt: novel.updatedAt,
+      contentReviewCoverage: { signature: 'review-v3:synthetic', status: 'failed', totalChunks: 2, completedChunks: 1, coveredCharacters: 3200,
+        totalCharacters: 5000, globalStatus: 'pending', failedChunk: 2, error: '模拟后半段失败' },
+    }]
+    await saveNovelToDb(novel)
+    const loaded = (await loadAllNovelsFromDb()).find(book => book.id === novel.id)!
+    expect(loaded.chapterLengthPolicy).toEqual(novel.chapterLengthPolicy)
+    expect(loaded.chapters[0].contentReviewCoverage).toEqual(novel.chapters[0].contentReviewCoverage)
+    expect(loaded.chapters[0].content).toBe(novel.chapters[0].content)
+    expect(loaded.chapters[0].wordCount).toBe(777)
+    expect(loaded.currentWordCount).toBe(777)
+  })
+
   it('round-trips new-book promise evidence and review proposals', async () => {
     const novel = largeNovel()
     novel.id = 'promise-roundtrip'

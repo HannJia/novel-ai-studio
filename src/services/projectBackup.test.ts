@@ -11,6 +11,24 @@ function validBook() {
 }
 
 describe('项目备份格式', () => {
+  it('round trips optional manual avatar IDs and keeps legacy characters valid', () => {
+    const book = validBook()
+    const store = useNovelStore()
+    store.addCharacter(book.id, { name: '林晚', identity: '学者', avatarId: 'ink-scholar-f' })
+    store.addCharacter(book.id, { name: '沈舟', identity: '剑客' })
+    const parsed = parseProjectBackup(JSON.stringify(createProjectBackup([store.getNovel(book.id)!], [])))
+    expect(parsed.novels[0].characters[0].avatarId).toBe('ink-scholar-f')
+    expect(parsed.novels[0].characters[1].avatarId).toBeUndefined()
+  })
+
+  it('preserves book length settings and validates their order during backup import', () => {
+    const book = validBook()
+    book.chapterLengthPolicy = { minWords: 3000, targetWords: 3500, maxWords: 4000 }
+    const backup = createProjectBackup([book], [])
+    expect(parseProjectBackup(JSON.stringify(backup)).novels[0].chapterLengthPolicy).toEqual(book.chapterLengthPolicy)
+    backup.novels[0].chapterLengthPolicy!.minWords = 5000
+    expect(() => parseProjectBackup(JSON.stringify(backup))).toThrow('chapterLengthPolicy')
+  })
   it('preserves and validates equipment and structured pending memory', () => {
     const book = validBook()
     book.dataPanels = [{ id: 'sword', name: '铁剑', category: '装备', equipmentState: 'stored',

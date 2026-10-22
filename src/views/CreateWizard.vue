@@ -9,13 +9,11 @@
           <span>{{ choosingCreationOptions && previousCreationState ? '返回' : '返回书架' }}</span>
         </button>
         <h1 class="page-title">创建新书</h1>
+        <span v-if="!choosingCreationOptions" class="creation-combination" role="status">{{ form.writingMode === 'ai' ? 'AI 模式' : '写作辅助' }} · {{ setupMethod === 'inspiration' ? '灵感模式' : '自选设定' }}</span>
         <n-button v-if="!choosingCreationOptions" quaternary :disabled="creating" @click="openCreationOptions">更换搭配</n-button>
         <n-button v-if="!choosingCreationOptions && setupMethod === 'inspiration' && reviewingInspiration"
           quaternary :disabled="creating" @click="reviewingInspiration = false">返回灵感对话</n-button>
       </div>
-      <p v-if="!choosingCreationOptions" class="creation-combination" role="status">
-        本书：{{ form.writingMode === 'ai' ? 'AI 模式' : '写作辅助' }} ＋ {{ setupMethod === 'inspiration' ? '灵感模式' : '自选设定' }}
-      </p>
 
       <!-- 步骤指示器 -->
       <div v-if="showSettings" class="steps-indicator" id="wizard-steps">
@@ -43,29 +41,12 @@
       v-model:writing-mode="form.writingMode" v-model:setup-method="setupMethod"
       :disabled="creating" @start="startCreation" />
     <inspiration-chat v-show="showInspiration"
-      :active="showInspiration" :form="form" @apply="applyInspiration" @history-change="handleInspirationHistoryChange" />
+      :active="showInspiration" :form="form" @apply="applyInspiration" @draft-change="updateInspirationDraft" @history-change="handleInspirationHistoryChange" />
     <div v-show="showSettings" class="wizard-body">
-      <div class="creation-writing-mode">
-        <label>本书正文创作方式</label>
-        <n-radio-group v-model:value="form.writingMode" name="new-book-writing-mode">
-          <n-radio-button value="ai">AI 生成正文</n-radio-button>
-          <n-radio-button value="manual">人工主笔辅助</n-radio-button>
-        </n-radio-group>
-      </div>
-      <section class="reference-import-panel paper-panel">
-        <div class="reference-import-header">
-          <div>
-            <h3 class="section-title">参考小说设定</h3>
-            <p class="import-hint">复制提示词给其他 AI 分析参考小说，再把返回的 JSON 粘贴回来一键填充设定。</p>
-          </div>
-          <div class="reference-import-actions">
-            <n-button @click="copyReferencePrompt">复制分析提示词</n-button>
-            <n-button type="primary" @click="showImportModal = true">粘贴 / 导入设定</n-button>
-          </div>
-        </div>
-      </section>
 
-      <n-modal v-model:show="showImportModal" preset="card" title="导入参考小说设定" style="width: 820px;">
+
+
+      <n-modal v-model:show="showImportModal" preset="card" title="导入参考小说设定" style="width: min(820px, calc(100vw - 32px));">
         <template v-if="!previewData">
           <n-input
             v-model:value="importJsonText"
@@ -355,6 +336,9 @@
           </div>
         </section>
 
+      </div>
+    </div>
+    <div v-if="currentStep === 2" class="wizard-page" id="wizard-page-3"><div class="form-sections">
         <!-- 核心冲突 -->
         <section class="form-section paper-panel">
           <h3 class="section-title">核心冲突</h3>
@@ -497,7 +481,20 @@
       </div>
     </div>
 
-        <section class="form-section paper-panel knowledge-mount-section">
+
+
+<aside class="wizard-overview"><section class="wizard-current-settings paper-panel"><h2>本书设定</h2><p>根据当前选择整理，随填写即时更新。</p><dl><div><dt>小说类型</dt><dd>{{ selectedGenre?.label || '尚未选择' }}<small>{{ selectedGenre?.children.find(sub => sub.value === form.subGenre)?.label }}</small></dd></div><div><dt>目标字数</dt><dd>{{ form.targetWordCountMin }} 万 — {{ form.targetWordCountMax }} 万字</dd></div><div><dt>写作风格</dt><dd>{{ currentStyleSummary || '尚未选择' }}</dd></div><div v-if="form.settings.protagonist.name"><dt>主角</dt><dd>{{ form.settings.protagonist.name }}</dd></div><div v-if="form.settings.coreConflict.coreSuspense"><dt>核心悬念</dt><dd>{{ form.settings.coreConflict.coreSuspense }}</dd></div></dl></section>      <section class="reference-import-panel paper-panel">
+        <div class="reference-import-header">
+          <div>
+            <h3 class="section-title">参考小说设定</h3>
+            <p class="import-hint">复制提示词给其他 AI 分析参考小说，再把返回的 JSON 粘贴回来一键填充设定。</p>
+          </div>
+          <div class="reference-import-actions">
+            <n-button @click="copyReferencePrompt">复制分析提示词</n-button>
+            <n-button type="primary" @click="showImportModal = true">粘贴 / 导入设定</n-button>
+          </div>
+        </div>
+      </section>        <section class="form-section paper-panel knowledge-mount-section">
           <div class="knowledge-mount-header">
             <div>
               <h3 class="section-title">挂载知识库</h3>
@@ -518,8 +515,7 @@
             </n-checkbox-group>
             <p v-else class="section-hint">书架还没有知识库，请先返回书架创建。</p>
           </div>
-        </section>
-
+        </section></aside>
     <!-- 底部操作栏 -->
     <div class="wizard-footer" id="wizard-footer">
       <n-button v-if="currentStep > 0" @click="currentStep--" size="large">
@@ -556,7 +552,7 @@
 import { ref, reactive, computed } from 'vue'
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import {
-  NButton, NIcon, NInput, NInputNumber, NSelect, NModal, NRadioButton, NRadioGroup, NSwitch, NCheckbox, NCheckboxGroup, useDialog, useMessage
+  NButton, NIcon, NInput, NInputNumber, NSelect, NModal, NSwitch, NCheckbox, NCheckboxGroup, useDialog, useMessage
 } from 'naive-ui'
 import { ArrowBackOutline, CheckmarkOutline } from '@vicons/ionicons5'
 import { genres, themeTags } from '@/data/genres'
@@ -574,7 +570,7 @@ const knowledgeStore = useKnowledgeStore()
 const message = useMessage()
 const dialog = useDialog()
 
-const steps = ['类型 & 风格', '核心设定']
+const steps = ['类型与风格', '主角与世界', '冲突与确认']
 const currentStep = ref(0)
 const showImportModal = ref(false)
 const importJsonText = ref('')
@@ -609,6 +605,11 @@ function startCreation() {
   previousCreationState.value = null
   currentStep.value = 0
   if (setupMethod.value === 'inspiration') reviewingInspiration.value = false
+}
+
+function updateInspirationDraft(settings: CreateWizardForm) {
+  if (!showInspiration.value || creating.value) return
+  Object.assign(form, settings, { writingMode: form.writingMode })
 }
 
 function applyInspiration(settings: CreateWizardForm, history: InspirationMessage[]) {
@@ -806,6 +807,7 @@ const selectedKnowledgeBaseIds = computed<string[]>({
 const selectedGenre = computed(() =>
   genres.find(g => g.value === form.genre) || null
 )
+const currentStyleSummary = computed(() => styleDimensions.map(dimension => dimension.options.find(option => option.value === (form.writingStyle as unknown as Record<string, string>)[dimension.key])?.label).filter(Boolean).slice(0, 4).join('、'))
 
 // 是否可以进入下一步
 const canProceed = computed(() => {
@@ -1193,7 +1195,7 @@ async function handleCreate() {
   display: flex;
   align-items: center;
   gap: 16px;
-  margin-bottom: var(--space-lg);
+  margin-bottom: 24px;
 }
 
 .back-btn {
@@ -1219,22 +1221,22 @@ async function handleCreate() {
 .steps-indicator {
   display: flex;
   align-items: center;
-  gap: 40px;
-  padding: 16px 24px;
+  gap: 48px;
+  padding: 20px 28px;
   background: var(--bg-color-card);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
-  margin-bottom: var(--space-xl);
+  border-radius: 8px;
+  margin-bottom: 32px;
   position: relative;
   overflow: hidden;
-  transition: background-color var(--transition-normal);
+  transition: background-color 0.25s ease;
 }
 
 .step-line {
   position: absolute;
   bottom: 0;
   left: 0;
-  height: 2px;
+  height: 3px;
   background: var(--color-primary);
   border-radius: 100px;
   transition: width 0.4s ease;
@@ -1248,32 +1250,32 @@ async function handleCreate() {
 }
 
 .step-dot {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  border: 1px solid var(--border-color);
-  font-size: 13px;
+  border: 2px solid var(--border-color);
+  font-size: 14px;
   font-weight: 600;
   font-family: var(--font-family-serif);
-  background: var(--bg-color-paper);
+  background: var(--bg-color);
   color: var(--text-color-tertiary);
-  transition: all var(--transition-normal);
+  transition: all 0.25s ease;
 }
 
 .step-active .step-dot {
   background: var(--color-primary);
   border-color: var(--color-primary);
-  color: var(--text-color-inverse);
+  color: var(--bg-color-card);
   box-shadow: 0 0 0 4px var(--color-primary-light);
 }
 
 .step-completed .step-dot {
   background: var(--color-accent);
   border-color: var(--color-accent);
-  color: var(--text-color-inverse);
+  color: var(--bg-color-card);
 }
 
 .step-label {
@@ -1300,20 +1302,22 @@ async function handleCreate() {
 .form-sections {
   display: flex;
   flex-direction: column;
-  gap: var(--space-lg);
-  padding-bottom: 100px; /* 留出底部操作栏空间 */
+  gap: 24px;
+  padding-bottom: 100px;
+  max-width: 1120px;
+  margin: 0 auto;
 }
 
 .form-section {
-  padding: var(--space-lg);
+  padding: 28px 32px;
 }
 
 .section-title {
   font-family: var(--font-family-serif);
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 600;
   color: var(--text-color-primary);
-  margin-bottom: var(--space-md);
+  margin-bottom: 16px;
 }
 
 .section-hint {
@@ -1486,13 +1490,15 @@ async function handleCreate() {
   bottom: 0;
   display: flex;
   align-items: center;
-  padding: 16px 0;
-  background: var(--bg-color-header);
-  border-top: 1px solid var(--border-color-light);
+  gap: 12px;
+  padding: 20px 0;
+  max-width: 1120px;
+  margin: 32px auto 0;
+  background: var(--bg-color);
+  border-top: 1px solid var(--border-color);
   backdrop-filter: blur(12px);
   z-index: 10;
-  margin-top: var(--space-xl);
-  transition: background-color var(--transition-normal);
+  transition: background-color 0.25s ease;
 }
 
 .footer-spacer {
@@ -1510,7 +1516,11 @@ async function handleCreate() {
 
 .wizard-top {
   flex-shrink: 0;
-  padding: var(--space-xl) var(--space-xl) 0;
+  padding: 32px 32px 0;
+  max-width: 1120px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .wizard-body {
@@ -1518,20 +1528,62 @@ async function handleCreate() {
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 0 var(--space-xl) 80px;
+  padding: 0 32px 80px;
 }
-.creation-combination { margin: -8px 0 16px; color: var(--text-color-secondary); font-size: 13px; line-height: 1.6; }
+.creation-combination { padding: 5px 12px; border: 1px solid var(--border-color); border-radius: 20px; color: var(--color-primary); background: var(--bg-color-hover); font-size: 13px; line-height: 1.6; }
 .creation-writing-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-bottom: 20px; }
 .wizard-layout > :deep(.inspiration-chat) { padding: 0 24px; box-sizing: border-box; }
 .wizard-header { flex-wrap: wrap; }
-@media (max-width: 640px) {
-  .wizard-top { padding: 16px 16px 0; }
-  .wizard-body { padding: 0 16px 24px; }
-  .steps-indicator { padding: 12px; gap: 16px; }
+@media (max-width: 1440px) {
+  .wizard-top, .wizard-footer { padding-left: 24px; padding-right: 24px; }
+  .wizard-body { padding: 0 24px 80px; }
+  .form-sections { max-width: 960px; }
+}
+@media (max-width: 768px) {
+  .wizard-top { padding: 20px 20px 0; }
+  .wizard-body { padding: 0 20px 24px; }
+  .wizard-footer { padding: 16px 0; margin-top: 24px; }
+  .steps-indicator { padding: 16px 20px; gap: 24px; }
+  .form-section { padding: 20px 24px; }
   .reference-import-header { flex-direction: column; align-items: stretch; }
   .reference-import-actions { flex-wrap: wrap; }
   .form-grid { grid-template-columns: minmax(0, 1fr); }
   .style-dimension { flex-direction: column; gap: 4px; }
   .word-count-row { flex-wrap: wrap; }
 }
+@media (max-width: 390px) {
+  .wizard-top { padding: 16px 16px 0; }
+  .wizard-body { padding: 0 16px 20px; }
+  .wizard-footer { padding: 12px 0; flex-wrap: wrap; }
+  .steps-indicator { padding: 12px 16px; gap: 16px; }
+  .form-section { padding: 16px 20px; }
+  .wizard-footer :deep(.n-button) { flex: 1 1 100%; }
+}
+.wizard-top { max-width: 1440px; width: 100%; padding: 28px 32px 0; margin: 0 auto; }
+.wizard-header { margin-bottom: 24px; flex-wrap: wrap; }
+.wizard-header .page-title { font-size: 36px; }
+.steps-indicator { gap: 32px; justify-content: flex-end; background: none; border: 0; padding: 0 0 24px; margin-bottom: 0; }
+.step-item { flex: 0 1 auto; }
+.step-line { display: none; }
+.wizard-body { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr); gap: 24px; align-items: start; max-width: 1440px; width: 100%; margin: 0 auto; padding: 0 32px 0; }
+.wizard-page { grid-column: 1; min-width: 0; max-width: none; width: 100%; margin: 0; }
+.form-sections { max-width: none; gap: 20px; }
+.form-section { padding: 28px; }
+.wizard-overview { grid-column: 2; grid-row: 1; display: grid; gap: 20px; min-width: 0; position: sticky; top: 0; }
+.wizard-current-settings { padding: 28px; }
+.wizard-current-settings h2 { font-size: 25px; margin-bottom: 8px; }
+.wizard-current-settings > p { font-size: 13px; color: var(--text-color-secondary); margin-bottom: 20px; }
+.wizard-current-settings dl { border: 1px solid var(--border-color-light); border-radius: var(--radius-md); padding: 8px 18px; }
+.wizard-current-settings dl div { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 12px; padding: 18px 0; border-bottom: 1px solid var(--border-color-light); font-size: 14px; }
+.wizard-current-settings dl div:last-child { border-bottom: 0; }
+.wizard-current-settings dt { color: var(--text-color-secondary); }
+.wizard-current-settings dd { margin: 0; overflow-wrap: anywhere; }
+.wizard-current-settings small { display: block; color: var(--text-color-tertiary); margin-top: 4px; }
+.reference-import-panel, .knowledge-mount-section { margin: 0; padding: 24px; }
+.reference-import-header { display: flex; flex-direction: column; align-items: stretch; gap: 18px; }
+.reference-import-actions { flex-direction: column-reverse; }
+.genre-btn { border-radius: var(--radius-md); min-height: 40px; }
+.wizard-footer { grid-column: 1 / -1; width: 100%; max-width: none; margin: 0; bottom: 0; z-index: 3; }
+@media (max-width: 1000px) { .wizard-body { grid-template-columns: minmax(0, 1fr); } .wizard-overview { grid-column: 1; grid-row: auto; position: static; } .steps-indicator { justify-content: flex-start; } }
+@media (max-width: 650px) { .wizard-top { padding: 20px 16px 0; } .wizard-body { padding: 0 16px; } .wizard-header .page-title { font-size: 28px; } .steps-indicator { gap: 16px; padding: 0 0 20px; flex-wrap: wrap; } .step-item { gap: 8px; } .form-section, .wizard-current-settings { padding: 20px; } }
 </style>

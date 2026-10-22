@@ -65,24 +65,28 @@ const setupOptions = [
 </script>
 
 <style scoped>
-.creation-mode-picker { flex: 1; min-height: 0; overflow-y: auto; width: 100%; max-width: 840px; box-sizing: border-box; margin: 0 auto; padding: 0 24px 24px; }
-.picker-intro { margin: 0 0 24px; color: var(--text-color-secondary); font-size: 14px; line-height: 1.7; }
-.choice-group { min-width: 0; margin: 0 0 24px; padding: 0; border: 0; }
-.choice-group legend { margin-bottom: 12px; font-size: 16px; font-weight: 600; color: var(--text-color-primary); }
-.choice-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.mode-option { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: start; gap: 10px; padding: 18px 16px; border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-color-card); cursor: pointer; }
+.creation-mode-picker { flex: 1; min-height: 0; overflow-y: auto; width: 100%; max-width: 1120px; box-sizing: border-box; margin: 0 auto; padding: 0 32px 32px; }
+.picker-intro { margin: 0 0 32px; color: var(--text-color-secondary); font-size: 15px; line-height: 1.75; }
+.choice-group { min-width: 0; margin: 0 0 32px; padding: 0; border: 0; }
+.choice-group legend { margin-bottom: 16px; font-size: 18px; font-weight: 600; font-family: var(--font-family-serif); color: var(--text-color-primary); }
+.choice-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.mode-option { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: start; gap: 12px; padding: 20px 18px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-color-card); cursor: pointer; transition: all 0.2s ease; }
+.mode-option:hover { border-color: var(--color-accent); box-shadow: 0 2px 8px rgba(43, 42, 40, 0.08); }
 .mode-option input { margin: 4px 0 0; accent-color: var(--color-primary); }
-.mode-option.selected { border-color: var(--color-primary); background: var(--color-primary-light); }
+.mode-option.selected { border-color: var(--color-primary); background: var(--bg-color-card); box-shadow: 0 0 0 3px var(--color-primary-light); }
 .mode-option:focus-within { outline: 2px solid var(--color-primary); outline-offset: 2px; }
-.mode-option strong { display: block; color: var(--text-color-primary); font-size: 15px; line-height: 1.5; }
-.mode-option small { display: block; margin-top: 6px; color: var(--text-color-secondary); font-size: 12px; line-height: 1.7; }
-.choice-actions { position: sticky; bottom: -24px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 0; background: var(--bg-color); border-top: 1px solid var(--border-color-light); }
-.choice-summary { margin: 0; color: var(--text-color-secondary); font-size: 13px; line-height: 1.6; }
-@media (max-width: 600px) {
+.mode-option strong { display: block; color: var(--text-color-primary); font-size: 16px; font-weight: 600; line-height: 1.5; }
+.mode-option small { display: block; margin-top: 6px; color: var(--text-color-secondary); font-size: 13px; line-height: 1.7; }
+.choice-actions { position: sticky; bottom: -32px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 0; background: var(--bg-color); border-top: 1px solid var(--border-color); }
+.choice-summary { margin: 0; color: var(--text-color-secondary); font-size: 14px; line-height: 1.6; }
+@media (max-width: 768px) {
+  .creation-mode-picker { padding: 0 20px 20px; }
+  .choice-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .mode-option { padding: 16px; }
+  .choice-actions { bottom: -20px; padding: 16px 0; }
+}
+@media (max-width: 390px) {
   .creation-mode-picker { padding: 0 16px 16px; }
-  .choice-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
-  .mode-option { padding: 14px; }
-  .choice-actions { bottom: -16px; }
   .choice-actions :deep(.n-button) { width: 100%; }
 }
 </style>

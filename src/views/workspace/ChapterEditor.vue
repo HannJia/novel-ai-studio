@@ -1,10 +1,20 @@
 <template>
   <div
     class="editor-view"
-    :class="{ 'editor-view--advisor-open': writingMode === 'manual' }"
+    :class="{ 'editor-view--assistant-open': !assistantCollapsed }"
     id="chapter-editor-view"
     v-if="chapter"
   >
+    <div class="editor-writing-column">
+    <div class="editor-formatbar" role="toolbar" aria-label="写作工具">
+        <button class="bottom-btn" @click="undo" title="撤销" aria-label="撤销"><n-icon :size="16"><arrow-undo-outline /></n-icon></button>
+        <button class="bottom-btn" @click="redo" title="重做" aria-label="重做"><n-icon :size="16"><arrow-redo-outline /></n-icon></button>
+        <div class="bottom-sep"></div>
+        <button class="bottom-btn" @click="changeFontSize(-1)" title="缩小字体">A-</button>
+        <span class="font-size-label">{{ fontSize }}px</span>
+        <button class="bottom-btn" @click="changeFontSize(1)" title="放大字体">A+</button>
+        <div class="bottom-sep"></div>
+    </div>
     <!-- 顶部导航 -->
     <div class="editor-topbar">
       <div class="topbar-left">
@@ -13,14 +23,6 @@
         <span class="breadcrumb-current">第 {{ chapter.chapterIndex + 1 }} 章</span>
       </div>
       <div class="topbar-center">
-        <n-input
-          :value="chapter.title"
-          @update:value="updateChapterTitle"
-          class="chapter-title-input"
-          :readonly="isChapterLocked || aiWriting || completing"
-          placeholder="章节标题"
-          @blur="saveTitle"
-        />
         <span
           class="story-days-control"
           title="默认由章节分析 AI 自动识别正文中的明确时间；输入框仅用于 AI 未识别或需要手动纠正时"
@@ -39,6 +41,7 @@
         </span>
       </div>
       <div class="topbar-right">
+        <button type="button" class="assistant-toggle" :aria-expanded="!assistantCollapsed" aria-controls="editor-assistant-pane" @click="toggleAssistant">AI 辅助</button>
         <button
           class="writing-mode-badge"
           :class="{ 'writing-mode-badge--ai': writingMode === 'ai' }"
@@ -48,7 +51,7 @@
         >
           {{ writingMode === 'manual' ? '辅助写作' : 'AI 自动写作' }}
         </button>
-        <span class="word-count">{{ currentContentWordCount.toLocaleString() }} 字</span>
+        <span class="word-count" title="去空白后计数，包含标点，沿用既有统计口径">{{ currentContentWordCount.toLocaleString() }} 字</span>
         <span class="save-status" :class="{ saved: !unsaved && !savingContent }">
           {{ savingContent ? '保存中…' : (unsaved ? '未保存' : '已保存') }}
         </span>
@@ -65,6 +68,21 @@
       </div>
     </div>
 
+    <div class="length-controls" role="group" aria-label="章节篇幅控制">
+      <span class="length-status" role="status" aria-live="polite">{{ chapterLengthStatusText }}</span>
+      <n-button size="tiny" :disabled="aiWriting || completing || isChapterLocked" @click="openLengthSettings">篇幅设置</n-button>
+      <n-button v-if="writingMode === 'ai' && content.trim() && chapterLengthInspection.status !== 'within'" size="tiny" :disabled="aiWriting || completing || isChapterLocked || !!pendingRevision" @click="calibrateChapterLength()">{{ chapterLengthInspection.status === 'long' ? '生成压缩候选' : '生成扩写候选' }}</n-button>
+    </div>
+    <n-modal v-model:show="showLengthSettings" preset="card" title="本书单章篇幅" style="width: min(460px, calc(100vw - 32px));">
+      <p>沿用去空白、含标点的计数方式。修改后用于本书后续生成和完成检查，已有正文和字数保持不变。</p>
+      <div class="length-settings">
+        <label>最低字数<n-input-number v-model:value="lengthForm.minWords" :min="100" :max="20000" :precision="0" /></label>
+        <label>目标字数<n-input-number v-model:value="lengthForm.targetWords" :min="100" :max="20000" :precision="0" /></label>
+        <label>最高字数<n-input-number v-model:value="lengthForm.maxWords" :min="100" :max="20000" :precision="0" /></label>
+        <n-button type="primary" :disabled="aiWriting || completing || isChapterLocked" @click="saveLengthSettings">保存篇幅设置</n-button>
+      </div>
+    </n-modal>
+
     <n-modal v-model:show="showChapterVersionModal" preset="card" title="正文历史版本" style="width: min(620px, calc(100vw - 32px));">
       <div class="chapter-version-dialog">
         <p>选择要恢复的正文快照。恢复前的当前正文会自动保留为新版本。</p>
@@ -77,6 +95,15 @@
     <div class="editor-body">
       <!-- 纸张式编辑区 -->
       <div class="paper-editor">
+        <div class="paper-sheet"><header class="paper-heading"><p>第 {{ chapter.chapterIndex + 1 }} 章</p>        <n-input
+          :value="chapter.title"
+          @update:value="updateChapterTitle"
+          class="chapter-title-input"
+          :readonly="isChapterLocked || aiWriting || completing"
+          placeholder="章节标题"
+          @blur="saveTitle"
+        />
+</header><div class="paper-content">
         <!-- 违禁词高亮层 -->
         <div
           v-if="highlightEnabled"
@@ -117,6 +144,7 @@
           @scroll="syncScroll"
           spellcheck="false"
         ></textarea>
+        </div></div>
       </div>
 
       <!-- 右侧工具栏 -->
@@ -182,19 +210,83 @@
           <div v-if="liveScanResults.length === 0" class="panel-empty">无违禁词</div>
         </div>
       </div>
+
     </div>
 
-    <ChapterAiStatus
-      :writing="aiWriting"
-      :writing-text="aiStatusText"
-      :completing="completing"
-      :completing-text="completingHint"
-      :can-stop-completing="true"
-      :background-text="backgroundTaskStatus"
-      :background-pending="backgroundTaskPendingCount"
-      @stop="stopAI"
+    </div>
+      <aside v-show="!assistantCollapsed" id="editor-assistant-pane" class="assistant-pane" aria-label="AI 辅助面板" @keydown.esc.stop="collapseAssistant">
+        <header class="assistant-heading"><h2>✧ AI 助手</h2><button type="button" class="assistant-close" aria-label="收起辅助面板" @click="collapseAssistant">⌃</button></header>
+        <div class="assistant-tabs" role="group" aria-label="辅助内容">
+          <button v-if="writingMode === 'manual'" type="button" class="assistant-tab" :aria-pressed="activeAssistantTab === 'advisor'" @click="setAssistantTab('advisor')">顾问</button>
+          <button type="button" class="assistant-tab" :aria-pressed="activeAssistantTab === 'review'" @click="setAssistantTab('review')">审查</button>
+          <button type="button" class="assistant-tab" :aria-pressed="activeAssistantTab === 'chat'" @click="setAssistantTab('chat')">对话</button>
+          <button type="button" class="assistant-tab" :aria-pressed="activeAssistantTab === 'data'" @click="setAssistantTab('data')">数据</button>
+        </div>
+        <div class="assistant-content">
+          <div v-show="activeAssistantTab === 'chat'" ref="assistantChatElement" class="editor-chat-panel"></div>
+          <div v-show="activeAssistantTab === 'advisor'" class="assistant-panel-wrapper">
+    <WritingAdvisorSidebar
+      v-if="writingMode === 'manual'"
+      :open="writingAdvisorOpen"
+      :persistent="writingMode === 'manual'"
+      :analyzing="writingAdvisorAnalyzing"
+      :error="writingAdvisorError"
+      :stale="writingAdvisorStale"
+      :result="writingAdvisorResult"
+      :last-mode="writingAdvisorLastMode"
+      :analyzing-modes="writingAdvisorAnalyzingModes"
+      @open="writingAdvisorOpen = true"
+      @close="closeWritingAdvisor"
+      @stop="stopWritingAdvisor"
+      @clear="clearWritingAdvisor"
+      @analyze="analyzeWritingAdvice"
+      @analyze-all="analyzeAllWritingAdvice"
+      @select-mode="selectWritingAdvisorMode"
+      @copy="copyWritingSuggestion"
+      @promote-plan="promoteWritingSuggestionToPlan"
+      @save-note="saveWritingSuggestionAsNote"
     />
-
+          </div>
+          <div v-show="activeAssistantTab === 'review'" class="assistant-panel-wrapper">
+    <ChapterReviewSidebar
+      :open="reviewPanelOpen"
+      :has-content="hasReviewContent"
+      :summary="chapter.summary"
+      :loading="reviewLoading"
+      :ending-check="endingCheckResult"
+      :pending-revision="pendingRevision"
+      :revision-loading="revisionLoading"
+      :content-review="contentReviewResult"
+      :rendered-content-review="renderBanned(contentReviewResult)"
+      :editable-review="editableReviewText"
+      :ai-writing="aiWriting"
+      :completing="completing"
+      :allow-rewrite="writingMode === 'ai'"
+      :local-scan-results="localScanResults"
+      :continuity-alerts="continuityAlerts"
+      :banned-result="bannedResult"
+      :rendered-banned-result="renderBanned(bannedResult)"
+      :expanded="expandedSections"
+      :review-status="currentReviewStatus"
+      :coverage-status="reviewCoverageStatus"
+      :action-label="chapterActionLabel"
+      :action-disabled="chapterActionDisabled"
+      :action-loading="completing"
+      @proceed="handleChapterPrimaryAction"
+      @toggle="reviewPanelOpen = !reviewPanelOpen"
+      @close="collapseAssistant"
+      @clear="closeReview"
+      @approve-revision="approvePendingRevision"
+      @reject-revision="rejectPendingRevision"
+      @rewrite="handleReviewRepair"
+      @replace-word="replaceWord"
+      @replace-all="replaceAllSuggested"
+      @toggle-section="toggleSection"
+      @update-editable-review="value => editableReviewText = value"
+    />
+            <p v-if="!hasReviewContent && !chapter.summary && !reviewLoading" class="assistant-empty">审查结果会显示在这里。可使用工具栏的内容审查检查本章。</p>
+          </div>
+          <div v-show="activeAssistantTab === 'data'" class="assistant-panel-wrapper">
     <ChapterDataPanelSidebar
       :open="dataPanelOpen"
       :items="dataPanels"
@@ -216,7 +308,7 @@
       :history-chapter-options="dataHistoryChapterOptions"
       :history-item-options="dataHistoryItemOptions"
       :history-status-options="dataHistoryStatusOptions"
-      @close="dataPanelOpen = false"
+      @close="collapseAssistant"
       @create="openDataItemModal()"
       @recommend="autoSelectRelatedData"
       @queue-rules="queueAutomaticDataChanges"
@@ -238,6 +330,22 @@
       @update-history-keep-count="value => dataHistoryKeepCount = value"
       @update-history-keep-chapters="value => dataHistoryKeepChapters = value"
     />
+          </div>
+        </div>
+      </aside>
+
+    <ChapterAiStatus
+      :writing="aiWriting"
+      :writing-text="aiStatusText"
+      :completing="completing"
+      :completing-text="completingHint"
+      :can-stop-completing="true"
+      :background-text="backgroundTaskStatus"
+      :background-pending="backgroundTaskPendingCount"
+      @stop="stopAI"
+    />
+
+
 
     <!-- 数据对象编辑弹窗 -->
     <n-modal v-model:show="showDataItemModal" preset="card" :title="editingDataItemId ? '编辑数据' : '新增数据'" style="width: 620px;">
@@ -268,74 +376,13 @@
       </template>
     </n-modal>
 
-    <ChapterReviewSidebar
-      :open="reviewPanelOpen"
-      :has-content="hasReviewContent"
-      :summary="chapter.summary"
-      :loading="reviewLoading"
-      :ending-check="endingCheckResult"
-      :pending-revision="pendingRevision"
-      :revision-loading="revisionLoading"
-      :content-review="contentReviewResult"
-      :rendered-content-review="renderBanned(contentReviewResult)"
-      :editable-review="editableReviewText"
-      :ai-writing="aiWriting"
-      :completing="completing"
-      :allow-rewrite="writingMode === 'ai'"
-      :local-scan-results="localScanResults"
-      :continuity-alerts="continuityAlerts"
-      :banned-result="bannedResult"
-      :rendered-banned-result="renderBanned(bannedResult)"
-      :expanded="expandedSections"
-      :review-status="currentReviewStatus"
-      :action-label="chapterActionLabel"
-      :action-disabled="chapterActionDisabled"
-      :action-loading="completing"
-      @proceed="handleChapterPrimaryAction"
-      @toggle="reviewPanelOpen = !reviewPanelOpen"
-      @close="reviewPanelOpen = false"
-      @clear="closeReview"
-      @approve-revision="approvePendingRevision"
-      @reject-revision="rejectPendingRevision"
-      @rewrite="handleReviewRepair"
-      @replace-word="replaceWord"
-      @replace-all="replaceAllSuggested"
-      @toggle-section="toggleSection"
-      @update-editable-review="value => editableReviewText = value"
-    />
 
-    <WritingAdvisorSidebar
-      v-if="writingMode === 'manual'"
-      :open="writingAdvisorOpen"
-      :persistent="writingMode === 'manual'"
-      :analyzing="writingAdvisorAnalyzing"
-      :error="writingAdvisorError"
-      :stale="writingAdvisorStale"
-      :result="writingAdvisorResult"
-      :last-mode="writingAdvisorLastMode"
-      :analyzing-modes="writingAdvisorAnalyzingModes"
-      @open="writingAdvisorOpen = true"
-      @close="closeWritingAdvisor"
-      @stop="stopWritingAdvisor"
-      @clear="clearWritingAdvisor"
-      @analyze="analyzeWritingAdvice"
-      @analyze-all="analyzeAllWritingAdvice"
-      @select-mode="selectWritingAdvisorMode"
-      @copy="copyWritingSuggestion"
-      @promote-plan="promoteWritingSuggestionToPlan"
-      @save-note="saveWritingSuggestionAsNote"
-    />
+
+
 
     <!-- 底部工具栏 -->
     <div class="editor-bottombar">
       <div class="bottom-tools">
-        <button class="bottom-btn" @click="undo" title="撤销" aria-label="撤销"><n-icon :size="16"><arrow-undo-outline /></n-icon></button>
-        <button class="bottom-btn" @click="redo" title="重做" aria-label="重做"><n-icon :size="16"><arrow-redo-outline /></n-icon></button>
-        <div class="bottom-sep"></div>
-        <button class="bottom-btn" @click="changeFontSize(-1)" title="缩小字体">A-</button>
-        <span class="font-size-label">{{ fontSize }}px</span>
-        <button class="bottom-btn" @click="changeFontSize(1)" title="放大字体">A+</button>
-        <div class="bottom-sep"></div>
         <span class="chapter-info">第 {{ chapter.chapterIndex + 1 }} 章 · {{ currentContentWordCount.toLocaleString() }} 字</span>
         <div class="bottom-sep"></div>
         <span class="chapter-info" v-if="novel">
@@ -369,15 +416,16 @@
 
 <script setup lang="ts">
 import { registerDraftSaver } from '@/services/appLifecycle'
-import { ref, computed, onActivated, onDeactivated, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, computed, inject, onActivated, onDeactivated, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { editorAssistantHostKey } from '@/services/editorAssistantHost'
 import { NButton, NIcon, NInput, NInputNumber, NModal, NSelect, useDialog, useMessage } from 'naive-ui'
 import { SparklesOutline, WarningOutline, ShieldCheckmarkOutline, ColorWandOutline, ListOutline, StatsChartOutline, ArrowUndoOutline, ArrowRedoOutline } from '@vicons/ionicons5'
 import { useNovelStore } from '@/stores/novel'
 import { useConfigStore } from '@/stores/config'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { callAI } from '@/services/ai'
-import { buildChapterPrompt, buildBannedWordsCheckPrompt, buildContentReviewPrompt, buildChapterSelfCheckPrompt } from '@/services/prompts'
+import { buildChapterPrompt, buildBannedWordsCheckPrompt, buildChapterSelfCheckPrompt } from '@/services/prompts'
 import { augmentWritingContextWithVectorMemory, buildWritingContext, buildReviewContext, buildChapterFactCard } from '@/services/context'
 import { chapterBackgroundQueue } from '@/services/aiTaskQueue'
 import { syncSemanticIndexForNovel } from '@/services/semanticIndex'
@@ -393,6 +441,11 @@ import ChapterAiStatus from '@/components/chapter-editor/ChapterAiStatus.vue'
 import WritingAdvisorSidebar from '@/components/chapter-editor/WritingAdvisorSidebar.vue'
 import { useChapterAiGeneration } from '@/composables/useChapterAiGeneration'
 import { chapterOutputTokenBudget } from '@/services/chapterGeneration'
+import { inspectChapterLength, resolveChapterLengthPolicy } from '@/services/chapterLength'
+import { requestChapterLengthRepair } from '@/services/chapterLengthRepair'
+import { requestCoveredContentReview } from '@/services/chapterReview'
+import { isReviewCoverageComplete } from '@/services/chapterReviewAcceptance'
+import { reviewCoverageLabel, type StoredReviewCoverage } from '@/services/chapterReviewCoverage'
 import { useChapterEndingCheck, type ChapterEndingCheck } from '@/composables/useChapterEndingCheck'
 import { useDataPanelSelection } from '@/composables/useDataPanelSelection'
 import { useChapterAnalysis } from '@/composables/useChapterAnalysis'
@@ -444,6 +497,7 @@ const lastMemorySignature = ref('')
 const navigatingChapter = ref(false)
 const readyForNextChapter = computed(() => !!chapter.value
   && ['finalized', 'locked'].includes(chapter.value.status)
+  && (chapter.value.status === 'locked' || chapterLengthInspection.value.status === 'within')
   && chapter.value.content === content.value)
 const followingChapter = computed(() => chapter.value
   ? novel.value?.chapters.find(item => item.chapterIndex === chapter.value!.chapterIndex + 1) : undefined)
@@ -459,14 +513,23 @@ const contentReviewResult = ref('')
 const editableReviewText = ref('')
 const lastContentReviewSignature = ref('')
 const lastEndingCheckSignature = ref('')
+const reviewCoverage = ref<StoredReviewCoverage>()
+const reviewCoverageStatus = computed(() => {
+  const coverage = reviewCoverage.value
+  if (!coverage) return ''
+  const stale = coverage.signature !== getChapterContextSignature()
+  const prefix = coverage.signature.startsWith('batch-review') ? '批量审查记录，完成本章时会重新核查：' : stale ? '上次检查（正文或设定已变化）：' : ''
+  return `${prefix}${reviewCoverageLabel(coverage)}${coverage.error ? `。${coverage.error}` : ''}`
+})
 const currentReviewStatus = computed(() => {
   if (reviewLoading.value) return '内容审查中'
   if (!contentReviewResult.value) return ''
   const signature = lastContentReviewSignature.value || chapter.value?.contentReviewSignature || ''
-  if (!signature.startsWith('review-v2:')) return '原审查记录待重新验证'
+  if (!signature.startsWith('review-v3:')) return '原审查记录待重新验证'
   if (signature !== getChapterContextSignature()) {
     return '正文或设定已修改，原审查结果待更新'
   }
+  if (!isReviewCoverageComplete(reviewCoverage.value, signature, content.value)) return '审查覆盖未完成，不能判定全文通过'
   return ({ passed: '当前正文审查已通过', 'changes-required': '当前正文需要修改', unknown: '审查结果待确认' })[
     contentReviewVerdict(contentReviewResult.value)]
 })
@@ -525,27 +588,92 @@ const dataTemplateOptions = [
   { label: '角色面板', value: 'character' },
 ]
 const reviewPanelOpen = ref(false)
+const assistantCollapsed = ref(false)
+const chatTabOpen = ref(false)
+const assistantChatElement = ref<HTMLElement | null>(null)
+const registerAssistantChatHost = inject(editorAssistantHostKey, undefined)
+watch(assistantChatElement, (host, previous) => {
+  if (previous) registerAssistantChatHost?.(previous, false)
+  if (host) registerAssistantChatHost?.(host, true)
+}, { flush: 'post' })
+onActivated(() => { if (assistantChatElement.value) registerAssistantChatHost?.(assistantChatElement.value, true) })
+onDeactivated(() => { if (assistantChatElement.value) registerAssistantChatHost?.(assistantChatElement.value, false) })
+onUnmounted(() => { if (assistantChatElement.value) registerAssistantChatHost?.(assistantChatElement.value, false) })
+
 watch(dataPanelOpen, open => {
-  if (open) reviewPanelOpen.value = false
+  if (open) {
+    chatTabOpen.value = false
+    reviewPanelOpen.value = false
+    assistantCollapsed.value = false
+  }
 }, { flush: 'sync' })
+
 watch(reviewPanelOpen, open => {
-  if (open) dataPanelOpen.value = false
+  if (open) {
+    chatTabOpen.value = false
+    dataPanelOpen.value = false
+    assistantCollapsed.value = false
+  }
 }, { flush: 'sync' })
+
+const activeAssistantTab = computed(() => {
+  if (chatTabOpen.value) return 'chat'
+  if (dataPanelOpen.value) return 'data'
+  if (reviewPanelOpen.value) return 'review'
+  if (writingMode.value === 'manual') return 'advisor'
+  return 'review'
+})
+
+function collapseAssistant() {
+  assistantCollapsed.value = true
+  document.querySelector<HTMLButtonElement>('.assistant-toggle')?.focus()
+}
+
+function toggleAssistant() {
+  if (!assistantCollapsed.value) collapseAssistant()
+  else setAssistantTab(activeAssistantTab.value)
+}
+
+function setAssistantTab(tab: 'advisor' | 'review' | 'data' | 'chat') {
+  chatTabOpen.value = tab === 'chat'
+  if (tab === 'chat') {
+    reviewPanelOpen.value = false
+    dataPanelOpen.value = false
+    assistantCollapsed.value = false
+  }
+  if (tab === 'advisor') {
+    reviewPanelOpen.value = false
+    dataPanelOpen.value = false
+    assistantCollapsed.value = false
+  } else if (tab === 'review') {
+    reviewPanelOpen.value = true
+    dataPanelOpen.value = false
+    assistantCollapsed.value = false
+  } else if (tab === 'data') {
+    dataPanelOpen.value = true
+    reviewPanelOpen.value = false
+    assistantCollapsed.value = false
+  }
+}
+
+if (typeof window !== 'undefined') {
+  assistantCollapsed.value = window.innerWidth <= 1000
+}
 const showChapterVersionModal = ref(false)
 const selectedChapterVersionId = ref('')
 const expandedSections = ref({
-  summary: true,
+  summary: false,
   contentReview: true,
   localScan: true,
   aiReview: true,
   continuity: true,
 })
-const fontSize = ref(17)
+const fontSize = ref(18)
 let autoSaveTimer: ReturnType<typeof setInterval> | null = null
 
 // 是否有审查内容
 const hasReviewContent = computed(() =>
-  !!(bannedResult.value || contentReviewResult.value || localScanResults.value.length > 0 || continuityAlerts.value.length > 0 || pendingRevision.value || endingCheckResult.value)
+  !!(bannedResult.value || contentReviewResult.value || reviewCoverage.value || localScanResults.value.length > 0 || continuityAlerts.value.length > 0 || pendingRevision.value || endingCheckResult.value)
 )
 const chapterVersionOptions = computed(() => (chapter.value?.versions || []).slice().reverse().map(version => ({
   label: `${version.label} · ${new Date(version.savedAt).toLocaleString('zh-CN')}`,
@@ -605,18 +733,46 @@ const filteredDataHistory = computed(() => (novel.value?.dataPanelChanges || [])
   .filter(change => dataHistoryItem.value === 'all' || change.itemId === dataHistoryItem.value)
   .filter(change => dataHistoryStatus.value === 'all' || change.status === dataHistoryStatus.value)
 )
-const MIN_CHAPTER_WORDS = 2000
-const SOFT_CHAPTER_WORDS = 2000
-const HARD_CHAPTER_WORDS = 2400
+const chapterLengthPolicy = computed(() => resolveChapterLengthPolicy(novel.value?.chapterLengthPolicy))
+const chapterLengthInspection = computed(() => inspectChapterLength(content.value, chapterLengthPolicy.value))
+const chapterLengthStatusText = computed(() => {
+  const policy = chapterLengthPolicy.value
+  const result = chapterLengthInspection.value
+  const state = result.status === 'short' ? `还差 ${result.deficit} 字` : result.status === 'long' ? `超出 ${result.excess} 字` : '篇幅达标'
+  return `${state} · 目标 ${policy.targetWords} 字，允许 ${policy.minWords}–${policy.maxWords} 字 · 含标点，不含空白`
+})
+const showLengthSettings = ref(false)
+const lengthForm = ref<{ minWords: number | null; targetWords: number | null; maxWords: number | null }>({ ...chapterLengthPolicy.value })
+function openLengthSettings() {
+  lengthForm.value = { ...chapterLengthPolicy.value }
+  showLengthSettings.value = true
+}
+async function saveLengthSettings() {
+  if (!novel.value || aiWriting.value || completing.value || isChapterLocked.value) return
+  const { minWords, targetWords, maxWords } = lengthForm.value
+  if ([minWords, targetWords, maxWords].some(value => value === null || !Number.isInteger(value) || value < 100 || value > 20000)
+    || minWords! > targetWords! || targetWords! > maxWords!) {
+    message.warning('请填写 100–20000 的整数，并满足最低 ≤ 目标 ≤ 最高')
+    return
+  }
+  const previous = novel.value.chapterLengthPolicy
+  novelStore.setChapterLengthPolicy(novelId.value, { minWords: minWords!, targetWords: targetWords!, maxWords: maxWords! })
+  try {
+    await novelStore.saveNovelNow(novelId.value)
+    showLengthSettings.value = false
+    message.success('本书篇幅设置已保存')
+  } catch {
+    novel.value.chapterLengthPolicy = previous
+    message.error('篇幅设置保存失败，请重试')
+  }
+}
 const aiWorkflowPolicy = computed(() => getAiWorkflowPolicy(configStore.aiWorkflowMode))
 const { chapterEndingPasses, requestChapterEndingCheck, generateEndingContinuation } = useChapterEndingCheck()
 const { beginGeneration, stopGeneration, getGenerationSignal, generateWritingPlan, streamAppend } = useChapterAiGeneration({
   content,
   writing: aiWriting,
   statusText: aiStatusText,
-  minWords: MIN_CHAPTER_WORDS,
-  softWords: SOFT_CHAPTER_WORDS,
-  hardWords: HARD_CHAPTER_WORDS,
+  lengthPolicy: chapterLengthPolicy,
   onWarning: warning => message.warning(warning),
   onChunk: () => {
     unsaved.value = true
@@ -750,7 +906,7 @@ const reviewContextSignature = computed(() => {
   const book = novel.value
   const current = chapter.value
   const source = {
-    settings: book.settings, style: book.writingStyle, outline: book.outline,
+    settings: book.settings, style: book.writingStyle, outline: book.outline, lengthPolicy: chapterLengthPolicy.value,
     volume: book.volumes.find(item => item.volumeIndex === current.volumeIndex),
     plans: (book.chapterPlans || []).filter(item => item.targetChapterStart <= current.chapterIndex && item.targetChapterEnd >= current.chapterIndex)
       .map(item => [item.id, item.title, item.objective, item.summary, item.beats, item.relatedArcIds, item.relatedEventIds]),
@@ -768,7 +924,7 @@ const reviewContextSignature = computed(() => {
 })
 
 function getChapterContextSignature(text = content.value): string {
-  return `review-v2:${getContentSignature(text)}:${reviewContextSignature.value}`
+  return `review-v3:${getContentSignature(text)}:${reviewContextSignature.value}`
 }
 
 async function loadPendingRevision() {
@@ -783,13 +939,22 @@ async function loadPendingRevision() {
 
 async function approvePendingRevision() {
   if (!pendingRevision.value) return
+  if (aiWriting.value || completing.value || isChapterLocked.value || revisionLoading.value) return
   if (writingMode.value === 'manual' && pendingRevision.value.source !== 'user') {
     message.info('请切换为 AI 自动写作后再确认 AI 正文修订')
     return
   }
+  if (inspectChapterLength(pendingRevision.value.proposedContent, chapterLengthPolicy.value).status !== 'within') {
+    message.warning('候选稿不符合当前篇幅设置，请调整设置或拒绝后重新生成；原稿未改动')
+    return
+  }
   revisionLoading.value = true
+  const targetNovelId = novelId.value
+  const targetChapterId = chapterId.value
   try {
-    await novelStore.acceptChapterRevision(novelId.value, chapterId.value, pendingRevision.value.id)
+    const applied = await novelStore.acceptChapterRevision(targetNovelId, targetChapterId, pendingRevision.value.id)
+    if (!applied || applied.status !== 'accepted') throw new Error('候选修订未能写入，请重新检查')
+    if (novelId.value !== targetNovelId || chapterId.value !== targetChapterId) return
     if (chapter.value) {
       content.value = chapter.value.content
       unsaved.value = false
@@ -816,6 +981,66 @@ async function rejectPendingRevision() {
     message.info('已拒绝正文修订')
   } finally {
     revisionLoading.value = false
+  }
+}
+
+// Length adjustment creates a reviewed proposal; the author sees its final diff before applying.
+async function calibrateChapterLength(options: { keepCompleting?: boolean; activityParentId?: string } = {}) {
+  if (!novel.value || !chapter.value || isChapterLocked.value || pendingRevision.value || !content.value.trim()) return
+  if ((aiWriting.value || completing.value) && !options.keepCompleting) return
+  if (writingMode.value !== 'ai') return
+  if (chapterLengthInspection.value.status === 'within') return
+  const model = configStore.getModelForTask('writing')
+  if (!model) { message.warning('请先配置写作模型'); return }
+  if (!(await saveContent())) return
+  const sourceNovelId = novelId.value
+  const sourceChapterId = chapterId.value
+  const source = content.value
+  const signature = getChapterContextSignature()
+  const policy = { ...chapterLengthPolicy.value }
+  const activity = options.activityParentId ? null : startAiActivity('调整章节篇幅')
+  const parentId = options.activityParentId || activity?.id
+  let failure: unknown
+  beginGeneration()
+  const signal = options.keepCompleting ? completionController!.signal : getGenerationSignal()
+  const ensureCurrent = () => {
+    signal.throwIfAborted()
+    assertChapterSnapshot(sourceNovelId, sourceChapterId, source)
+    if (signature !== getChapterContextSignature()) throw new Error('正文、设定或篇幅设置已变化，未应用旧候选')
+  }
+  try {
+    aiStatusText.value = '正在生成篇幅调整候选，原稿保留...'
+    if (options.keepCompleting) completingHint.value = aiStatusText.value
+    const ctx = buildWritingContext(novel.value, chapter.value)
+    const candidate = await requestChapterLengthRepair({
+      model, source, policy, factCard: buildChapterFactCard(novel.value, chapter.value, ctx),
+      guidance: ctx.chapterGuidance, signal, activityParentId: parentId,
+    })
+    ensureCurrent()
+    const reviewModel = configStore.getModelForTask('review') || model
+    aiStatusText.value = '正在检查调整后的结尾和内容...'
+    if (options.keepCompleting) completingHint.value = aiStatusText.value
+    reviewLoading.value = true
+    reviewPanelOpen.value = true
+    const ending = await requestChapterEndingCheck(reviewModel, candidate, ctx.chapterGuidance, '', signal, parentId)
+    ensureCurrent()
+    const report = await requestContentReview(reviewModel, { candidateContent: candidate, signal, activityParentId: parentId })
+    ensureCurrent()
+    const merged = [buildLocalConsistencyReviewBlock(candidate), report].filter(Boolean).join('\n\n')
+    const passed = chapterEndingPasses(ending) && contentReviewVerdict(merged) === 'passed'
+    const revision = await novelStore.proposeChapterRevision(sourceNovelId, sourceChapterId, candidate, 'review',
+      `篇幅调整：${countNovelWords(source)} → ${countNovelWords(candidate)} 字。${passed ? '结尾与内容复检通过' : '复检仍有待处理问题'}。${passed ? '' : `${ending.reason}\n${merged}\n`}请检查最终差异，确认写入后再完成本章。`)
+    ensureCurrent()
+    if (!revision) throw new Error('未能保存篇幅候选，原稿未改动')
+    pendingRevision.value = revision
+    message.info('已生成篇幅调整候选，请检查最终差异并确认；原稿保留')
+  } catch (error: any) {
+    failure = error
+    if (error?.name !== 'AbortError') message.error('篇幅调整未完成：' + (error?.message || String(error)))
+  } finally {
+    reviewLoading.value = false
+    aiWriting.value = false
+    if (activity) finishAiActivity(activity, failure)
   }
 }
 
@@ -1142,6 +1367,7 @@ onMounted(() => {
     contentReviewResult.value = chapter.value.contentReview || ''
     editableReviewText.value = extractActionableReview(chapter.value.contentReview || '')
     lastContentReviewSignature.value = chapter.value.contentReviewSignature || ''
+    reviewCoverage.value = chapter.value.contentReviewCoverage
     reviewPanelOpen.value = hasReviewContent.value
     void loadPendingRevision()
     // 如果是新章节（内容为空），延迟 600ms 后自动续写
@@ -1422,7 +1648,16 @@ async function gateChapterEndingBeforeStatusChange(
     )
     assertChapterSnapshot(sourceNovelId, sourceChapterId, sourceContent)
     if (!continuation) break
+    if (contentSignature !== getChapterContextSignature()) throw new Error('设定已变化，未使用旧版本的收尾')
     proposedContent = `${proposedContent.replace(/\s+$/, '')}\n\n${continuation}`
+    if (inspectChapterLength(proposedContent, chapterLengthPolicy.value).status !== 'within') {
+      proposedContent = await requestChapterLengthRepair({
+        model: writingModel, source: proposedContent, policy: chapterLengthPolicy.value,
+        factCard, guidance: chapterGuidance, signal: completionController?.signal, activityParentId,
+      })
+      assertChapterSnapshot(sourceNovelId, sourceChapterId, sourceContent)
+      if (contentSignature !== getChapterContextSignature()) throw new Error('正文或设定已变化，未使用旧版本的收尾候选')
+    }
     proposalCheck = await requestChapterEndingCheck(reviewModel, proposedContent, chapterGuidance, '', completionController?.signal, activityParentId)
     assertChapterSnapshot(sourceNovelId, sourceChapterId, sourceContent)
   }
@@ -1483,8 +1718,8 @@ function aiContinue() {
     return
   }
   if (!chapter.value || !novel.value || isChapterLocked.value) return
-  if (currentContentWordCount.value >= MIN_CHAPTER_WORDS) {
-    message.info(`本章已达到 ${MIN_CHAPTER_WORDS} 字，请先点击“完成本章”进行收束和审查`)
+  if (currentContentWordCount.value >= chapterLengthPolicy.value.minWords) {
+    message.info(`本章已达到 ${chapterLengthPolicy.value.minWords} 字，请先点击“完成本章”进行收束和审查`)
     return
   }
   selectRelatedDataForGeneration()
@@ -1545,7 +1780,7 @@ async function runAiContinue() {
       }
 
       const existingWordCount = countNovelWords(content.value)
-      const remainingWords = Math.max(0, SOFT_CHAPTER_WORDS - existingWordCount)
+      const remainingWords = Math.max(0, chapterLengthPolicy.value.targetWords - existingWordCount)
       const dynamicMaxTokens = chapterOutputTokenBudget(writingModel.maxTokens, remainingWords)
 
       await streamAppend(writingModel, messages, dynamicMaxTokens, {
@@ -1556,9 +1791,9 @@ async function runAiContinue() {
 
     async function ensureMinimumWords() {
       let noProgressAttempts = 0
-      while (countNovelWords(content.value) < MIN_CHAPTER_WORDS && aiWriting.value) {
+      while (countNovelWords(content.value) < chapterLengthPolicy.value.minWords && aiWriting.value) {
         const beforeWords = countNovelWords(content.value)
-        aiStatusText.value = `当前 ${countNovelWords(content.value)} 字，AI 正在自动补足到 ${MIN_CHAPTER_WORDS} 字以上...`
+        aiStatusText.value = `当前 ${countNovelWords(content.value)} 字，AI 正在自动补足到 ${chapterLengthPolicy.value.minWords} 字以上...`
         await generateOnce()
         saveContent()
         const afterWords = countNovelWords(content.value)
@@ -1576,8 +1811,8 @@ async function runAiContinue() {
     await ensureMinimumWords()
 
     const wc = countNovelWords(content.value)
-    if (wc < MIN_CHAPTER_WORDS) {
-      message.warning(`当前仅 ${wc} 字，低于 ${MIN_CHAPTER_WORDS} 字最低标准，请继续生成后再完成本章`)
+    if (wc < chapterLengthPolicy.value.minWords) {
+      message.warning(`当前仅 ${wc} 字，低于 ${chapterLengthPolicy.value.minWords} 字最低标准，请继续生成后再完成本章`)
       return
     }
 
@@ -1597,7 +1832,8 @@ async function runAiContinue() {
     endingCheckResult.value = draftEndingCheck
     lastEndingCheckSignature.value = getChapterContextSignature()
     if (chapterEndingPasses(draftEndingCheck)) {
-      message.success('AI 续写完成，章节结尾完整性检查已通过')
+      if (chapterLengthInspection.value.status === 'long') message.warning('结尾检查通过，但正文超过篇幅上限；已保留草稿，请生成压缩候选后再完成本章')
+      else message.success('AI 续写完成，章节结尾完整性检查已通过')
     } else {
       message.warning(`AI 续写已完成，但结尾复检仍未通过：${draftEndingCheck.openAction || draftEndingCheck.reason}`)
     }
@@ -1608,8 +1844,8 @@ async function runAiContinue() {
     } else {
       saveContent()
       const wc = countNovelWords(content.value)
-      if (wc < MIN_CHAPTER_WORDS) {
-        message.warning(`当前仅 ${wc} 字，低于 ${MIN_CHAPTER_WORDS} 字最低标准，请继续生成`)
+      if (wc < chapterLengthPolicy.value.minWords) {
+        message.warning(`当前仅 ${wc} 字，低于 ${chapterLengthPolicy.value.minWords} 字最低标准，请继续生成`)
       } else {
         message.info(`已停止生成，当前 ${wc} 字；未把目标字数当作章节结束依据`)
       }
@@ -1713,43 +1949,39 @@ function isValidContentReviewText(reviewText: string): boolean {
 
 async function requestContentReview(
   model: import('@/stores/config').ModelConfig,
-  options: { liveUpdate?: boolean; activityParentId?: string; candidateContent?: string; signal?: AbortSignal } = {},
+  options: { liveUpdate?: boolean; activityParentId?: string; candidateContent?: string; signal?: AbortSignal; onCoverage?: (coverage: StoredReviewCoverage) => void } = {},
 ): Promise<string> {
-  const reviewContext = buildReviewContext(novel.value!, chapter.value!, options.candidateContent ?? content.value)
-  const reviewMsgs = buildContentReviewPrompt(reviewContext, chapter.value!.chapterIndex)
+  const targetContent = options.candidateContent ?? content.value
   const reviewModel = configStore.getModelForTask('review') || model
   const sourceNovelId = novelId.value
   const sourceChapterId = chapterId.value
   const sourceContent = content.value
   const contextSignature = getChapterContextSignature()
-
-  for (let attempt = 0; attempt < 2; attempt++) {
-    let reviewText = ''
-    if (attempt > 0 && completing.value) completingHint.value = '2/4 审查结果不完整，正在重试...'
-    const result = await callAI({
-      model: reviewModel,
-      skillTask: 'review',
-      messages: reviewMsgs,
-      stream: true,
-      taskName: attempt ? '内容审查（重试）' : '内容审查',
-      signal: options.signal || completionController?.signal,
-      noAutomaticRetry: true,
-      activityParentId: options.activityParentId,
-      onChunk: (c) => {
-        reviewText += c
-        if (options.liveUpdate && chapterId.value === sourceChapterId) contentReviewResult.value = reviewText
-      },
-    })
-    options.signal?.throwIfAborted()
+  const targetSignature = getChapterContextSignature(targetContent)
+  const signal = options.signal || completionController?.signal || getGenerationSignal()
+  const ensureCurrent = () => {
+    signal.throwIfAborted()
     assertChapterSnapshot(sourceNovelId, sourceChapterId, sourceContent)
     if (contextSignature !== getChapterContextSignature()) throw new Error('设定已变化，已跳过旧版本的审查结果')
-    if (result.finishReason && result.finishReason !== 'stop') throw new Error('内容审查输出未正常完成，未将部分报告当作通过结果')
-
-    if (isValidContentReviewText(reviewText)) return reviewText.trim()
-    if (attempt === 0) message.warning('内容审查返回为空或格式不完整，正在自动重试...')
   }
-
-  throw new Error('AI 审查返回为空或格式不完整')
+  return requestCoveredContentReview({
+    source: targetContent, chapterIndex: chapter.value!.chapterIndex, model: reviewModel,
+    buildContext: text => buildReviewContext(novel.value!, chapter.value!, text),
+    ensureCurrent, signal, activityParentId: options.activityParentId,
+    onRetry: () => message.warning('内容审查返回为空或格式不完整，正在自动重试...'),
+    onChunk: report => {
+      if (options.liveUpdate && chapterId.value === sourceChapterId) contentReviewResult.value = report
+    },
+    onProgress: progress => {
+    const coverage = { ...progress, signature: targetSignature }
+    options.onCoverage?.(coverage)
+    if (options.candidateContent === undefined && novelId.value === sourceNovelId && chapterId.value === sourceChapterId) {
+      reviewCoverage.value = coverage
+      novelStore.updateChapter(sourceNovelId, sourceChapterId, { contentReviewCoverage: coverage })
+      if (completing.value) completingHint.value = '2/4 ' + reviewCoverageLabel(coverage)
+    }
+    },
+  })
 }
 
 function saveContentReviewResult(reviewText: string) {
@@ -1930,7 +2162,8 @@ function getReusableContentReview(currentSignature: string): string {
   if (!existingReview) return ''
 
   const existingSignature = lastContentReviewSignature.value || chapter.value?.contentReviewSignature || ''
-  if (existingSignature === currentSignature && isValidContentReviewText(existingReview)) return existingReview
+  if (existingSignature === currentSignature && isValidContentReviewText(existingReview)
+    && isReviewCoverageComplete(reviewCoverage.value, currentSignature, content.value)) return existingReview
 
   return ''
 }
@@ -1960,8 +2193,8 @@ async function completeChapter() {
   if (!(await saveContent())) return
 
   const currentWordCount = countNovelWords(content.value)
-  if (currentWordCount < MIN_CHAPTER_WORDS) {
-    message.warning(`当前仅 ${currentWordCount} 字，低于 ${MIN_CHAPTER_WORDS} 字最低标准，请继续生成后再完成本章`)
+  if (currentWordCount < chapterLengthPolicy.value.minWords) {
+    message.warning(`当前仅 ${currentWordCount} 字，低于 ${chapterLengthPolicy.value.minWords} 字最低标准，请继续生成后再完成本章`)
     return
   }
 
@@ -1982,6 +2215,11 @@ async function completeChapter() {
   let completionFailure: unknown
   let succeeded = false
   try {
+    if (chapterLengthInspection.value.status === 'long') {
+      if (writingMode.value === 'ai') await calibrateChapterLength({ keepCompleting: true, activityParentId: completionActivity.id })
+      else message.warning(`当前正文超出最高 ${chapterLengthPolicy.value.maxWords} 字，请压缩正文或调整本书篇幅设置后再完成`)
+      return
+    }
     if (!(await gateChapterEndingBeforeStatusChange(writingModel, reviewModel, completionActivity.id))) return
 
     completingHint.value = '2/4 审查章节内容...'
@@ -1989,7 +2227,7 @@ async function completeChapter() {
     let reviewText = getReusableContentReview(getChapterContextSignature())
     if (reviewText) {
       completingHint.value = '2/4 已复用当前正文的审查结果'
-    } else if (content.value.length > 200) {
+    } else {
       reviewText = await reviewContentConsistency(reviewModel, completionActivity.id)
     }
 
@@ -2017,11 +2255,11 @@ async function completeChapter() {
         reviewPanelOpen.value = true
         return
       }
-      if (revisedWordCount < MIN_CHAPTER_WORDS) {
-        const rangeText = revisedWordCount < MIN_CHAPTER_WORDS
-          ? `低于 ${MIN_CHAPTER_WORDS} 字最低标准`
-          : revisedWordCount > HARD_CHAPTER_WORDS
-            ? `超过 ${HARD_CHAPTER_WORDS} 字硬上限`
+      if (inspectChapterLength(content.value, chapterLengthPolicy.value).status !== 'within') {
+        const rangeText = revisedWordCount < chapterLengthPolicy.value.minWords
+          ? `低于 ${chapterLengthPolicy.value.minWords} 字最低标准`
+          : revisedWordCount > chapterLengthPolicy.value.maxWords
+            ? `超过 ${chapterLengthPolicy.value.maxWords} 字硬上限`
             : '重写失败'
         message.warning(`自动重写后为 ${revisedWordCount} 字，${rangeText}，本章暂不完成`)
         reviewPanelOpen.value = true
@@ -2055,6 +2293,8 @@ async function completeChapter() {
       throw new Error('章节已切换，请返回原章节继续完成')
     }
     const approvedContent = content.value
+    if (inspectChapterLength(approvedContent, chapterLengthPolicy.value).status !== 'within') throw new Error('最终正文篇幅未达标，请调整后重新完成')
+    if (!getReusableContentReview(getChapterContextSignature())) throw new Error('最终正文审查未完整覆盖，请重新审查')
     assertChapterSnapshot(targetNovelId, targetChapterId, approvedContent)
     const approvedSignature = getContentSignature(approvedContent)
     const manuallyEnteredDays = Math.max(0, Number(chapterStoryDays.value) || 0)
@@ -2094,6 +2334,7 @@ async function completeChapter() {
     const kbStore = useKnowledgeStore()
     await syncSemanticIndexForNovel(novel.value, kbStore.knowledgeBases, configStore.embedding)
     assertChapterSnapshot(targetNovelId, targetChapterId, approvedContent)
+    if (inspectChapterLength(approvedContent, chapterLengthPolicy.value).status !== 'within') throw new Error('篇幅设置已变化，最终正文未达标，请重新完成')
     novelStore.completeChapterPlans(targetNovelId, chapter.value.chapterIndex)
     novelStore.ensureNextChapterPlan(targetNovelId, chapter.value.chapterIndex)
     novelStore.updateChapter(targetNovelId, targetChapterId, { status: 'finalized' })
@@ -2194,7 +2435,7 @@ async function contentReview() {
   reviewLoading.value = true
   reviewPanelOpen.value = true
   aiStatusText.value = 'AI 正在审查内容...'
-  aiWriting.value = true
+  beginGeneration()
   message.info('正在进行全维度内容审查...')
 
   try {
@@ -2277,14 +2518,13 @@ async function rewriteFromReview(
     ensureSourceUnchanged()
     const candidate = await requestChapterRepair({
       model, source: originalContent, review: reviewRef,
+      lengthPolicy: chapterLengthPolicy.value,
       factCard: buildChapterFactCard(novel.value, chapter.value, ctx),
       guidance: ctx.chapterGuidance || '', mode, signal, activityParentId: rewriteParentId,
     })
     ensureSourceUnchanged()
-    const words = countNovelWords(candidate)
-    if (words < Math.min(MIN_CHAPTER_WORDS, countNovelWords(originalContent))
-      || words > Math.max(HARD_CHAPTER_WORDS, countNovelWords(originalContent) + 200)) {
-      throw new Error('候选修订的篇幅变化异常，原文未改动')
+    if (inspectChapterLength(candidate, chapterLengthPolicy.value).status !== 'within') {
+      throw new Error(`候选修订不在 ${chapterLengthPolicy.value.minWords}–${chapterLengthPolicy.value.maxWords} 字范围，原文未改动`)
     }
     const reviewModel = configStore.getModelForTask('review') || model
     aiStatusText.value = '正在检查候选修订，原文保留...'
@@ -2293,8 +2533,11 @@ async function rewriteFromReview(
     reviewPanelOpen.value = true
     const ending = await requestChapterEndingCheck(reviewModel, candidate, ctx.chapterGuidance, '', signal, rewriteParentId)
     ensureSourceUnchanged()
+    let candidateCoverage: StoredReviewCoverage | undefined
     const review = chapterEndingPasses(ending)
-      ? await requestContentReview(reviewModel, { candidateContent: candidate, signal, activityParentId: rewriteParentId }) : ''
+      ? await requestContentReview(reviewModel, { candidateContent: candidate, signal, activityParentId: rewriteParentId,
+        onCoverage: coverage => { candidateCoverage = coverage },
+      }) : ''
     ensureSourceUnchanged()
     const mergedReview = [buildLocalConsistencyReviewBlock(candidate), review].filter(Boolean).join('\n\n---\n\n')
     const passed = chapterEndingPasses(ending) && !reviewNeedsRewrite(mergedReview)
@@ -2315,6 +2558,8 @@ async function rewriteFromReview(
     pendingRevision.value = null
     content.value = candidate
     unsaved.value = false
+    reviewCoverage.value = candidateCoverage
+    novelStore.updateChapter(sourceNovelId, sourceChapterId, { contentReviewCoverage: candidateCoverage })
     endingCheckResult.value = ending
     lastEndingCheckSignature.value = getChapterContextSignature()
     saveContentReviewResult(review)
@@ -2412,6 +2657,29 @@ function redo() {
 </script>
 
 <style scoped>
+.length-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 6px 16px;
+  min-height: 36px;
+  border-bottom: 1px solid var(--border-color-light);
+  background: var(--bg-color-secondary);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.length-status {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-color-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.length-controls :deep(.n-button) { flex-shrink: 0; }
+.length-settings { display: grid; gap: 12px; }
+.length-settings label { display: grid; gap: 5px; }
 .editor-view {
   display: flex;
   flex-direction: column;
@@ -2528,10 +2796,12 @@ function redo() {
   display: flex;
   overflow: hidden;
   position: relative;
+  gap: 0;
 }
 
 .paper-editor {
   flex: 1;
+  min-width: 0;
   display: flex;
   justify-content: center;
   position: relative;
@@ -2541,7 +2811,7 @@ function redo() {
 
 .editor-textarea {
   width: 100%;
-  max-width: 760px;
+  max-width: 720px;
   min-height: 100%;
   padding: 48px 56px;
   background: var(--bg-color-paper);
@@ -2549,8 +2819,8 @@ function redo() {
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-paper);
   font-family: var(--font-family-serif);
-  font-size: 17px;
-  line-height: 2;
+  font-size: 18px;
+  line-height: 1.85;
   letter-spacing: 0.02em;
   color: var(--text-color-primary);
   resize: none;
@@ -2620,36 +2890,31 @@ function redo() {
   z-index: 10;
 }
 
-/* The persistent advisor is fixed on the right; reserve its width so the paper stays fully visible. */
-@media (min-width: 1100px) {
-  .editor-view--advisor-open .editor-body {
-    padding-right: min(440px, 94vw);
-  }
-
-  .editor-view--advisor-open .side-toolbar {
-    right: calc(min(440px, 94vw) + 16px) !important;
-  }
+.assistant-pane { width: 320px; flex: 0 0 320px; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-color-card); border-left: 1px solid var(--border-color); z-index: 20; }
+.assistant-tabs { display: flex; flex-shrink: 0; min-height: 42px; border-bottom: 1px solid var(--border-color); }
+.assistant-tab { flex: 1; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-color-secondary); cursor: pointer; }
+.assistant-tab[aria-pressed="true"] { color: var(--color-primary); border-bottom-color: var(--color-primary); font-weight: 600; }
+.assistant-toggle, .assistant-close { border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 4px 10px; background: var(--bg-color-card); color: var(--text-color-secondary); cursor: pointer; }
+.assistant-close { border: 0; font-size: 22px; }
+.assistant-content, .assistant-panel-wrapper { flex: 1; min-height: 0; overflow: auto; }
+.assistant-panel-wrapper { height: 100%; }
+.assistant-pane :deep(.advisor-header p) { line-height: 1.7; }
+.assistant-empty { padding: 24px; color: var(--text-color-tertiary); line-height: 1.8; }
+.assistant-pane :deep(.advisor-sidebar), .assistant-pane :deep(.review-sidebar) { position: static; width: 100%; height: 100%; max-width: 100%; border: 0; box-shadow: none; transform: none; }
+.assistant-pane :deep(.advisor-toggle-btn), .assistant-pane :deep(.review-toggle-btn), .assistant-pane :deep(.close-btn) { display: none; }
+.editor-view--assistant-open .side-toolbar { right: 336px; }
+.paper-sheet { display: flex; flex: 1; min-width: 0; max-width: 720px; position: relative; min-height: 100%; }
+@media (max-width: 1000px) {
+  .assistant-pane { position: absolute; inset: 0 0 0 auto; width: min(360px, 100%); box-shadow: var(--shadow-lg); }
+  .editor-view--assistant-open .side-toolbar { right: 16px; }
+}
+@media (max-width: 1100px) {
+  .editor-topbar { flex-wrap: wrap; gap: 8px; }
+  .topbar-right { flex-wrap: wrap; }
+  .topbar-left { display: none; }
+  .topbar-center { margin: 0; min-width: 120px; }
 }
 
-/* Keep the floating tools in the editor area when the fixed advisor is visible. */
-.editor-view--advisor-open .side-toolbar {
-  right: min(456px, calc(94vw + 16px));
-}
-
-/* Data/review sidebars use fixed positioning, so give their edge toggles the same clearance. */
-.editor-view--advisor-open :deep(.review-toggle-btn) {
-  right: min(430px, 92vw) !important;
-  z-index: 121;
-}
-
-/* Expanded data/review panels may cover the advisor; both have an explicit close action. */
-.editor-view--advisor-open :deep(.data-panel-sidebar),
-.editor-view--advisor-open :deep(.review-sidebar:not(.data-panel-sidebar)) {
-  right: 0 !important;
-  top: 104px !important;
-  height: calc(100vh - 104px) !important;
-  z-index: 120;
-}
 
 .tool-btn {
   width: 36px;
@@ -2922,10 +3187,11 @@ function redo() {
   left: 0;
   right: 0;
   bottom: 0;
-  padding: 32px 40px;
+  padding: 48px 56px;
+  border: 1px solid transparent;
   font-family: var(--font-family-serif);
-  font-size: 17px;
-  line-height: 2;
+  font-size: 18px;
+  line-height: 1.85;
   letter-spacing: 0.02em;
   color: transparent;
   white-space: pre-wrap;
@@ -3347,16 +3613,24 @@ function redo() {
 }
 
 @media (max-width: 700px) {
-  .editor-view--advisor-open .side-toolbar { display: none; }
-  .editor-view--advisor-open :deep(.review-toggle-btn) { display: none; }
-  .editor-view--advisor-open :deep(.data-panel-sidebar),
-  .editor-view--advisor-open :deep(.review-sidebar:not(.data-panel-sidebar)) {
-    top: 180px;
-    height: calc(100vh - 180px) !important;
-    right: 0 !important;
-    width: 100vw;
-    z-index: 120;
+  .editor-topbar {
+    flex-wrap: wrap;
+    min-height: auto;
   }
+
+  .topbar-center {
+    order: 3;
+    flex-basis: 100%;
+    max-width: none;
+    margin: 8px 0 0;
+  }
+  .paper-editor { padding: 16px 12px; }
+  .editor-textarea, .highlight-overlay { padding: 24px 20px; }
+  .side-toolbar { position: static; transform: none; flex-direction: row; justify-content: center; flex-wrap: wrap; border-radius: 0; box-shadow: none; flex-shrink: 0; }
+  .editor-body { flex-wrap: wrap; }
+  .paper-editor { flex-basis: 100%; min-height: 0; height: calc(100% - 48px); }
+  .side-toolbar { width: 100%; height: 48px; }
+  .editor-bottombar { padding: 6px 8px; gap: 4px; flex-wrap: wrap; }
 }
 
 /* 面板滑入/滑出动画 */
@@ -3419,5 +3693,50 @@ function redo() {
   display: flex;
   gap: 8px;
   margin-top: 8px;
+}
+/* Writing workspace: reading column and full-height assistant share the frame. */
+.editor-view { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; min-width: 0; min-height: 0; position: relative; background: var(--bg-color-paper); }
+.editor-view--assistant-open { grid-template-columns: minmax(0, 1fr) clamp(330px, 26vw, 420px); }
+.editor-writing-column { grid-column: 1; grid-row: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.editor-formatbar { display: flex; align-items: center; gap: 14px; min-height: 48px; padding: 8px 28px; background: var(--bg-color-card); border-bottom: 1px solid var(--border-color-light); flex-shrink: 0; }
+.editor-topbar { min-height: 76px; padding: 14px 28px; gap: 12px; background: var(--bg-color-paper); flex-wrap: wrap; }
+.topbar-left { display: flex; min-width: 0; font-size: 14px; }
+.breadcrumb { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-center { flex: 0 1 auto; max-width: none; margin: 0; }
+.story-days-control { justify-content: flex-start; margin: 0; }
+.topbar-right { margin-left: auto; gap: 10px; flex-wrap: wrap; }
+.length-controls { background: var(--bg-color-paper); padding-inline: 28px; border-bottom: 1px solid var(--border-color-light); }
+.editor-body { min-height: 0; }
+.paper-editor { padding: 32px clamp(24px, 4vw, 64px); background: var(--bg-color-paper); }
+.paper-sheet { width: 100%; max-width: 900px; min-height: 0; display: flex; flex-direction: column; }
+.paper-heading { text-align: center; padding: 0 0 28px; flex-shrink: 0; }
+.paper-heading > p { font-size: 12px; color: var(--text-color-tertiary); letter-spacing: .15em; margin: 0 0 8px; }
+.chapter-title-input { width: 100%; --n-border: none !important; --n-border-hover: none !important; --n-border-focus: none !important; --n-color: transparent !important; --n-color-focus: transparent !important; }
+.chapter-title-input :deep(input) { text-align: center; font: 600 32px var(--font-family-serif); line-height: 1.5; height: auto; }
+.paper-content { flex: 1; min-height: 0; position: relative; display: flex; }
+.editor-textarea, .highlight-overlay { padding: 4px 0 32px; border: 0; border-radius: 0; box-shadow: none; max-width: none; line-height: 2; }
+.editor-textarea { min-height: 100%; background: transparent; }
+.editor-bottombar { grid-column: 1; grid-row: 2; }
+.assistant-pane { grid-column: 2; grid-row: 1 / -1; width: auto; min-width: 0; height: 100%; background: var(--bg-color-card); }
+.assistant-heading { display: flex; align-items: center; justify-content: space-between; padding: 22px 22px 10px; flex-shrink: 0; }
+.assistant-heading h2 { font: 600 24px var(--font-family-serif); }
+.assistant-heading h2::first-letter { color: var(--color-accent); }
+.assistant-tabs { margin: 0 18px; }
+.assistant-tab { font-size: 14px; padding: 12px 4px; }
+.assistant-pane :deep(.review-sidebar-header) { min-height: 54px; border: 0; padding: 16px 20px 0; font: 600 21px var(--font-family-serif); }
+.assistant-pane :deep(.review-sidebar-body) { padding: 10px 20px 20px; }
+.assistant-pane :deep(.review-section-title) { background: transparent; padding: 12px; }
+.editor-chat-panel { height: 100%; min-height: 0; }
+.editor-view--assistant-open .side-toolbar { right: 12px; }
+@media (max-width: 1200px) { .editor-topbar { padding: 12px 20px; } .topbar-right { gap: 6px; } .topbar-left { flex-basis: 100%; } }
+@media (max-width: 1000px) {
+  .editor-view--assistant-open { grid-template-columns: minmax(0, 1fr); }
+  .assistant-pane { position: absolute; grid-area: auto; inset: 0 0 0 auto; width: min(420px, 100%); height: 100%; box-shadow: var(--shadow-lg); }
+}
+@media (max-width: 700px) {
+  .editor-topbar { padding: 10px 12px; } .topbar-center { order: 0; margin: 0; flex-basis: auto; }
+  .editor-formatbar { padding: 6px 12px; } .paper-editor { padding: 24px 20px; height: calc(100% - 48px); }
+  .chapter-title-input :deep(input) { font-size: 26px; } .paper-heading { padding-bottom: 18px; }
+  .editor-textarea, .highlight-overlay { padding: 4px 0 24px; }
 }
 </style>

@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, nextTick, reactive } from 'vue'
 import { flushPromises, shallowMount, type VueWrapper } from '@vue/test-utils'
 import ChapterEditor from './ChapterEditor.vue'
+import { NInputNumber } from 'naive-ui'
 import ChapterAiStatus from '@/components/chapter-editor/ChapterAiStatus.vue'
 import ChapterReviewSidebar from '@/components/chapter-editor/ChapterReviewSidebar.vue'
 import ChapterDataPanelSidebar from '@/components/chapter-editor/ChapterDataPanelSidebar.vue'
@@ -126,6 +127,26 @@ function calls(task: string) {
 }
 
 describe('chapter review and completion', () => {
+  it('switches and collapses the shared assistant without changing the manuscript or calling AI', async () => {
+    const { chapter } = await setup('manual', '作者尚未保存的原始正文。')
+    const tabs = wrapper!.findAll('.assistant-tab')
+    expect(tabs.map(item => item.text())).toEqual(['顾问', '审查', '对话', '数据'])
+    await tabs[2].trigger('click')
+    expect(wrapper!.get('.editor-chat-panel').isVisible()).toBe(true)
+    expect(wrapper!.findComponent(ChapterDataPanelSidebar).props('open')).toBe(false)
+    await tabs[3].trigger('click')
+    expect(wrapper!.findComponent(ChapterDataPanelSidebar).props('open')).toBe(true)
+    await wrapper!.get('.assistant-close').trigger('click')
+    expect(wrapper!.get('.assistant-toggle').attributes('aria-expanded')).toBe('false')
+    await wrapper!.get('.assistant-toggle').trigger('click')
+    expect(wrapper!.get('.assistant-toggle').attributes('aria-expanded')).toBe('true')
+    await tabs[0].trigger('click')
+    expect(wrapper!.findComponent(ChapterDataPanelSidebar).props('open')).toBe(false)
+    expect(wrapper!.get('textarea').element.value).toBe('作者尚未保存的原始正文。')
+    expect(chapter.content).toBe('作者尚未保存的原始正文。')
+    expect(callAI).not.toHaveBeenCalled()
+  })
+
   it('keeps data and review sidebars mutually exclusive', async () => {
     await setup()
     const dataPanel = wrapper!.findComponent(ChapterDataPanelSidebar)
@@ -561,5 +582,200 @@ describe('chapter review and completion', () => {
     expect(chapter.content).toBe(original)
     expect([...revisions.values()][0].status).toBe('pending')
     expect(chapter.status).not.toBe('finalized')
+  })
+
+  it('blocks an overlong manual draft before charging for reviews', async () => {
+    const { chapter } = await setup('manual', '甲'.repeat(2500))
+    await click('完成本章')
+    expect(chapter.status).toBe('writing')
+    expect(callAI).not.toHaveBeenCalled()
+    expect(messages.warning).toHaveBeenCalledWith(expect.stringContaining('最高 2400'))
+  })
+
+  it('creates a checked compression diff and rechecks the accepted final version', async () => {
+    const original = '甲'.repeat(2700)
+    const candidate = '乙'.repeat(2200)
+    const { chapter } = await setup('ai', original)
+    vi.mocked(callAI).mockImplementation(async options => options.taskName === '压缩章节长度候选稿'
+      ? { content: candidate, finishReason: 'stop' } : reply(options))
+    await click('完成本章')
+    expect(chapter.content).toBe(original)
+    expect(chapter.status).not.toBe('finalized')
+    expect(calls('压缩章节长度候选稿')).toHaveLength(1)
+    expect(calls('更新章节记忆')).toHaveLength(0)
+    const panel = wrapper!.findComponent(ChapterReviewSidebar)
+    expect(panel.props('pendingRevision')?.proposedContent).toBe(candidate)
+    expect(calls('内容审查')).toHaveLength(1)
+    panel.vm.$emit('approve-revision')
+    await flushPromises()
+    expect(chapter.content).toBe(candidate)
+    expect(chapter.status).not.toBe('finalized')
+    await click('完成本章')
+    expect(calls('内容审查')).toHaveLength(2)
+    expect(calls('章节结尾检查')).toHaveLength(2)
+    expect(chapter.status).toBe('finalized')
+    expect(chapter.versions?.some(version => version.snapshot.includes(original))).toBe(true)
+  })
+
+  it('preserves an overlong original when compression shrinks too far', async () => {
+    const original = '甲'.repeat(2700)
+    const { chapter } = await setup('ai', original)
+    vi.mocked(callAI).mockResolvedValue({ content: '乙'.repeat(1500), finishReason: 'stop' })
+    await click('完成本章')
+    expect(chapter.content).toBe(original)
+    expect(revisions.size).toBe(0)
+    expect(calls('压缩章节长度候选稿')).toHaveLength(1)
+    expect(messages.error).toHaveBeenCalledWith(expect.stringContaining('已停止调整并保留原稿'))
+  })
+
+  it('rejects a quality repair that moves the candidate beyond the chapter upper bound', async () => {
+    const original = '甲'.repeat(2350) + '。五月三日抵达。'
+    const { chapter } = await setup('ai', original)
+    vi.mocked(callAI).mockImplementation(async options => {
+      if (options.taskName === '局部修正候选稿') return { content: JSON.stringify({ edits: [{ original: '五月三日', replacement: '五月四日' + '细'.repeat(120) }] }) }
+      return reply(options, '总体判断：必须修改\n必改数量：1')
+    })
+    await click('完成本章')
+    expect(chapter.content).toBe(original)
+    expect(chapter.status).not.toBe('finalized')
+    expect(revisions.size).toBe(0)
+    expect(calls('更新章节记忆')).toHaveLength(0)
+  })
+
+  it('uses a changed book policy everywhere and invalidates the old review', async () => {
+    const { store, book, chapter } = await setup('manual')
+    await wrapper!.get('[title="内容审查（6维度）"]').trigger('click')
+    await flushPromises()
+    store.setChapterLengthPolicy(book.id, { minWords: 3000, targetWords: 3500, maxWords: 4000 })
+    await flushPromises()
+    expect(wrapper!.text()).toContain('目标 3500 字')
+    expect(wrapper!.findComponent(ChapterReviewSidebar).props('reviewStatus')).toContain('待更新')
+    await click('完成本章')
+    expect(chapter.status).not.toBe('finalized')
+    expect(messages.warning).toHaveBeenCalledWith(expect.stringContaining('3000'))
+  })
+
+  it('still requires full review for a valid custom short chapter', async () => {
+    const { store, book, chapter } = await setup('manual', '甲'.repeat(150))
+    store.setChapterLengthPolicy(book.id, { minWords: 100, targetWords: 150, maxWords: 200 })
+    await click('完成本章')
+    expect(calls('内容审查')).toHaveLength(1)
+    expect(chapter.contentReviewCoverage).toMatchObject({ status: 'complete', totalCharacters: 150, coveredCharacters: 150 })
+    expect(chapter.status).toBe('finalized')
+  })
+
+  it('saves a book length setting through the editor without changing manuscript counts', async () => {
+    const { book, chapter } = await setup('manual')
+    const original = chapter.content
+    const count = chapter.wordCount
+    await click('篇幅设置')
+    const fields = wrapper!.findAllComponents(NInputNumber).filter(field => field.props('min') === 100 && field.props('max') === 20000)
+    expect(fields).toHaveLength(3)
+    for (const [index, value] of [3000, 3500, 4000].entries()) fields[index].vm.$emit('update:value', value)
+    await flushPromises()
+    await click('保存篇幅设置')
+    expect(book.chapterLengthPolicy).toEqual({ minWords: 3000, targetWords: 3500, maxWords: 4000 })
+    expect(chapter.content).toBe(original)
+    expect(chapter.wordCount).toBe(count)
+    expect(wrapper!.text()).toContain('目标 3500 字')
+  })
+
+  it('keeps the original if the current length policy invalidates an older pending compression', async () => {
+    const original = '甲'.repeat(2700)
+    const { store, book, chapter } = await setup('ai', original)
+    vi.mocked(callAI).mockImplementation(async options => options.taskName === '压缩章节长度候选稿'
+      ? { content: '乙'.repeat(2200), finishReason: 'stop' } : reply(options))
+    await click('完成本章')
+    store.setChapterLengthPolicy(book.id, { minWords: 3000, targetWords: 3500, maxWords: 4000 })
+    wrapper!.findComponent(ChapterReviewSidebar).vm.$emit('approve-revision')
+    await flushPromises()
+    expect(chapter.content).toBe(original)
+    expect(messages.warning).toHaveBeenCalledWith(expect.stringContaining('不符合当前篇幅设置'))
+    expect([...revisions.values()][0].status).toBe('pending')
+  })
+
+  it('reviews all long-chapter parts including the tail then checks global facts', async () => {
+    const source = '甲'.repeat(4900) + '尾部唯一证据'
+    const { chapter } = await setup('manual', source)
+    vi.mocked(callAI).mockImplementation(async options => {
+      if (options.taskName?.startsWith('内容审查')) return reply(options, passingReview + '\n## 本段事实摘要\n角色先出发，随后到达。')
+      return reply(options)
+    })
+    await wrapper!.get('[title="内容审查（6维度）"]').trigger('click')
+    await flushPromises()
+    expect(calls('内容审查（分段 2/2）')[0][0].messages[1].content).toContain('尾部唯一证据')
+    expect(calls('内容审查（全章关系复核）')).toHaveLength(1)
+    expect(chapter.contentReviewCoverage).toMatchObject({ status: 'complete', completedChunks: 2, totalCharacters: source.length, coveredCharacters: source.length, globalStatus: 'complete' })
+    expect(wrapper!.findComponent(ChapterReviewSidebar).props('coverageStatus')).toContain('2/2')
+  })
+
+  it('keeps a failed later chunk visible and never calls it a completed review', async () => {
+    const { chapter } = await setup('manual', '甲'.repeat(5000))
+    vi.mocked(callAI).mockImplementation(async options => {
+      if (options.taskName === '内容审查（分段 2/2）') throw new Error('后半章调用失败')
+      return reply(options, passingReview + '\n## 本段事实摘要\n角色出发。')
+    })
+    await wrapper!.get('[title="内容审查（6维度）"]').trigger('click')
+    await flushPromises()
+    expect(chapter.contentReview).toBe('')
+    expect(chapter.contentReviewCoverage).toMatchObject({ status: 'failed', completedChunks: 1, failedChunk: 2 })
+    expect(wrapper!.findComponent(ChapterReviewSidebar).props('coverageStatus')).toContain('未完成')
+    expect(calls('内容审查（全章关系复核）')).toHaveLength(0)
+  })
+})
+
+describe('v1.0.7 UI integration with length controls', () => {
+  it('opens data panel and review sidebar with length bar present and changes custom length while preserving source', async () => {
+    const { book, chapter } = await setup('manual')
+    const dataPanel = wrapper!.findComponent(ChapterDataPanelSidebar)
+    const reviewPanel = wrapper!.findComponent(ChapterReviewSidebar)
+
+    expect(wrapper!.text()).toContain('目标 2200 字')
+    expect(wrapper!.find('.length-controls').exists()).toBe(true)
+
+    await wrapper!.get('[aria-label="数据面板"]').trigger('click')
+    await flushPromises()
+    expect(dataPanel.props('open')).toBe(true)
+
+    reviewPanel.vm.$emit('toggle')
+    await flushPromises()
+    expect(reviewPanel.props('open')).toBe(true)
+    expect(dataPanel.props('open')).toBe(false)
+
+    await click('篇幅设置')
+    const fields = wrapper!.findAllComponents(NInputNumber).filter(f => f.props('min') === 100 && f.props('max') === 20000)
+    expect(fields).toHaveLength(3)
+    for (const [index, value] of [1500, 1800, 2000].entries()) fields[index].vm.$emit('update:value', value)
+    await flushPromises()
+    await click('保存篇幅设置')
+
+    expect(book.chapterLengthPolicy).toEqual({ minWords: 1500, targetWords: 1800, maxWords: 2000 })
+    expect(chapter.content).toBe('甲'.repeat(2100) + '。')
+    expect(wrapper!.text()).toContain('目标 1800 字')
+
+    await wrapper!.get('[aria-label="数据面板"]').trigger('click')
+    expect(dataPanel.props('open')).toBe(true)
+    expect(reviewPanel.props('open')).toBe(false)
+  })
+
+  it('keeps icon controls functional with length calibration available in AI mode', async () => {
+    const original = '甲'.repeat(2700)
+    await setup('ai', original)
+    const dataPanel = wrapper!.findComponent(ChapterDataPanelSidebar)
+    const reviewPanel = wrapper!.findComponent(ChapterReviewSidebar)
+
+    expect(wrapper!.text()).toContain('超出 300 字')
+    expect(wrapper!.findAll('button').some(b => b.text().includes('生成压缩候选'))).toBe(true)
+
+    await wrapper!.get('[aria-label="数据面板"]').trigger('click')
+    expect(dataPanel.props('open')).toBe(true)
+
+    await wrapper!.get('[aria-label="内容审查"]').trigger('click')
+    await flushPromises()
+    expect(reviewPanel.props('open')).toBe(true)
+    expect(dataPanel.props('open')).toBe(false)
+
+    expect(wrapper!.find('.length-controls').exists()).toBe(true)
+    expect(wrapper!.text()).toContain('目标 2200 字')
   })
 })

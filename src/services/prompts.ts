@@ -6,6 +6,8 @@ import type { ChatMessage } from '@/services/ai'
 import type { ChapterEndingCheck } from '@/services/chapterEnding'
 import { genres } from '@/data/genres'
 import { DATA_MEMORY_OUTPUT, DATA_MEMORY_RULES } from '@/services/dataPanelExtraction'
+import { chapterLengthPrompt, resolveChapterLengthPolicy } from './chapterLength'
+import { countNovelWords } from '@/utils/format'
 
 // 查找分类名称
 function findGenreNames(genreVal: string, subGenreVal: string): { genre: string; subGenre: string } {
@@ -102,11 +104,10 @@ function formatStyle(novel: Novel): string {
   ].join('\n')
 }
 
-const CHAPTER_WORD_LIMIT_RULE = `【单章字数硬性规则】
-- 每章正文目标字数必须在 2000~2500 字之间。
-- 单章最低不能低于 2000 字；单章最高绝对不能超过 3000 字。
-- 规划章节数时，必须按“本卷/全书预估字数 ÷ 0.20~0.25 万字/章”倒推章节数。
-- 禁止写“每章约 6500~7500 字”等高密度估算；如果总字数约 233 万字，合理章节数应约为 932~1165 章，而不是 300 多章。`
+function chapterWordLimitRule(novel: Novel): string {
+  const policy = resolveChapterLengthPolicy(novel.chapterLengthPolicy)
+  return `${chapterLengthPrompt(policy)}\n规划章节数时，按本卷/全书预估字数除以每章 ${policy.minWords}~${policy.maxWords} 字倒推章节数，不得使用与本书篇幅设置矛盾的估算。`
+}
 
 // 生成总大纲的 Prompt
 export function buildOutlinePrompt(novel: Novel): ChatMessage[] {
@@ -129,7 +130,7 @@ export function buildOutlinePrompt(novel: Novel): ChatMessage[] {
 【目标字数】
 ${novel.targetWordCountMin}~${novel.targetWordCountMax} 万字
 
-${CHAPTER_WORD_LIMIT_RULE}
+${chapterWordLimitRule(novel)}
 
 【写作风格】
 ${formatStyle(novel)}
@@ -161,10 +162,10 @@ ${formatSettings(novel)}
 描述核心矛盾、高潮转折和爽点分布。
 
 ## 分卷建议
-建议分为几卷，每卷的主题、关键事件和大致章节数。每卷章节数必须符合单章 2000~2500 字的换算关系。
+建议分为几卷，每卷的主题、关键事件和大致章节数。每卷章节数必须符合上述单章篇幅设置的换算关系。
 
 ## 预估总字数分配
-各卷预估字数，总字数需在 ${novel.targetWordCountMin}~${novel.targetWordCountMax} 万字范围内，并明确说明“按每章 2000~2500 字估算”。
+各卷预估字数，总字数需在 ${novel.targetWordCountMin}~${novel.targetWordCountMax} 万字范围内，并说明所用的单章篇幅设置。
 
 【数字规则】
 所有预估数字必须自然真实，禁止使用整数或 5 的倍数。
@@ -202,13 +203,15 @@ export function buildChapterPrompt(
   factCard?: string,
   writingPlan?: string,
 ): ChatMessage[] {
-  const existingWordCount = existingContent ? existingContent.replace(/\s/g, '').length : 0
-  const remainingWords = Math.max(0, 2000 - existingWordCount)
+  const lengthPolicy = resolveChapterLengthPolicy(novel.chapterLengthPolicy)
+  const existingWordCount = countNovelWords(existingContent || '')
+  const remainingWords = Math.max(0, lengthPolicy.targetWords - existingWordCount)
   const isContinuation = existingWordCount > 50
 
   const system = `你是一位网文写手，正在创作长篇小说《${novel.title}》。
 
-【章节长度与收束原则】单章最低 2000 字。正文接近 2000 字时必须主动收束当前场景，通常控制在 2000~2200 字，原则上不要超过 2400 字；达到 2000 字后不得为了凑字继续开启新场景或新冲突。不得在动作、对话、决定或场景目标尚未产生结果时停笔，必须先用尽可能短的篇幅完成当前剧情节拍，再结束本章。${isContinuation ? `当前本章已写 ${existingWordCount} 字，请只续写完成本章节拍所需的内容。` : ''}
+${chapterLengthPrompt(lengthPolicy)}
+【章节收束原则】接近目标 ${lengthPolicy.targetWords} 字时主动收束当前场景，不得为了凑字开启新场景或新冲突。不得在动作、对话、决定或场景目标尚未产生结果时停笔；先完成当前剧情节拍，再结束本章。${isContinuation ? `当前本章已写 ${existingWordCount} 字，请只续写完成本章节拍所需的内容。` : ''}
 
 【写作风格要求】
 ${formatStyle(novel)}`
@@ -221,7 +224,7 @@ ${formatStyle(novel)}`
       wordRequirement = `1. 本章已有 ${existingWordCount} 字，建议再写约 **${remainingWords} 字**并自然收束。请根据当前剧情节拍决定准确停点，不得因达到字数而强行截断`
     }
   } else {
-    wordRequirement = `1. 目标长度为 **2000~2200 字**。从接近 2000 字起主动收束当前场景；达到 2000 字后只补写完成当前剧情节拍所需的最短内容，不要开启新场景或新冲突`
+    wordRequirement = `1. 目标长度为 **${lengthPolicy.targetWords} 字**，允许 ${lengthPolicy.minWords}~${lengthPolicy.maxWords} 字；接近目标起主动收束当前场景，不要开启新场景或新冲突`
   }
 
   const continuationContext = isContinuation
@@ -359,6 +362,8 @@ ${chapterGuidance || '暂无章节计划'}
 ${factCard}
 
 【输出要求】
+${chapterWordLimitRule(novel)}
+为核心事件分配简短的篇幅预算，总和靠近目标字数，并预留结尾空间。
 只输出以下 5 项，每项 1-3 条，禁止写正文：
 1. 承接点：本章开头从哪里接起
 2. 必须遵守的事实：角色状态、地点、资源、等级、伏笔等
@@ -397,7 +402,7 @@ ${chapterContent}
 2. 是否突然新增未铺垫的重大人物、道具、势力、世界规则
 3. 是否偏离已确认的章节计划和本次写作计划
 4. 是否有章节标题、半截句、未闭合引号、结尾不完整
-5. 字数以约 2000~2200 字为目标；先完成本章剧情节拍，不把一句话结束等同于剧情收束
+5. ${chapterLengthPrompt(resolveChapterLengthPolicy(novel.chapterLengthPolicy))} 先完成本章剧情节拍，不把一句话结束等同于剧情收束
 
 【输出格式】只输出 JSON 对象，不要代码块：
 {
@@ -423,7 +428,7 @@ ${novel.outline.substring(0, 3000)}
 【目标字数】
 ${novel.targetWordCountMin}~${novel.targetWordCountMax} 万字
 
-${CHAPTER_WORD_LIMIT_RULE}
+${chapterWordLimitRule(novel)}
 
 【输出格式】
 严格按以下格式逐卷输出（不要用代码块、不要用文件路径、不要加额外包装）：
@@ -437,7 +442,7 @@ ${CHAPTER_WORD_LIMIT_RULE}
 **本卷角色变化**：
 - 角色1变化
 - 角色2变化
-**预估章节数和字数**：约XX章，约XX万字（按每章 2000~2500 字估算）
+**预估章节数和字数**：约XX章，约XX万字（按上述单章篇幅设置估算）
 **卷级伏笔**：
 - 本卷伏笔：xxx
 - 跨卷铺垫：xxx
