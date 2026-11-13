@@ -1,7 +1,7 @@
 {
   "name": "ai-novel-writer",
-  "version": "1.0.9",
-  "description": "墨笺：本地优先的 AI 长篇小说写作软件，支持作者主笔、AI 写作、知识库与剧情数据记忆",
+  "version": "1.0.10",
+  "description": "墨笔生花 mobish，本地优先的 AI 长篇小说写作软件，支持作者主笔、AI 协作、知识库与长篇记忆",
   "author": "HannJia",
   "repository": {
     "type": "git",
@@ -38,6 +38,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
+    "sql.js": "^1.14.1",
+    "semver": "7.8.5"
+  },
+  "devDependencies": {
     "@floating-ui/dom": "1.8.0",
     "@fontsource-variable/jetbrains-mono": "5.3.0",
     "@fontsource-variable/noto-sans-sc": "5.3.1",
@@ -51,32 +56,28 @@
     "@tiptap/vue-3": "3.33.0",
     "@types/sql.js": "^1.4.10",
     "@vicons/ionicons5": "^0.13.0",
-    "electron-updater": "^6.8.9",
-    "eventsource-parser": "^3.1.1",
-    "jszip": "^3.10.1",
-    "lxgw-wenkai-webfont": "1.7.0",
-    "mammoth": "1.13.0",
-    "naive-ui": "^2.44.1",
-    "pinia": "^3.0.4",
-    "sql.js": "^1.14.1",
-    "vue": "^3.5.42",
-    "vue-router": "^4.6.4"
-  },
-  "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.8",
     "@vitest/ui": "^4.1.5",
     "@vue/test-utils": "^2.4.6",
     "concurrently": "^9.2.1",
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
+    "eventsource-parser": "^3.1.1",
     "fake-indexeddb": "^6.2.8",
     "happy-dom": "^20.11.1",
+    "jszip": "^3.10.1",
     "knip": "^6.29.0",
+    "lxgw-wenkai-webfont": "1.7.0",
+    "mammoth": "1.13.0",
+    "naive-ui": "^2.44.1",
     "pdfjs-dist": "^6.3.289",
+    "pinia": "^3.0.4",
     "tesseract.js": "6.0.1",
     "typescript": "^5.9.3",
     "vite": "^8.1.5",
     "vitest": "^4.1.5",
+    "vue": "^3.5.42",
+    "vue-router": "^4.6.4",
     "vue-tsc": "^3.2.6",
     "wait-on": "^9.0.4"
   },
@@ -97,7 +98,7 @@
   },
   "build": {
     "appId": "com.ainovelwriter.desktop",
-    "productName": "AI Novel Writer",
+    "productName": "mobish",
     "asar": true,
     "electronDist": "node_modules/electron/dist",
     "directories": {
@@ -113,14 +114,15 @@
       "target": [
         "nsis"
       ],
-      "artifactName": "AI-Novel-Writer-${version}-${arch}.${ext}",
+      "artifactName": "mobish-${version}.${ext}",
       "signExecutable": false
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "shortcutName": "墨笔生花"
     },
     "publish": {
       "provider": "github",

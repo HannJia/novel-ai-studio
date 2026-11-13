@@ -1,6 +1,7 @@
 // Prompt 构造器 — 用于各种 AI 调用场景
 
 import type { Novel } from '@/types/novel'
+import type { CreationDraft } from '@/types/reconstruction'
 import type { ReviewContext } from '@/services/context'
 import type { ChatMessage } from '@/services/ai'
 import type { ChapterEndingCheck } from '@/services/chapterEnding'
@@ -109,12 +110,32 @@ function chapterWordLimitRule(novel: Novel): string {
   return `${chapterLengthPrompt(policy)}\n规划章节数时，按本卷/全书预估字数除以每章 ${policy.minWords}~${policy.maxWords} 字倒推章节数，不得使用与本书篇幅设置矛盾的估算。`
 }
 
+function planningContract(draft?: CreationDraft) {
+  return draft?.approval.contract === 'approved' && draft.contract.approval === 'approved' ? draft.contract : undefined
+}
+
+function planningWordTarget(novel: Novel, draft?: CreationDraft): string {
+  const contract = planningContract(draft)
+  if (!contract) return `${novel.targetWordCountMin * 10000}~${novel.targetWordCountMax * 10000} 字`
+  const { targetWordCountMin: min, targetWordCountMax: max } = contract
+  return min && max ? `${min}~${max} 字` : min ? `至少 ${min} 字` : max ? `最多 ${max} 字` : '暂不确定，等待作者确认'
+}
+
+function planningChapterRule(novel: Novel, draft?: CreationDraft): string {
+  const max = planningContract(draft)?.targetWordCountMax
+  if (!novel.chapterLengthPolicy && max && max < resolveChapterLengthPolicy().minWords) {
+    return '单章篇幅尚未由作者设置。按作品契约的总字数建议紧凑的章节划分，不套用默认长章长度；单章实际写作范围仍须由作者在写作前设置。'
+  }
+  return chapterWordLimitRule(novel)
+}
+
 // 生成总大纲的 Prompt
-export function buildOutlinePrompt(novel: Novel): ChatMessage[] {
-  const { genre, subGenre } = findGenreNames(novel.genre, novel.subGenre)
+export function buildOutlinePrompt(novel: Novel, draft?: CreationDraft): ChatMessage[] {
+  const contract = planningContract(draft)
+  const { genre, subGenre } = contract ? { genre: contract.genre || '暂不确定', subGenre: contract.subGenre || '暂不确定' } : findGenreNames(novel.genre, novel.subGenre)
   const tagsText = novel.tags.length > 0 ? `\n题材标签：${novel.tags.join('、')}` : ''
 
-  const system = `你是一位资深网文策划师，擅长构思百万字级长篇小说大纲。你对各类网文套路、读者心理和市场趋势了如指掌。`
+  const system = `你是一位小说策划师，按作者确认的篇幅、题材和故事方向设计大纲，兼顾短篇与长篇的结构。`
 
   const user = `请根据以下信息，生成一份详细的小说总大纲。
 
@@ -128,12 +149,12 @@ export function buildOutlinePrompt(novel: Novel): ChatMessage[] {
 子类：${subGenre}${tagsText}
 
 【目标字数】
-${novel.targetWordCountMin}~${novel.targetWordCountMax} 万字
+${planningWordTarget(novel, draft)}
 
-${chapterWordLimitRule(novel)}
+${planningChapterRule(novel, draft)}
 
 【写作风格】
-${formatStyle(novel)}
+${contract ? [contract.pointOfView, contract.tense, contract.styleDirection].filter(Boolean).join('；') || '暂不确定' : formatStyle(novel)}
 
 【核心设定】
 ${formatSettings(novel)}
@@ -165,12 +186,10 @@ ${formatSettings(novel)}
 建议分为几卷，每卷的主题、关键事件和大致章节数。每卷章节数必须符合上述单章篇幅设置的换算关系。
 
 ## 预估总字数分配
-各卷预估字数，总字数需在 ${novel.targetWordCountMin}~${novel.targetWordCountMax} 万字范围内，并说明所用的单章篇幅设置。
+各卷预估字数须符合上述作者目标，并说明所用的单章篇幅设置；短篇可以单卷。
 
 【数字规则】
-所有预估数字必须自然真实，禁止使用整数或 5 的倍数。
-- ✅ 正确示例：预估 103.7 万字、本卷约 23 章、本卷约 48.3 万字
-- ❌ 错误示例：预估 100 万字、本卷 20 章、本卷 50 万字\``
+数字按剧情和作者篇幅要求估算，章数为正整数；允许整数与 5 的倍数，不为制造精确感编造数字。`
 
   const density = novel.settings.structure?.foreshadowingDensity || '中等'
   let foreshadowingInstruction = ''
@@ -419,18 +438,21 @@ ${chapterContent}
 }
 
 // 生成分卷规划的 Prompt
-export function buildVolumePlanningPrompt(novel: Novel): ChatMessage[] {
+export function buildVolumePlanningPrompt(novel: Novel, draft?: CreationDraft): ChatMessage[] {
   return [
-    { role: 'system', content: '你是一位擅长长篇小说结构设计的策划师。直接输出分卷内容，不要使用代码块、文件路径或任何包装格式。' },
+    { role: 'system', content: '你是一位小说结构策划师。按作者确认的篇幅规划，短篇可以单卷。直接输出分卷内容，不要使用代码块、文件路径或任何包装格式。' },
     { role: 'user', content: `根据以下总大纲，为小说《${novel.title}》生成详细的分卷规划。
 
 【总大纲】
 ${novel.outline.substring(0, 3000)}
 
 【目标字数】
-${novel.targetWordCountMin}~${novel.targetWordCountMax} 万字
+${planningWordTarget(novel, draft)}
 
-${chapterWordLimitRule(novel)}
+${planningChapterRule(novel, draft)}
+
+【已确认作品契约】
+${planningContract(draft) ? JSON.stringify(planningContract(draft)) : '尚未确认，不将讨论草稿作为正式约束。'}
 
 【输出格式】
 严格按以下格式逐卷输出（不要用代码块、不要用文件路径、不要加额外包装）：
@@ -458,7 +480,7 @@ ${chapterWordLimitRule(novel)}
 - 如有必要，承接上一卷线索或为下一卷做铺垫
 - 列出本卷需要重点推进的全书伏笔
 
-注意：数字避免整数或 5 的倍数。` },
+注意：按剧情与作者目标估算，章数为正整数；允许整数与 5 的倍数，不编造虚假精确度。` },
   ]
 }
 
@@ -625,7 +647,7 @@ ${reviewContext.previousSummary}
 ======== 可引用证据来源（语义召回） ========
 ${reviewContext.semanticEvidence}
 
-======== V2 结构化故事状态 ========
+======== V3 结构化故事状态 ========
 ${reviewContext.structuredState || '暂无结构化状态包；涉及未确认事实时必须明确标为候选。'}
 
 ======== 待审查正文（第 ${chapterIndex + 1} 章） ========

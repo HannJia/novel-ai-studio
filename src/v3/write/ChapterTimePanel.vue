@@ -24,7 +24,7 @@
       </form>
     </template>
     <p v-if="error" class="time-error" role="alert">{{ error }}</p>
-    <router-link class="m-link" :to="{ path: `/workspace/${novel.id}/data`, query: { chapterId: chapter.id } }">查看时间来源与历史</router-link>
+    <router-link class="m-link" :to="{ path: `/data/${novel.id}`, query: { chapterId: chapter.id } }">查看时间来源与历史</router-link>
   </div>
 </template>
 

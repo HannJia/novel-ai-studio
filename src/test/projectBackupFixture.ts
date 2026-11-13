@@ -23,10 +23,12 @@ export function plannedProjectWorkspace(novel: Novel): ProjectWorkspaceSnapshot 
     requiredActions: ['追逐'], informationChanges: ['得知暗号'], outputState: '到达藏身处', status: 'planned', approval: 'approved' }]
   return { ...emptyProjectWorkspace(novel.id), creationDraft,
     aiRuns: [{ id: novel.id + ':run', mode: 'autonomous', taskType: 'draft', targetId: novel.id, chapterStart: 0, chapterEnd: 2,
-      tokenBudget: 10000, usedTokens: 340, status: 'needs_author', checkpoint: 'chapter-1:review-needs-author', createdAt: novel.createdAt, updatedAt: novel.updatedAt }] }
+      tokenBudget: 10000, requestLimit: 200, requests: [{ id: novel.id + ':request', chapterIndex: 0, phase: 'writing', modelId: 'synthetic-model',
+        status: 'completed', reservedTokens: 1000, inputTokens: 100, outputTokens: 240, usageSource: 'reported', startedAt: novel.createdAt, completedAt: novel.createdAt }],
+      usedTokens: 340, status: 'needs_author', checkpoint: 'chapter-1:review-needs-author', createdAt: novel.createdAt, updatedAt: novel.updatedAt }] }
 }
 
-/** Test-only helper: these fixtures intentionally start with empty V2 state. */
+/** Test-only helper: these fixtures intentionally start with empty V3 state. */
 export function createTestProjectBackup(novels: Novel[], knowledgeBases: KnowledgeBase[], chapterRevisions: ChapterRevision[] = [],
   inspirationSessions: InspirationSession[] = [], reconstructionWorkspaces = novels.map(novel => emptyProjectWorkspace(novel.id))) {
   return createProjectBackup({ novels, knowledgeBases, chapterRevisions, inspirationSessions, reconstructionWorkspaces })

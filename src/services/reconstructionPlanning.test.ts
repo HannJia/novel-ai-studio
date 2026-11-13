@@ -1,7 +1,8 @@
+import { confirmTestStoryContract as confirmStoryContract } from '@/test/contractCardsFixture'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useNovelStore } from '@/stores/novel'
-import { buildPlotSkeletonFromOutline, confirmCreationSkeleton, confirmStoryContract, createCreationDraftFromNovel, reviseCreationSkeleton, reviseStoryContract, syncCreationDraftPlanning } from './reconstructionCreation'
+import { buildPlotSkeletonFromOutline, confirmCreationSkeleton,  createCreationDraftFromNovel, reviseCreationSkeleton, reviseStoryContract, syncCreationDraftPlanning } from './reconstructionCreation'
 import { approveScenePlans, buildScenePlanningPrompt, confirmChapterPlan, formatApprovedPlanning, normalizeScenePlans, proposeScenePlans, reviseChapterPlan } from './reconstructionPlanning'
 import { buildReviewContext, buildWritingContext } from './context'
 import { buildReviewContextVersion } from './reconstructionReviewVersion'
@@ -73,7 +74,7 @@ describe('approved chapter and scene planning', () => {
     const scenes = normalizeScenePlans([scene('过城门')], planId, 'stable')
     next = approveScenePlans(proposeScenePlans(next, planId, scenes, now), planId, [scenes[0].id], now)
     const synced = syncCreationDraftPlanning(next, novel, now)
-    expect(synced.chapterPlans[0]).toMatchObject({ title: '作者修改的标题', openingState: '日落时分', prohibitedReveals: ['不能揭露父亲身份'], volumeId: 'volume-v2:v1', approval: 'approved', scenePlanIds: [scenes[0].id] })
+    expect(synced.chapterPlans[0]).toMatchObject({ title: '作者修改的标题', openingState: '日落时分', prohibitedReveals: ['不能揭露父亲身份'], volumeId: 'volume:v1', approval: 'approved', scenePlanIds: [scenes[0].id] })
     expect(synced.volumes[0].chapterPlanIds).toEqual([planId])
     expect(synced.scenePlans[0].approval).toBe('approved')
     novel.chapterPlans![0].summary = '守卫同意放行'

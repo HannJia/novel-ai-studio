@@ -260,11 +260,11 @@ const chapterFields = { id, volumeIndex: chapterVolumeIndex, chapterIndex: integ
     status: oneOf('draft', 'writing', 'completed', 'reviewed', 'finalized', 'locked'), ...times, versions,
     sceneNotes: optional(list(object({ id, title: text, content: text, source, ...times }), 10000)),
 };
-const storyTimeRecord = object({ id, kind: oneOf('origin', 'absolute', 'relative'), status: oneOf('current', 'superseded', 'invalid', 'legacy'),
+const storyTimeRecord = object({ id, kind: oneOf('origin', 'absolute', 'relative'), status: oneOf('current', 'superseded', 'invalid', 'unverified'),
     boundary: oneOf('origin', 'chapter'), chapterId: optional(id), chapterIndex: optional(integer), startDay: number, endDay: number,
-    elapsedDays: number, confirmedAt: date, confirmationOrder: integer, source: oneOf('author', 'canon', 'legacy'),
+    elapsedDays: number, confirmedAt: date, confirmationOrder: integer, source: oneOf('author', 'canon', 'unverified'),
     sourceVersionId: optional(id), dependsOnRecordId: optional(id), label: optional(text), invalidReason: optional(text) });
-const storyTimeOrigin = object({ id, day: number, label: text, confirmedAt: date, source: oneOf('author', 'legacy') });
+const storyTimeOrigin = object({ id, day: number, label: text, confirmedAt: date, source: oneOf('author', 'unverified') });
 const book = object({
     id, ...strings('title genre subGenre genreLabel subGenreLabel outline synopsis'), tags: list(text, 1000),
     targetWordCountMin: number, targetWordCountMax: number, currentWordCount: integer,
@@ -342,6 +342,8 @@ function checkTree(value, path, depth = 0) {
     }
 }
 function validateProjectBackup(value) {
+    if (!value || typeof value !== 'object' || value.format !== 'ai-novel-writer-backup' || value.version !== 3)
+        fail('项目格式（仅支持 V3）');
     checkTree(value, '项目');
     object({ exportedAt: date, novels: list(book, 1000), knowledgeBases: list(knowledge, 1000),
         chapterRevisions: list(object({ id, novelId: id, chapterId: id,
@@ -440,7 +442,7 @@ function validateProjectBackup(value) {
                 fail(`${novel.title}.storyClock：确认顺序无效`);
             if (row.status !== 'current')
                 continue;
-            if (!(0, storyTime_1.storyTimeRecordWellFormed)(row) || row.source === 'legacy')
+            if (!(0, storyTime_1.storyTimeRecordWellFormed)(row) || row.source === 'unverified')
                 fail(`${novel.title}.storyClock：当前记录来源或边界格式无效`);
             const heads = timeHistory.filter(item => row.boundary === 'origin' ? item.boundary === 'origin' : item.chapterId === row.chapterId);
             const latest = heads.reduce((head, item) => item.confirmationOrder >= head.confirmationOrder ? item : head);

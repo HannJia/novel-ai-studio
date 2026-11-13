@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { deriveReviewCenter } from './reviewCenter'
 import { buildChapterReviewSourceVersion } from '@/services/chapterReviewIdentity'
 import { buildChapterReviewSignature } from '@/services/chapterReviewIdentity'
@@ -10,6 +10,24 @@ const chapter = (over: Partial<Chapter> = {}): Chapter => ({ id: 'c1', volumeInd
 const novel = (chapters: Chapter[]): Novel => ({ id: 'n1', title: '测试', genre: '', subGenre: '', genreLabel: '', subGenreLabel: '', tags: [], targetWordCountMin: 1, targetWordCountMax: 2, currentWordCount: chapters.reduce((sum, row) => sum + row.wordCount, 0), writingStyle: {} as Novel['writingStyle'], writingMode: 'manual', settings: {} as Novel['settings'], outline: '', synopsis: '', volumes: [], chapters, characters: [], chatHistory: [], knowledgeBaseIds: [], eventLog: [], storyArcs: [], chapterPlans: [], storyStateProposals: [], dataPanels: [], dataPanelChanges: [], chapterLengthPolicy: { minWords: 1, targetWords: 5, maxWords: 100 }, status: 'writing', createdAt: '', updatedAt: '' })
 
 describe('deriveReviewCenter', () => {
+  it('opens a long unreviewed book without projecting every prompt, while checking stored reports and partial coverage', () => {
+    const chapters = Array.from({ length: 200 }, (_, index) => chapter({ id: 'chapter-' + index, chapterIndex: index }))
+    chapters[1].contentReviewSignature = buildChapterReviewSignature(chapters[1].content, 'previous-context')
+    const signature = buildChapterReviewSignature(chapters[2].content, 'current-context')
+    chapters[2].contentReviewCoverage = { signature, status: 'running', totalChunks: 1, completedChunks: 0,
+      coveredCharacters: 0, totalCharacters: chapters[2].content.length, globalStatus: 'not-needed' }
+    const contextVersion = vi.fn((_chapter: Chapter) => 'current-context')
+    const result = deriveReviewCenter({ novel: novel(chapters), findings: [], candidates: [], impactReports: [], contextVersion,
+      reviews: [{ id: 'stored', chapterId: chapters[1].id, sourceVersionId: buildChapterReviewSourceVersion(chapters[1].content, 'previous-context'),
+        startedAt: '2026-11-13T00:00:00.000Z', deterministicChecksPassed: true, semanticChecksPassed: true,
+        findings: [], candidateChanges: [], status: 'approved' }] })
+    expect(result.rows).toHaveLength(200)
+    expect(contextVersion.mock.calls.map(([row]) => row.id)).toEqual(['chapter-1', 'chapter-2'])
+    expect(result.rows[0]).toMatchObject({ status: 'needs_review', reviewStale: false })
+    expect(result.rows[1]).toMatchObject({ status: 'needs_review', reviewStale: true })
+    expect(result.rows[2]).toMatchObject({ status: 'reviewing', coveragePercent: 0 })
+  })
+
   it('groups chapters into review states and queue items', () => {
     const first = chapter(), second = chapter({ id: 'c2', chapterIndex: 1, content: '', wordCount: 0 })
     const result = deriveReviewCenter({ novel: novel([first, second]), findings: [], candidates: [], reviews: [], impactReports: [], contextVersion: () => 'ctx' })

@@ -13,10 +13,9 @@ function buildChapterReviewSignature(content, contextVersion) {
 function buildChapterReviewSourceVersion(content, contextVersion) {
     return (0, reconstructionCandidates_1.buildAnalysisSourceVersionId)(content) + '|context:' + buildChapterReviewSignature(content, contextVersion);
 }
-/** Storage preserves recognized historical identities; execution still requires the current builder above. */
+/** Persisted reports use the same identity protocol as current execution. */
 function isStoredChapterReviewSignature(signature, content, contextVersion) {
-    const suffix = (0, reconstructionCandidates_1.buildAnalysisSourceVersionId)(content) + ':' + contextVersion;
-    return [4, 5, 6, 7, 8].some(version => signature === 'review-v' + version + ':' + suffix);
+    return signature === buildChapterReviewSignature(content, contextVersion);
 }
 function isStoredChapterReviewSourceVersion(version, content, contextVersion) {
     const prefix = (0, reconstructionCandidates_1.buildAnalysisSourceVersionId)(content) + '|context:';

@@ -8,30 +8,20 @@ import { nextTick } from 'vue'
 import { cloudApplyBusy, cloudConfigApplying, cloudPreferencesBusy } from './services/appLifecycle'
 
 describe('application language', () => {
-  it('opens settings with focus and restores the invoking control on Escape', async () => {
+  it('uses the V3 shell without the retired header and modal settings branch', () => {
     setActivePinia(createPinia())
-    const w = shallowMount(App, { attachTo: document.body, global: { renderStubDefaultSlot: true, stubs: {
-      RouterView: { template: '<div />' },
-      AppHeader: { emits: ['open-settings'], template: '<button @click="$emit(\'open-settings\')">设置</button>' },
-    } } })
+    const w = shallowMount(App, { global: { renderStubDefaultSlot: true } })
     try {
-      const trigger = w.get('button')
-      trigger.element.focus()
-      await trigger.trigger('click')
-      await nextTick()
-      expect(w.get('.app-shell').attributes('inert')).toBeDefined()
-      expect(document.activeElement).toBe(w.get('.settings-overlay-close').element)
-      await w.get('.settings-overlay').trigger('keydown', { key: 'Escape' })
-      await nextTick()
+      expect(w.findComponent({ name: 'V3Shell' }).exists()).toBe(true)
+      expect(w.findComponent({ name: 'AppHeader' }).exists()).toBe(false)
       expect(w.find('.settings-overlay').exists()).toBe(false)
-      expect(document.activeElement).toBe(trigger.element)
     } finally { w.unmount() }
   })
 
   it('keeps focused content and scroll during background config sync, retaining project merge protection', async () => {
     setActivePinia(createPinia())
     const wrapper = shallowMount(App, { attachTo: document.body, global: { renderStubDefaultSlot: true, stubs: {
-      RouterView: { template: '<div />' }, AppHeader: { template: '<input aria-label="正在编辑的内容" />' },
+      V3Shell: { template: '<main class="main-content"><input aria-label="正在编辑的内容" /></main>' },
     } } })
     try {
       const field = wrapper.get('input').element as HTMLInputElement
@@ -53,7 +43,7 @@ describe('application language', () => {
       cloudConfigApplying.value = false
       await nextTick()
       expect(wrapper.find('.project-transfer-overlay').exists()).toBe(true)
-      expect(wrapper.get('.app-shell').attributes('inert')).toBeDefined()
+      expect(wrapper.get('.main-content').attributes('inert')).toBeDefined()
     } finally {
       cloudApplyBusy.value = false; cloudConfigApplying.value = false; cloudPreferencesBusy.value = false
       wrapper.unmount()

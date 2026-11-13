@@ -1,6 +1,6 @@
 'use strict'
 
-// This module owns only project data. The injected V2 validator is deliberately
+// This module owns only project data. The injected V3 validator is deliberately
 // the only connection to the application's domain model. SQLite is disposable.
 const fs = require('node:fs')
 const fsp = fs.promises
@@ -140,7 +140,7 @@ async function createProjectKernel(options) {
   function validate(value, code) {
     try {
       exact(value, BACKUP_KEYS)
-      check(value.format === 'ai-novel-writer-backup' && value.version === 2, 'Expected ProjectBackup V2')
+      check(value.format === 'ai-novel-writer-backup' && value.version === 3, 'Expected ProjectBackup V3')
       jsonTree(value)
       check(json(value).length <= MAX_JSON_BYTES, 'Project backup exceeds 256 MiB')
       const result = validateBackup(value)
@@ -279,7 +279,7 @@ async function createProjectKernel(options) {
     const prefix = 'projects/' + ref.key + '/snapshots/' + ref.snapshot + '/'
     const manifest = await parsed(prefix + 'manifest.json', ref.snapshot)
     exact(manifest, ['format', 'version', 'id', 'files', 'chapters'])
-    check(manifest.format === 'mojian-project-snapshot' && manifest.version === 2 && manifest.id === ref.id, 'Invalid project manifest')
+    check(manifest.format === 'mojian-project-snapshot' && manifest.version === 3 && manifest.id === ref.id, 'Invalid project manifest')
     check(object(manifest.files) && Array.isArray(manifest.chapters), 'Invalid snapshot references')
     const expected = ['project.json', 'workspace.json', 'revisions.json']
     manifest.chapters.forEach((entry, index) => {
@@ -616,7 +616,7 @@ async function createProjectKernel(options) {
     files.set('project.json', json(project))
     files.set('workspace.json', json(backup.reconstructionWorkspaces.filter(row => row.novelId === novel.id)))
     files.set('revisions.json', json(backup.chapterRevisions.filter(row => row.novelId === novel.id)))
-    const manifest = { format: 'mojian-project-snapshot', version: 2, id: novel.id,
+    const manifest = { format: 'mojian-project-snapshot', version: 3, id: novel.id,
       files: Object.fromEntries([...files].map(([file, data]) => [file, hash(data)])), chapters }
     const data = json(manifest), snapshot = hash(data)
     const prefix = 'projects/' + key + '/snapshots/'

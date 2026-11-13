@@ -62,6 +62,7 @@ async function waitForWorkflowDependencies(baseUrl, timeoutMs = 120_000) {
   const deadline = Date.now() + timeoutMs
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
   let lastState = []
+  let attempts = 0
   while (Date.now() < deadline) {
     const editor = await fetchText(new URL('/src/v3/editor/PlainTextEditor.vue', baseUrl))
     lastState = [{ editorStatus: editor?.statusCode ?? 'unavailable' }]
@@ -81,6 +82,7 @@ async function waitForWorkflowDependencies(baseUrl, timeoutMs = 120_000) {
         }
       }
     }
+    if (++attempts % 20 === 0) console.log('SMOKE_DEPENDENCIES ' + JSON.stringify(lastState))
     await sleep(400)
   }
   throw new Error('Vite 写作页依赖未就绪：' + JSON.stringify(lastState))
@@ -112,7 +114,7 @@ async function main() {
   const clipboard = process.argv.includes('--clipboard') || clipboardScenario !== 'normal'
   const workflow = process.argv.includes('--workflow')
   const workflowKind = process.argv.find(argument => argument.startsWith('--workflow-kind='))?.slice('--workflow-kind='.length) || 'integrated'
-  if (!['integrated', 'creation', 'visual', 'deep', 'selection', 'shelf-resume'].includes(workflowKind) || (!workflow && workflowKind !== 'integrated')) throw new Error('Unsupported smoke workflow kind')
+  if (!['integrated', 'creation', 'visual', 'ui', 'deep', 'selection', 'shelf-resume'].includes(workflowKind) || (!workflow && workflowKind !== 'integrated')) throw new Error('Unsupported smoke workflow kind')
   const requestedEvidencePrefix = process.env.AI_NOVEL_WRITER_SMOKE_EVIDENCE_PREFIX?.trim()
   if (requestedEvidencePrefix && !/^[a-z0-9._-]+$/i.test(requestedEvidencePrefix)) throw new Error('Invalid smoke evidence prefix')
   const workflowPhase = process.argv.find(argument => argument.startsWith('--workflow-phase='))?.slice('--workflow-phase='.length)
@@ -120,20 +122,27 @@ async function main() {
     ? (workflowPhase ? [workflowPhase]
       : workflowKind === 'shelf-resume' ? ['resume']
         : workflowKind === 'selection' ? ['selection']
+        : workflowKind === 'ui' ? ['ui']
         : workflowKind === 'visual' ? ['visual']
           : workflowKind === 'deep' ? ['deep']
           : ['write', 'reopen', 'verify-stale'])
     : ['']
   if (workflowKind === 'visual' && (!workflow || (workflowPhase && workflowPhase !== 'visual'))) throw new Error('Visual smoke requires --workflow-phase=visual')
+  if (workflowKind === 'ui' && (!workflow || (workflowPhase && workflowPhase !== 'ui'))) throw new Error('UI smoke requires --workflow-phase=ui')
   if (workflowKind === 'deep' && (!workflow || (workflowPhase && workflowPhase !== 'deep'))) throw new Error('Deep visual smoke requires --workflow-phase=deep')
   if (workflowKind === 'selection' && (!workflow || (workflowPhase && workflowPhase !== 'selection'))) throw new Error('Selection smoke requires --workflow-phase=selection')
   if (workflowKind === 'shelf-resume' && (!workflow || (workflowPhase && workflowPhase !== 'resume'))) throw new Error('Shelf resume smoke requires --workflow-phase=resume')
   const timeoutMs = Number(process.env.AI_NOVEL_WRITER_SMOKE_TIMEOUT_MS) || (workflow ? 120_000 : 60_000)
-  if (workflow && packaged) throw new Error('V2 workflow fixtures are development-only')
+  if (workflow && packaged) throw new Error('Synthetic workflow fixtures are development-only')
   let viteProcess = null
   let viteCacheDir = null
   let smokeViteUrl = devServerUrl
-  if (!packaged && workflow) {
+  const existingVite = process.env.AI_NOVEL_WRITER_SMOKE_EXISTING_VITE_URL
+  if (existingVite && !/^http:\/\/127\.0\.0\.1:\d+$/.test(existingVite)) throw new Error('Existing smoke server must be loopback')
+  if (!packaged && existingVite) {
+    smokeViteUrl = existingVite
+    await waitForServer(smokeViteUrl)
+  } else if (!packaged && workflow) {
     const port = await findAvailablePort()
     smokeViteUrl = `http://127.0.0.1:${port}`
     viteCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mojian-vite-smoke-'))
@@ -169,7 +178,7 @@ async function main() {
 
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-novel-writer-smoke-'))
   const electronPath = packaged
-    ? path.join(projectRoot, 'release', 'win-unpacked', 'AI Novel Writer.exe')
+    ? path.join(path.resolve(process.env.AI_NOVEL_WRITER_SMOKE_PACKAGED_DIR || path.join(projectRoot, 'release', 'win-unpacked')), 'mobish.exe')
     : require('electron')
   if (!fs.existsSync(electronPath)) throw new Error(`找不到 Electron 可执行文件：${electronPath}`)
   let output = ''
@@ -196,7 +205,7 @@ async function main() {
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       })
-      child.stdout.on('data', chunk => { output += chunk.toString() })
+      child.stdout.on('data', chunk => { output += chunk.toString(); if (workflowKind === 'ui') process.stdout.write(chunk.toString().split('\n').filter(line => line.startsWith('UI_CAPTURE ')).join('\n') + '\n') })
       child.stderr.on('data', chunk => { output += chunk.toString() })
       const exitCode = await new Promise((resolve, reject) => {
         let timedOut = false
@@ -270,6 +279,25 @@ async function main() {
         fs.writeFileSync(path.join(evidence, (requestedEvidencePrefix || 'v3-selection') + '-geometry-20261111.json'), JSON.stringify({
           date: '2026-11-11', expectedStates: 9, actualStates: states.length, states,
         }, null, 2))
+      }
+      if (phase && workflowKind === 'ui') {
+        const states = result.workflow?.states
+        if (result.workflow?.kind !== 'ui' || states?.length !== 135) throw new Error('UI workflow did not capture all 135 states')
+        for (const state of states) {
+          if (state.width !== state.documentWidth || state.width !== state.bodyWidth || state.width !== state.screenshotWidth
+            || state.railWidth !== 68 || state.headerHeight !== 52 || state.footerHeight !== 30
+            || state.runtimeErrors.length || state.externalRequests || state.rootWidth <= 0) throw new Error('UI state failed: ' + JSON.stringify(state))
+        }
+        const evidence = path.join(projectRoot, '.local-recovery', 'verification')
+        fs.mkdirSync(evidence, { recursive: true })
+        const prefix = requestedEvidencePrefix || 'v3-final-ui'
+        fs.copyFileSync(path.join(userData, 'offline-writing-fixture.json'), path.join(evidence, prefix + '-offline-writing-fixture.json'))
+        for (const state of states) {
+          const name = prefix + '-' + state.page + '-' + state.theme + '-' + state.width + '.png'
+          fs.copyFileSync(path.join(userData, state.fileName), path.join(evidence, name))
+          state.fileName = name
+        }
+        fs.writeFileSync(path.join(evidence, prefix + '-matrix.json'), JSON.stringify({ fixture: result.workflow.fixture, expectedStates: 135, actualStates: states.length, states }, null, 2))
       }
       if (phase && workflowKind === 'visual') {
         const states = result.workflow?.states
@@ -372,7 +400,7 @@ async function main() {
           }
         }
       }
-      if (phase && !['visual', 'deep'].includes(workflowKind)) {
+      if (phase && !['visual', 'deep', 'ui'].includes(workflowKind)) {
         const evidence = path.join(projectRoot, '.local-recovery', 'verification')
         fs.mkdirSync(evidence, { recursive: true })
         const evidencePrefix = requestedEvidencePrefix || (workflowKind === 'creation' ? 'v3-creation-desktop' : workflowKind === 'selection' ? 'v3-selection-desktop' : workflowKind === 'shelf-resume' ? 'v3-shelf-resume-electron' : 'v2-desktop')

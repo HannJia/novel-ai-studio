@@ -75,8 +75,8 @@
         <template v-else-if="selectionKind === 'volume'"><div class="eyebrow">分卷 · {{ selectedGroup?.title || '未分卷' }}</div><h2>{{ selectedGroup?.title || '未分卷' }}</h2><dl class="detail-fields"><dt>分卷主题</dt><dd>{{ selectedVolume?.theme || '未记录' }}</dd><dt>剧情概要</dt><dd>{{ selectedVolume?.summary || '未记录' }}</dd><dt>关键转折</dt><dd>{{ selectedVolume?.keyTurningPoints || '未记录' }}</dd><dt>人物变化</dt><dd>{{ selectedVolume?.characterChanges || '未记录' }}</dd><dt>章节</dt><dd>{{ selectedGroup?.chapters.filter(row => row.chapter).length || 0 }} 章已建立<span v-if="selectedVolume"> · 预计 {{ selectedVolume.estimatedChapters }} 章</span></dd></dl><p class="detail-principle">卷级目标、转折和预计章节均为规划，不代表已写或已发生。</p><button class="m-btn zhu" type="button" @click="openPlanner('volumes')">编辑分卷</button></template>
         <template v-else>
           <div class="eyebrow">第 {{ selectedIndex + 1 }} 章 · 章纲</div><h2>{{ selectedRow?.title || '尚未创建章节' }}</h2>
-          <div class="detail-tags"><span class="track-tag">{{ chapterState(selectedRow?.chapter) }}</span><span v-if="detailPlan || selectedLegacyPlan" class="track-tag" :class="detailPlanApproved ? 'qing' : 'jin'">{{ detailPlanApproved ? '已批准规划' : '待确认章纲' }}</span><span v-if="selectedRow?.chapter" class="detail-word-count">{{ selectedRow.chapter.wordCount.toLocaleString() }} 字</span></div>
-          <dl v-if="detailPlan || selectedLegacyPlan" class="detail-fields chapter-fields"><template v-for="field in detailFields" :key="field.label"><dt>{{ field.label }}</dt><dd>{{ field.value || '未记录' }}</dd></template></dl>
+          <div class="detail-tags"><span class="track-tag">{{ chapterState(selectedRow?.chapter) }}</span><span v-if="detailPlan || selectedAuthorPlan" class="track-tag" :class="detailPlanApproved ? 'qing' : 'jin'">{{ detailPlanApproved ? '已批准规划' : '待确认章纲' }}</span><span v-if="selectedRow?.chapter" class="detail-word-count">{{ selectedRow.chapter.wordCount.toLocaleString() }} 字</span></div>
+          <dl v-if="detailPlan || selectedAuthorPlan" class="detail-fields chapter-fields"><template v-for="field in detailFields" :key="field.label"><dt>{{ field.label }}</dt><dd>{{ field.value || '未记录' }}</dd></template></dl>
           <p v-else class="detail-prose muted">尚无单章章纲。跨章规划不会被当作本章已确认计划。</p>
           <p class="plan-source-note">{{ detailPlanApproved ? '以下为作者批准的创作计划，不代表故事事实。' : '未批准的章纲与场景仅作草稿参考，不进入已确认写作约束。' }}</p>
           <div class="detail-section-title">场景 · {{ selectedRow?.scenes.length || 0 }}<button type="button" @click="editScenes">编辑与方案</button></div>
@@ -85,7 +85,7 @@
           <details v-if="selectedRow?.chapter?.sceneNotes?.length" class="scene-notes"><summary>场景笔记 · {{ selectedRow.chapter.sceneNotes.length }}（非场景方案）</summary><p v-for="note in selectedRow.chapter.sceneNotes" :key="note.id"><strong>{{ note.title }}</strong><br />{{ note.content }}</p></details>
           <div v-if="selectedRangePlans.length" class="detail-ranges"><h3>覆盖本章的跨章规划</h3><button v-for="plan in selectedRangePlans" :key="plan.id" type="button" @click="openPlanner('plans', plan.id)">第 {{ plan.targetChapterStart + 1 }}–{{ plan.targetChapterEnd + 1 }} 章 · {{ plan.title }}</button></div>
           <div class="detail-principle"><h3><V3Icon name="alert" size="s" />修改规划时</h3><p>保存仍经影响分析事务；实际影响记录在工作台查看，不预造“需重审章节”。</p><button type="button" @click="openPlanner('impacts')">查看真实影响记录</button></div>
-          <div class="detail-actions"><router-link v-if="selectedRow?.chapter" class="m-btn zhu" :to="'/write/' + novel.id + '/' + selectedRow.chapter.id">打开正文</router-link><button class="m-btn" type="button" @click="editScenes">章纲与场景</button><button v-if="selectedLegacyPlan" class="m-link" type="button" @click="openPlanner('plans', selectedLegacyPlan.id)">编辑章节计划</button></div>
+          <div class="detail-actions"><router-link v-if="selectedRow?.chapter" class="m-btn zhu" :to="'/write/' + novel.id + '/' + selectedRow.chapter.id">打开正文</router-link><button class="m-btn" type="button" @click="editScenes">章纲与场景</button><button v-if="selectedAuthorPlan" class="m-link" type="button" @click="openPlanner('plans', selectedAuthorPlan.id)">编辑章节计划</button></div>
         </template>
       </aside>
     </section>
@@ -105,7 +105,7 @@
     </section>
 
     <section v-else-if="activeTab === 'events'" class="event-columns"><article class="m-panel event-panel"><div class="panel-head"><div><h2>事件与伏笔</h2><p>伏笔使用埋设、最近推进、计划回收和实际回收四个节点。</p></div><button class="m-link" type="button" @click="openPlanner('timeline')">编辑事件</button></div><article v-for="event in events" :key="event.id" class="event-row"><div class="event-marker" :class="event.type === '伏笔' ? 'zhu' : ''" /><div><span class="card-kicker">{{ event.type }} · {{ eventStatusLabel(event.status) }}</span><h3>{{ event.title }}</h3><p>{{ event.description }}</p><div class="event-meta"><small>{{ event.chapterIndex < 0 ? '全书规划' : `第${event.chapterIndex + 1}章` }}<span v-if="event.targetChapter !== undefined"> · 计划第{{ event.targetChapter + 1 }}章推进</span></small><button class="m-link" type="button" @click="openPlanner('timeline', event.id)">编辑事件</button></div></div></article><div v-if="!events.length" class="empty"><p>还没有事件记录。</p><button class="m-btn zhu" type="button" @click="openPlanner('timeline')">添加事件</button></div></article><article class="m-panel event-panel"><div class="panel-head"><div><h2>伏笔追踪</h2><p>按真实事件字段显示推进和回收状态。</p></div></div><article v-for="event in foreshadowings" :key="event.id" class="foreshadow-row"><strong>{{ event.title }}</strong><div class="four-points"><span :class="{ on: event.chapterIndex >= 0 && event.status !== 'unverified' }">埋设</span><span :class="{ on: event.lastProgressChapterIndex !== undefined && event.status !== 'unverified' }">最近推进</span><span :class="{ on: event.targetChapter !== undefined }">计划推进/回收</span><span :class="{ on: event.status === 'resolved' && event.resolvedChapterIndex !== undefined }">实际回收</span></div><small>{{ event.hintCount || 0 }} 次提及</small></article><div v-if="!foreshadowings.length" class="empty">还没有伏笔。</div></article></section>
-    <section v-else class="planner-workbench"><StoryPlanner :embedded="true" :initial-tab="plannerTab" :initial-selection="plannerSelection" @tab-change="onPlannerTabChange" @navigate="target => openPlanner(target.tab, target.selection)" /></section>
+    <section v-else class="planner-workbench"><StoryPlanner :initial-tab="plannerTab" :initial-selection="plannerSelection" @tab-change="onPlannerTabChange" @navigate="target => openPlanner(target.tab, target.selection)" /></section>
   </div>
 </template>
 
@@ -117,7 +117,7 @@ import { useReconstructionWorkspaceStore } from '@/stores/reconstructionWorkspac
 import { projectCanonicalEntities } from '@/services/entityProvenance'
 import { syncCreationDraftPlanning } from '@/services/reconstructionCreation'
 import { getApprovedPlanning } from '@/services/reconstructionPlanning'
-import StoryPlanner from '@/views/workspace/StoryPlanner.vue'
+import StoryPlanner from '@/v3/planning/PlanningWorkbench.vue'
 import V3Icon from '@/v3/components/V3Icon.vue'
 import type { Chapter, ChapterPlanHorizon, ChapterPlanStatus, StoryArcType, StoryArcStatus, EventLogEntry } from '@/types/novel'
 
@@ -162,14 +162,14 @@ const chapterRows = computed(() => {
   livePlans.value.filter(plan => plan.targetChapterStart === plan.targetChapterEnd).forEach(plan => indices.add(plan.targetChapterStart))
   return [...indices].sort((a, b) => a - b).map(index => {
     const chapter = novel.value?.chapters.find(item => item.chapterIndex === index)
-    const legacy = livePlans.value.find(plan => plan.targetChapterStart === index && plan.targetChapterEnd === index)
+    const authorPlan = livePlans.value.find(plan => plan.targetChapterStart === index && plan.targetChapterEnd === index)
     const plans = (planningDraft.value?.chapterPlans || []).filter(plan => plan.number === index + 1 && (plan.endNumber ?? plan.number) === plan.number && plan.status !== 'archived')
     const approved = getApprovedPlanning(planningDraft.value, index)?.chapters.filter(plan => plan.number === index + 1 && (plan.endNumber ?? plan.number) === plan.number) || []
     const approvedScenes = new Set(approved.flatMap(plan => plan.scenes.map(scene => scene.id)))
     const scenes = (planningDraft.value?.scenePlans || []).filter(scene => scene.approval !== 'rejected' && plans.some(plan => plan.id === scene.chapterPlanId && plan.scenePlanIds.includes(scene.id)))
       .sort((a, b) => a.order - b.order).map(scene => ({ ...scene, approved: approvedScenes.has(scene.id) }))
-    const volume = novel.value?.volumes.find(item => 'volume-v2:' + item.id === plans[0]?.volumeId)
-    return { index, chapter, title: chapter?.title || legacy?.title || '未命名章节', volumeIndex: chapter?.volumeIndex ?? volume?.volumeIndex ?? -1, scenes }
+    const volume = novel.value?.volumes.find(item => 'volume:' + item.id === plans[0]?.volumeId)
+    return { index, chapter, title: chapter?.title || authorPlan?.title || '未命名章节', volumeIndex: chapter?.volumeIndex ?? volume?.volumeIndex ?? -1, scenes }
   })
 })
 const treeGroups = computed(() => {
@@ -189,13 +189,13 @@ const detailPlan = computed(() => {
   return exact.find(plan => approvedSelection.value?.chapters.some(approved => approved.id === plan.id)) || exact[0]
 })
 const detailPlanApproved = computed(() => !!detailPlan.value && !!approvedSelection.value?.chapters.some(plan => plan.id === detailPlan.value!.id))
-const selectedLegacyPlan = computed(() => livePlans.value.find(plan => 'chapter-plan-v2:' + plan.id === detailPlan.value?.id)
+const selectedAuthorPlan = computed(() => livePlans.value.find(plan => 'chapter-plan:' + plan.id === detailPlan.value?.id)
   || livePlans.value.find(plan => plan.targetChapterStart === selectedIndex.value && plan.targetChapterEnd === selectedIndex.value))
 const selectedRangePlans = computed(() => rangePlans.value.filter(plan => plan.targetChapterStart <= selectedIndex.value && plan.targetChapterEnd >= selectedIndex.value))
 const detailFields = computed(() => {
-  const plan = detailPlan.value, legacy = selectedLegacyPlan.value
-  const related = plan?.foreshadowingIds || legacy?.relatedEventIds || []
-  return [{ label: '章节目标', value: plan?.objective || legacy?.objective }, { label: '核心事件', value: (plan?.requiredEvents || legacy?.beats || []).join('；') },
+  const plan = detailPlan.value, authorPlan = selectedAuthorPlan.value
+  const related = plan?.foreshadowingIds || authorPlan?.relatedEventIds || []
+  return [{ label: '章节目标', value: plan?.objective || authorPlan?.objective }, { label: '核心事件', value: (plan?.requiredEvents || authorPlan?.beats || []).join('；') },
     { label: '人物变化', value: plan?.characterChangeNotes.join('；') }, { label: '关联伏笔', value: related.map(id => novel.value?.eventLog.find(event => event.id === id)?.title).filter(Boolean).join('、') },
     { label: '结尾状态', value: plan?.endingState }, { label: '禁止揭露', value: plan?.prohibitedReveals.join('；') }]
 })
@@ -303,7 +303,7 @@ function restoreSelection() {
   else if (selectionKind.value === 'chapter') collapsedVolumes.value = collapsedVolumes.value.filter(index => index !== selectedGroup.value!.index)
 }
 function editScenes() {
-  const id = detailPlan.value?.id || (selectedLegacyPlan.value ? 'chapter-plan-v2:' + selectedLegacyPlan.value.id : '')
+  const id = detailPlan.value?.id || (selectedAuthorPlan.value ? 'chapter-plan:' + selectedAuthorPlan.value.id : '')
   openPlanner(id ? 'scenes' : 'plans', id)
 }
 function startOutline() { outlineDraft.value = novel.value?.outline || ''; outlineError.value = ''; editingOutline.value = true }

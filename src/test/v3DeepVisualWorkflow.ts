@@ -56,7 +56,7 @@ function prepareCurrentReview(novelId: string, chapter: Chapter): void {
   }, SYNTHETIC_NOW, () => 'v3-deep-time-' + (novel.storyClock?.confirmationSequence || 0))
   chapter.summary = '码头挑夫整理麻袋，豆腐铺照常开门，港城日常尚未引出新的调查。'
   chapter.summarySource = createChapterSourceBinding(chapter, chapter.summary, 'author', SYNTHETIC_NOW)
-  // V2 semantics: accepting individual candidates writes Canon; finalization only audits them.
+  // Accepting individual candidates writes Canon; finalization only audits them.
   // Exercise both a real accepted record and a remaining proposal in the adapted prototype state.
   const quotes = chapter.content.split('\n').filter(Boolean)
   const changes = buildChapterAnalysisCandidates(novel, chapter, buildAnalysisSourceVersionId(chapter.content), { events: [

@@ -16,7 +16,7 @@ export interface ChapterWorkflowInput {
   content: string
   contextVersion: string
   lengthPolicy: ChapterLengthPolicy
-  /** 本章是否有章纲（ChapterPlanV2 或旧章节计划） */
+  /** 本章是否有章纲（StructuredChapterPlan 或旧章节计划） */
   hasPlan: boolean
   storyTimeKnown: boolean
   latestReview?: ChapterReview

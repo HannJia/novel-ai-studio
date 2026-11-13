@@ -1,12 +1,12 @@
 // 写作日历：本机按日记录进入正文的新增字数。只记数字，不记正文；不进入项目备份或云同步。
 // 做法：定期比较每章字数与上次快照，只累计增长部分（删改不扣减），因此任何界面里的写作都会被记录。
-// “采纳 AI”由新界面在接受候选时显式登记；旧界面接受候选的字数计入“作者”。
+// “采纳 AI”在接受候选时显式登记；作者输入单独记录。
 import { readonly, ref } from 'vue'
 import { useNovelStore } from '@/stores/novel'
 import { cloudApplyBusy, projectTransferBusy } from '@/services/appLifecycle'
 
 export interface DayEntry { total: number; ai: number; books: Record<string, number> }
-const KEY = 'mojian-writing-log-v1'
+const KEY = 'mojian-v3-writing-log'
 const KEEP_DAYS = 400
 const log = ref<Record<string, DayEntry>>({})
 const snapshot = new Map<string, number>()

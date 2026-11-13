@@ -1,6 +1,7 @@
+import { confirmTestStoryContract as confirmStoryContract } from '@/test/contractCardsFixture'
 import { describe, expect, it } from 'vitest'
 import type { Novel } from '@/types/novel'
-import { buildConfirmedSkeletonConstraint, buildPlotSkeletonFromOutline, buildPlotSkeletonPrompt, confirmCreationSkeleton, confirmStoryContract, reviseStoryContract, createCreationDraftFromNovel, syncCreationDraftFromOutline, syncCreationDraftPlanning } from './reconstructionCreation'
+import { buildConfirmedSkeletonConstraint, buildPlotSkeletonFromOutline, buildPlotSkeletonPrompt, confirmCreationSkeleton,  reviseStoryContract, createCreationDraftFromNovel, syncCreationDraftFromOutline, syncCreationDraftPlanning } from './reconstructionCreation'
 
 const now = '2026-10-26T00:00:00.000Z'
 

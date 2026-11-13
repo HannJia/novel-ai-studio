@@ -53,28 +53,14 @@ function checkedLibrary(value: ProjectLibraryState, allowEmpty = false): Project
   return clone({ revision: value.revision, backup: value.backup, sync: value.sync })
 }
 
-/** One-time transfer from the current local V2 state; the old file is retained. */
+/** Open the native V3 project library; a new library starts empty. */
 export async function initializeProjectKernel(): Promise<void> {
   if (initialized || !hasProjectKernelBridge()) return
   if (!initializing) initializing = (async () => {
     let current = checkedLibrary(await invoke<ProjectLibraryState>({ method: 'read' }), true)
     if (!current.backup) {
-      // Adapters use the existing database only until this transfer commits. This
-      // path cannot run again once a main-process library has been published.
-      const [{ loadAllNovelsFromDb }, { loadAllKnowledgeBasesFromDb }, { loadProjectChapterRevisions },
-        { loadInspirationSessions }, { loadReconstructionWorkspace }, { readCloudState, readCloudConflicts }] = await Promise.all([
-        import('./db/novels'), import('./db/knowledge'), import('./db/chapterRevisions'), import('./db/inspirationSessions'),
-        import('./db/reconstruction'), import('./db/cloudSync'),
-      ])
-      const [novels, knowledgeBases, chapterRevisions, inspirationSessions, state, conflicts] = await Promise.all([
-        loadAllNovelsFromDb(), loadAllKnowledgeBasesFromDb(), loadProjectChapterRevisions(), loadInspirationSessions(), readCloudState(), readCloudConflicts(),
-      ])
-      const reconstructionWorkspaces = await Promise.all(novels.map(async novel => {
-        const workspace = await loadReconstructionWorkspace(novel.id)
-        return { ...workspace, novelId: novel.id, chapterReviews: workspace.chapterReviews || [], aiRuns: workspace.aiRuns || [] }
-      }))
-      const backup = parseProjectBackup(JSON.stringify(createProjectBackup({ novels, knowledgeBases, chapterRevisions, inspirationSessions, reconstructionWorkspaces })))
-      current = await invoke<ProjectLibraryState>({ method: 'commit', baseRevision: current.revision, backup, sync: { state, conflicts } })
+      const backup = createProjectBackup({ novels: [], knowledgeBases: [], chapterRevisions: [], inspirationSessions: [], reconstructionWorkspaces: [] })
+      current = await invoke<ProjectLibraryState>({ method: 'commit', baseRevision: current.revision, backup, sync: { state: null, conflicts: [] } })
     }
     library = checkedLibrary(current)
     initialized = true

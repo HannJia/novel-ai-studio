@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { GlobalThemeOverrides } from 'naive-ui'
 
-// 主题键名保持不变，兼容已保存在 localStorage 中的偏好
+// V3 主题与原生控件使用统一色板。
 export type ThemeName = 'fanqie' | 'eyecare' | 'dark'
 
 export interface ThemeOption {
@@ -15,9 +15,9 @@ export interface ThemeOption {
 
 // 主题选项列表
 export const themeOptions: ThemeOption[] = [
-  { name: 'fanqie', label: '宣纸', description: '东方书卷，淡雅舒适', swatch: ['#F6F1E7', '#B83A2E'] },
-  { name: 'eyecare', label: '护眼', description: '柔和豆青，长时写作', swatch: ['#E9EEDD', '#47695A'] },
-  { name: 'dark', label: '夜墨', description: '深色护眼，专注沉浸', swatch: ['#191C20', '#D86A5C'] },
+  { name: 'fanqie', label: '宣纸', description: '东方书卷，淡雅舒适', swatch: ['#ECE7DC', '#B8321F'] },
+  { name: 'eyecare', label: '青瓷', description: '柔和豆青，长时写作', swatch: ['#E3E9E4', '#2C5470'] },
+  { name: 'dark', label: '夜墨', description: '深色护眼，专注沉浸', swatch: ['#141311', '#E0634B'] },
 ]
 
 interface Palette {
@@ -34,26 +34,26 @@ interface Palette {
   text: string
 }
 
-// 与 variables.css 中三套主题保持一致
+// 与 V3 设计系统的原生色板保持一致。
 const palettes: Record<ThemeName, Palette> = {
   fanqie: {
-    primary: '#B83A2E', primaryHover: '#C94C3F', primaryPressed: '#9E3026',
-    info: '#3E5C6B', success: '#5E8C6A', warning: '#B7832F', error: '#B83A2E',
-    body: '#F6F1E7', card: '#FBF8F2', border: '#E3DACB', text: '#2B2A28',
+    primary: '#B8321F', primaryHover: '#C44632', primaryPressed: '#9E281A',
+    info: '#2F4F6A', success: '#3F7A64', warning: '#A87A1E', error: '#B8321F',
+    body: '#ECE7DC', card: '#FCFAF5', border: '#DDD5C6', text: '#1E1C19',
   },
   eyecare: {
-    primary: '#A8432F', primaryHover: '#B85540', primaryPressed: '#8E3726',
-    info: '#47695A', success: '#4F7D5B', warning: '#A57A2E', error: '#A8432F',
-    body: '#E9EEDD', card: '#F1F4E8', border: '#CFD8C0', text: '#2D3328',
+    primary: '#B23A2A', primaryHover: '#C54A39', primaryPressed: '#963022',
+    info: '#2C5470', success: '#2F7A5E', warning: '#A87A1E', error: '#B23A2A',
+    body: '#E3E9E4', card: '#F8FAF7', border: '#CCD7CF', text: '#18221D',
   },
   dark: {
-    primary: '#D86A5C', primaryHover: '#E47F72', primaryPressed: '#C2594C',
-    info: '#7FA3B4', success: '#8DBB98', warning: '#D8B26A', error: '#E0837A',
-    body: '#191C20', card: '#22262C', border: '#343941', text: '#E6E0D4',
+    primary: '#E0634B', primaryHover: '#EA7B65', primaryPressed: '#C54D38',
+    info: '#7EA6C4', success: '#6FB596', warning: '#D6A84A', error: '#E0634B',
+    body: '#141311', card: '#1F1D1A', border: '#2E2B26', text: '#E9E3D6',
   },
 }
 
-const UI_FONT = "'Source Han Sans SC', 'Noto Sans SC', 'Microsoft YaHei', 'PingFang SC', -apple-system, sans-serif"
+const UI_FONT = "'Noto Sans SC Variable', 'Microsoft YaHei UI', system-ui, sans-serif"
 
 export const useThemeStore = defineStore('theme', () => {
   // 当前主题名
@@ -65,7 +65,7 @@ export const useThemeStore = defineStore('theme', () => {
   // 切换主题
   function switchTheme(theme: ThemeName) {
     // A storage failure must leave the visible theme unchanged during restore.
-    localStorage.setItem('novel-writer-theme', theme)
+    localStorage.setItem('mojian-v3-theme', theme)
     currentTheme.value = theme
     document.documentElement.setAttribute('data-theme', theme)
     // 持久化到 localStorage
@@ -73,7 +73,7 @@ export const useThemeStore = defineStore('theme', () => {
 
   // 初始化主题（从 localStorage 或默认）
   function initTheme() {
-    const saved = localStorage.getItem('novel-writer-theme') as ThemeName | null
+    const saved = localStorage.getItem('mojian-v3-theme') as ThemeName | null
     if (saved && ['fanqie', 'eyecare', 'dark'].includes(saved)) {
       switchTheme(saved)
     } else {

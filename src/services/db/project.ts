@@ -15,8 +15,6 @@ export function writeProjectRows(checked: ProjectBackup): void {
   for (const novel of checked.novels) writeNovelRows(novel)
   for (const revision of checked.chapterRevisions) writeChapterRevisionRow(revision)
   writeInspirationSessions(checked.inspirationSessions)
-  // Prevent a later first-time initialization from merging pre-import sessions.
-  execute("INSERT OR IGNORE INTO local_migrations(id) VALUES('inspiration-sessions')")
   for (const workspace of checked.reconstructionWorkspaces) writeReconstructionWorkspaceRows(workspace.novelId, workspace)
 }
 

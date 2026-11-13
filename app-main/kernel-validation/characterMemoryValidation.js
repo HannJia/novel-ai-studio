@@ -42,15 +42,14 @@ function assertStoredCharacterMemory(value, path = 'characterState') {
             continue;
         const state = object(change[field], path + '.' + field);
         if (change.kind === 'relationship') {
-            if (state.dimension !== undefined)
-                (0, characterMemoryIdentity_1.assertRelationshipDimension)(state.dimension);
+            (0, characterMemoryIdentity_1.assertRelationshipDimension)(state.dimension);
             continue;
         }
         if (change.kind !== 'knowledge')
             fail(path + '.kind');
-        if (state.proposition !== undefined) {
+        {
             const p = object(state.proposition, path + '.proposition');
-            if (p.version !== 1 || p.id !== state.factId || p.text !== state.fact || !['explicit', 'unresolved', 'legacy'].includes(String(p.identityStatus)))
+            if (p.version !== 1 || p.id !== state.factId || p.text !== state.fact || !['explicit', 'unresolved'].includes(String(p.identityStatus)))
                 fail(path + '.proposition.identity');
             text(p.id, path + '.proposition.id');
             text(p.text, path + '.proposition.text');
@@ -175,9 +174,6 @@ function assertStoredRelationshipDimensions(value) {
     const seen = new Set();
     for (const raw of value) {
         const row = object(raw, 'relationships');
-        // Unclassified legacy rows are readable without any migration or guessing.
-        if (row.dimension === undefined)
-            continue;
         const dimension = (0, characterMemoryIdentity_1.assertRelationshipDimension)(row.dimension);
         const key = JSON.stringify([row.targetId, dimension]);
         if (seen.has(key))

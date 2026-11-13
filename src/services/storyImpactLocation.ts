@@ -4,12 +4,15 @@ import type { StoryImpactRef } from '@/types/storyImpact'
 
 export function storyImpactLocation(novel: Novel, target: StoryImpactRef, workspace?: Pick<ReconstructionWorkspaceSnapshot, 'creationDraft' | 'storyMemories'>) {
   const params = { novelId: novel.id }
-  const planning = (tab: string, query: Record<string, string> = {}) => ({ name: 'WorkspacePlanning', params, query: { tab, ...query } })
+  const planning = (tab: string, query: Record<string, string> = {}) => {
+    const selection = tab === 'timeline' ? query.event : tab === 'arcs' ? query.arc : query.plan
+    return { name: 'V3Plan', params, query: { view: 'workbench', plannerTab: tab, ...query, ...(selection ? { plannerSelection: selection } : {}) } }
+  }
   switch (target.kind) {
     case 'novel': return target.id === novel.id ? planning('volumes') : undefined
     case 'volume': return novel.volumes.some(row => row.id === target.id) ? planning('volumes', { volume: target.id }) : undefined
-    case 'chapter': return novel.chapters.some(row => row.id === target.id) ? { name: 'WorkspaceEditor', params: { ...params, chapterId: target.id } } : undefined
-    case 'character': return novel.characters.some(row => row.id === target.id) ? { name: 'WorkspaceCharacters', params, query: { character: target.id } } : undefined
+    case 'chapter': return novel.chapters.some(row => row.id === target.id) ? { name: 'V3Write', params: { ...params, chapterId: target.id } } : undefined
+    case 'character': return novel.characters.some(row => row.id === target.id) ? { name: 'V3Characters', params, query: { character: target.id } } : undefined
     case 'event': return novel.eventLog.some(row => row.id === target.id) ? planning('timeline', { event: target.id }) : undefined
     case 'arc': return novel.storyArcs?.some(row => row.id === target.id) ? planning('arcs', { arc: target.id }) : undefined
     case 'node': {

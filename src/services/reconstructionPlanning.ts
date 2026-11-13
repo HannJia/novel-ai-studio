@@ -1,4 +1,4 @@
-import type { ChapterPlanV2, CreationDraft, ScenePlan } from '@/types/reconstruction'
+import type { StructuredChapterPlan, CreationDraft, ScenePlan } from '@/types/reconstruction'
 import type { Novel } from '@/types/novel'
 import { invalidateSceneApprovals, syncCreationDraftPlanning } from './reconstructionCreation'
 
@@ -22,7 +22,7 @@ export function confirmChapterPlan(draft: CreationDraft, planId: string, now: st
     stage: 'scene-outline', updatedAt: now }
 }
 
-export function reviseChapterPlan(draft: CreationDraft, plan: ChapterPlanV2, now: string): CreationDraft {
+export function reviseChapterPlan(draft: CreationDraft, plan: StructuredChapterPlan, now: string): CreationDraft {
   const existing = draft.chapterPlans.find(item => item.id === plan.id)
   if (!existing) throw new Error('找不到章节计划')
   const next = { ...existing, title: plan.title.trim(), objective: plan.objective.trim(), conflict: plan.conflict.trim(),
@@ -34,7 +34,7 @@ export function reviseChapterPlan(draft: CreationDraft, plan: ChapterPlanV2, now
     approval: { ...draft.approval, 'chapter-outline': 'draft', 'scene-outline': 'draft' }, updatedAt: now }
 }
 
-export function requireSceneParent(draft: CreationDraft, planId: string): ChapterPlanV2 {
+export function requireSceneParent(draft: CreationDraft, planId: string): StructuredChapterPlan {
   requireConfirmedStory(draft)
   const plan = draft.chapterPlans.find(item => item.id === planId && item.status !== 'archived')
   if (!plan || plan.approval !== 'approved') throw new Error('请先确认本章计划')

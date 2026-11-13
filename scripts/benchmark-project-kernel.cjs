@@ -134,7 +134,7 @@ function makeBackup(chapterCount, totalCharacters) {
   const novel = makeNovel(chapterCount, totalCharacters)
   return {
     format: 'ai-novel-writer-backup',
-    version: 2,
+    version: 3,
     exportedAt: isoDate(),
     novels: [novel],
     knowledgeBases: [],

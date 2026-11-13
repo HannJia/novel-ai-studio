@@ -30,13 +30,13 @@ export function assertStoredCharacterMemory(value: unknown, path = 'characterSta
     if (field === 'before' && change[field] === undefined) continue
     const state = object(change[field], path + '.' + field)
     if (change.kind === 'relationship') {
-      if (state.dimension !== undefined) assertRelationshipDimension(state.dimension)
+      assertRelationshipDimension(state.dimension)
       continue
     }
     if (change.kind !== 'knowledge') fail(path + '.kind')
-    if (state.proposition !== undefined) {
+    {
       const p = object(state.proposition, path + '.proposition')
-      if (p.version !== 1 || p.id !== state.factId || p.text !== state.fact || !['explicit','unresolved','legacy'].includes(String(p.identityStatus))) fail(path + '.proposition.identity')
+      if (p.version !== 1 || p.id !== state.factId || p.text !== state.fact || !['explicit','unresolved'].includes(String(p.identityStatus))) fail(path + '.proposition.identity')
       text(p.id, path + '.proposition.id'); text(p.text, path + '.proposition.text'); text(p.scope, path + '.proposition.scope')
       for (const key of ['subjectId','objectId']) if (p[key] !== undefined) text(p[key], path + '.proposition.' + key)
       if (p.identityStatus === 'explicit' && !p.subjectId) fail(path + '.proposition.subjectId')
@@ -125,8 +125,6 @@ export function assertStoredRelationshipDimensions(value: unknown) {
   const seen = new Set<string>()
   for (const raw of value as unknown[]) {
     const row = object(raw,'relationships')
-    // Unclassified legacy rows are readable without any migration or guessing.
-    if (row.dimension === undefined) continue
     const dimension = assertRelationshipDimension(row.dimension)
     const key = JSON.stringify([row.targetId, dimension])
     if (seen.has(key)) fail('relationships（同方向同维度重复）')

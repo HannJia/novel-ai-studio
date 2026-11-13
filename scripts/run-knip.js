@@ -2,7 +2,7 @@ const { spawnSync } = require('node:child_process')
 const path = require('node:path')
 
 const knipEntry = path.join(__dirname, '..', 'node_modules', 'knip', 'bin', 'knip.js')
-const result = spawnSync(process.execPath, [knipEntry, '--no-progress'], {
+const result = spawnSync(process.execPath, [knipEntry, '--no-progress', '--production', '--include', 'files,dependencies,unlisted,unresolved'], {
   stdio: 'inherit',
   env: {
     ...process.env,

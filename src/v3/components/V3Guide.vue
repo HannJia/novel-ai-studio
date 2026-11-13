@@ -33,7 +33,7 @@ const router = useRouter()
 const step = ref(0)
 const STEPS = [
   { title: '先配置 AI 模型', art: step1, actLabel: '打开设置', act: () => { emit('close'); void router.push('/settings') },
-    desc: '墨笺不内置 AI 额度。在“设置 → 模型配置”填写接口地址、密钥和模型名称，测试连接，再为大纲、写作、审校和对话分配模型。',
+    desc: '墨笔生花不内置 AI 额度。在“设置 → 模型配置”填写接口地址、密钥和模型名称，测试连接，再为大纲、写作、审校和对话分配模型。',
     points: ['密钥由系统安全存储加密，不进入项目备份', '不配置模型也能手动写作，AI 功能会提示先配置'] },
   { title: '新建一部作品', art: step2, actLabel: '去新建', act: () => { emit('close'); router.push('/create') },
     desc: '从一句灵感、已有大纲文件或空白模板开始。设定按“作品契约 → 故事骨架 → 分卷 → 章节 → 场景”逐层确认。',

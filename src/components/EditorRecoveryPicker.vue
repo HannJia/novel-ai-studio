@@ -31,7 +31,7 @@ function preview(draft: EditorDraft): string { return JSON.stringify(draft.paylo
 <style scoped>
 .editor-recovery { margin: 12px 0; padding: 12px; }
 summary, button { cursor: pointer; }
-article { border-top: 1px solid var(--border-color); padding: 12px 0; overflow-wrap: anywhere; }
+article { border-top: 1px solid var(--line-2); padding: 12px 0; overflow-wrap: anywhere; }
 button { margin: 8px 8px 0 0; }
 pre { max-height: 240px; overflow: auto; white-space: pre-wrap; }
 </style>

@@ -1,6 +1,6 @@
 import type { Novel } from '@/types/novel'
 import type { CreationDraft, PlotSkeleton, StoryContract, SkeletonSourceSelection } from '@/types/reconstruction'
-import { ensureSkeletonHistory, mixSkeletonRevisions, saveSkeletonRevision, skeletonContentSignature } from './creationDraft'
+import { captureSkeletonBaselines, mixSkeletonRevisions, saveSkeletonRevision, skeletonContentSignature } from './creationDraft'
 import { recoverPartialSkeletons } from './plotSkeletonResponse'
 import { buildAnalysisSourceVersionId } from './reconstructionCandidates'
 import type { StoryAggregate } from './storyAggregate'
@@ -71,14 +71,14 @@ export function applyCreationEdit(aggregate: StoryAggregate, edit: CreationEdit,
 
   if (edit.action === 'initialize') {
     if (!initialDraft && novel.outline.trim()) draft = syncCreationDraftFromOutline(draft, novel, novel.outline, now)
-    draft = ensureSkeletonHistory(draft, now, id)
+    draft = captureSkeletonBaselines(draft, now, id)
     fields = ['creationDraft']
   } else if (edit.action === 'contract') {
     draft = edit.confirm ? confirmStoryContract(draft, edit.contract, now) : reviseStoryContract(draft, edit.contract, now)
     if (edit.confirm) editNovelContextWithImpact(aggregate, { updates: { title: draft.contract.title.trim() }, fields: ['title'] }, now, id)
     fields = ['creationDraft.contract']
   } else if (edit.action === 'skeleton') {
-    draft = ensureSkeletonHistory(draft, now, id)
+    draft = captureSkeletonBaselines(draft, now, id)
     const skeleton = edit.skeleton && { ...edit.skeleton, complete: edit.authorComplete ? true : edit.skeleton.complete }
     draft = reviseCreationSkeleton(draft, edit.selectedId, skeleton, now, id)
     fields = ['creationDraft.skeletons']
@@ -86,7 +86,7 @@ export function applyCreationEdit(aggregate: StoryAggregate, edit: CreationEdit,
     draft = saveSkeletonRevision(draft, { id: id(), title: '', premise: '', logline: '', promise: '', ending: '', beats: [], approval: 'draft', complete: true, updatedAt: now }, 'author', now, id)
     fields = ['creationDraft.skeletons']
   } else if (edit.action === 'mix-skeleton') {
-    draft = ensureSkeletonHistory(draft, now, id)
+    draft = captureSkeletonBaselines(draft, now, id)
     const mixed = mixSkeletonRevisions(draft, edit.sources, now, id)
     draft = saveSkeletonRevision(draft, mixed, 'mixed', now, id, { sources: edit.sources })
     fields = ['creationDraft.skeletons']
@@ -108,7 +108,7 @@ export function applyCreationEdit(aggregate: StoryAggregate, edit: CreationEdit,
     draft.skeletonAttempts = draft.skeletonAttempts!.map(item => item.id === attempt.id ? { ...item, candidateIds: [...item.candidateIds, ...ids] } : item)
     fields = ['creationDraft.skeletons']
   } else if (edit.action === 'confirm-skeleton') {
-    draft = ensureSkeletonHistory(draft, now, id)
+    draft = captureSkeletonBaselines(draft, now, id)
     const confirmed = confirmCreationSkeleton(draft, now)
     if (confirmed !== draft) {
       bindImportedOutline = confirmed.outlineCandidate?.source === 'author'

@@ -18,7 +18,7 @@ import { runDesktopAutoWorkflow } from './desktopAutoWorkflow'
 import { runDesktopReviewWorkflow } from './desktopReviewWorkflow'
 import { runDesktopAutoControlsWorkflow } from './desktopAutoControlsWorkflow'
 
-const title = 'V2桌面验收·渡口钥匙（合成作品）'
+const title = 'V3桌面验收·渡口钥匙（合成作品）'
 const reviewTitle = 'V3桌面验收·独立批量审校（合成作品）'
 const controlsTitle = 'V3桌面验收·自动任务按钮（合成作品）'
 const prose = '林澈拿到了钥匙。雨水沿着桥栏流进河里，他停在渡口，向守夜人打听最后一班船。守夜人摇了摇头，说雾没有散，船不会开。\n\n林澈取出衣袋里的信，封口还留着一层薄蜡。他没有拆开，只把潮湿的边角压平。桥对岸的灯亮了一次，随即熄灭。他不认识约他来的人，也不愿把信交给任何陌生人。\n\n守夜人收好绳索，提醒他天亮以后再来。林澈点头，转身走向街角的客栈。他决定先找个干燥的地方，再仔细看看信封上的字。'
@@ -27,7 +27,7 @@ const summary = '林澈取得钥匙后在渡口等待，守夜人因雾停船。
 const eventTitle = '取得渡口钥匙'
 const contractRecoveryInput = '合成桌面恢复输入：先讨论渡口视角，尚未发送。'
 const assert: (condition: unknown, message: string) => asserts condition = (condition, message) => {
-  if (!condition) throw new Error('V2 desktop: ' + message)
+  if (!condition) throw new Error('V3 desktop: ' + message)
 }
 
 async function until(check: () => unknown, label: string, timeoutMs = 20000) {
@@ -70,7 +70,7 @@ function dismissV3Guide() {
   document.querySelector<HTMLButtonElement>('.v3 .m-modal.guide [aria-label="关闭"]')?.click()
 }
 async function openEditor(novelId: string, chapterId: string) {
-  await router.push(`/workspace/${novelId}/editor/${chapterId}`)
+  await router.push(`/write/${novelId}/${chapterId}`)
   dismissV3Guide()
   await until(() => document.querySelector('.pte-doc'), 'V3 editor not rendered')
   // Let the initial empty chapter recovery checkpoint finish before typing.

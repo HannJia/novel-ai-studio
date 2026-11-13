@@ -40,7 +40,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useNovelStore } from '@/stores/novel'
 import { useReconstructionWorkspaceStore } from '@/stores/reconstructionWorkspace'
-import GenerateOutline from '@/views/GenerateOutline.vue'
+import GenerateOutline from '@/v3/create/DirectionEditor.vue'
 import CreationPlanning from './CreationPlanning.vue'
 
 defineOptions({ name: 'V3CreateFlowView' })
@@ -72,6 +72,7 @@ onMounted(() => { if (novelId.value) void workspace.hydrateFromPersistence(novel
 </script>
 
 <style scoped>
+
 .creation-flow { position: absolute; inset: 0; overflow: auto; padding: 28px 40px 60px; background: var(--desk); color: var(--ink); }
 .flow-head { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .flow-kicker { color: var(--zhu); font-size: 11px; }
@@ -88,25 +89,10 @@ onMounted(() => { if (novelId.value) void workspace.hydrateFromPersistence(novel
 .flow-steps li.done .flow-step-number { border-color: var(--qing); background: var(--qing-soft); color: var(--qing); }
 .flow-steps li.active .flow-step-number { border-color: var(--zhu); background: var(--zhu); color: #fff; }
 .flow-content { max-width: 1160px; margin: 0 auto; }
-.flow-content :deep(.generate-page) { width: 100%; height: auto; min-height: 0; padding: 20px 0 48px; overflow: visible; align-items: stretch; gap: 18px; color: var(--ink); }
-.flow-content :deep(.generate-animation) { display: none; }
-.flow-content :deep(.generate-header) { max-width: 100%; text-align: left; }
-.flow-content :deep(.generate-header h2) { margin: 0; color: var(--ink); font: 600 20px/1.5 var(--f-serif); }
-.flow-content :deep(.generate-header p) { color: var(--ink-3); }
-.flow-content :deep(.structured-plan-status) { width: fit-content; max-width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink-3); }
-.flow-content :deep(.generate-page.outline-ready) { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(280px, .8fr); align-items: start; gap: 16px; max-width: none; padding: 20px 0 48px; margin: 0; overflow: visible; }
-.flow-content :deep(.outline-ready .generate-header) { grid-column: 1 / -1; }
-.flow-content :deep(.generate-page.choosing-skeleton) { display: flex; flex-direction: column; align-items: stretch; }
-.flow-content :deep(.outline-ready .generate-header h2) { font-size: 23px; }
-.flow-content :deep(.outline-ready .output-container) { min-height: 460px; border-color: var(--line); border-radius: 8px; background: var(--paper); }
-.flow-content :deep(.outline-ready .generate-actions) { position: sticky; top: 16px; align-self: start; padding: 20px; border-color: var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); }
-.flow-content :deep(.paper-panel) { border-color: var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); }
 .flow-missing { max-width: 620px; margin: 56px auto; padding: 24px; text-align: center; }
 .crumb-link { color: var(--ink-3); text-decoration: none; }.crumb-link:hover { color: var(--zhu); }.crumb-sep { color: var(--ink-4); }.crumb-book { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }.crumb-current { color: var(--ink); font-weight: 600; }
 @media (max-width: 900px) {
   .creation-flow { padding: 20px 20px 40px; }
-  .flow-content :deep(.generate-page.outline-ready) { grid-template-columns: minmax(0, 1fr); }
-  .flow-content :deep(.outline-ready .generate-actions) { position: static; }
 }
 @media (max-width: 580px) {
   .creation-flow { padding: 16px 14px 32px; }
@@ -117,4 +103,5 @@ onMounted(() => { if (novelId.value) void workspace.hydrateFromPersistence(novel
   .flow-steps li::after { top: 12px; left: 31px; right: 4px; }
   .flow-step-number { width: 22px; height: 22px; }
 }
+
 </style>

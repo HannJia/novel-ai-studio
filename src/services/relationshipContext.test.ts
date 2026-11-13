@@ -60,15 +60,15 @@ describe('one relationship state across AI inputs and retrieval', () => {
     expect(character.retrieval).toMatchObject({ method: 'local', indexed: false })
   })
 
-  it('keeps an undimensioned author relationship visible as labeled historical context', () => {
+  it('keeps an explicitly unclassified author relationship visible as labeled context', () => {
     const { novel, records } = setup()
-    novel.characters[0].relationships = [{ targetId: 'person-1', targetName: '苏禾', relation: '宿敌' }]
+    novel.characters[0].relationships = [{ targetId: 'person-1', targetName: '苏禾', relation: '宿敌', dimension: 'unclassified' }]
     const chapter = novel.chapters[2]
     const writing = buildWritingContext(novel, chapter, 20000, undefined, records)
     const review = buildReviewContext(novel, chapter, chapter.content, 20000, undefined, undefined, records)
     const character = buildSemanticRecords(novel, [], 2, [], records).find(row => row.sourceId === 'person-0')!
     expect(review.characters).toContain('苏禾(宿敌)')
-    expect(writing.semanticEvidence).toContain('未分类历史:宿敌（作者基础设定）')
-    expect(character.content).toContain('未分类历史:宿敌（作者基础设定）')
+    expect(writing.semanticEvidence).toContain('待分类:宿敌（作者基础设定）')
+    expect(character.content).toContain('待分类:宿敌（作者基础设定）')
   })
 })

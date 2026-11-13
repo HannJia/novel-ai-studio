@@ -66,8 +66,8 @@ export interface EntityRevision {
   appliedAt: string
   changes: EntityFieldChange[]
   /**
-   * A legacy entity can receive its first tracked update after it already
-   * existed in the author's data.  These values are the truthful pre-update
+   * An author-defined entity can receive its first tracked update after it
+   * was created. These values are the truthful pre-update
    * baseline and are intentionally separate from chapter evidence.
    */
   baseline?: EntityFieldChange[]

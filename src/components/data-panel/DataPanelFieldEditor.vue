@@ -194,16 +194,16 @@ function parseRules(text: string): RuleRow[] {
 
 <style scoped>
 .field-editor { display: grid; gap: 14px; min-width: 0; }
-.formula-error { color: var(--color-error); margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+.formula-error { color: var(--zhu); margin: 0; font-size: 12px; overflow-wrap: anywhere; }
 .editor-section { display: grid; gap: 8px; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; }
 .field-list, .rule-list { display: grid; gap: 8px; }
 .field-row { display: grid; grid-template-columns: 1.2fr 1fr 80px 120px 1.2fr 34px; gap: 6px; align-items: center; min-width: 0; }
 .rule-row { display: grid; grid-template-columns: 1fr 120px 100px 1fr 34px; gap: 6px; align-items: center; min-width: 0; }
-.formula-placeholder { text-align: center; color: var(--text-color-tertiary); }
-.field-editor > label { font-size: 13px; font-weight: 600; color: var(--text-color-secondary); }
+.formula-placeholder { text-align: center; color: var(--ink-3); }
+.field-editor > label { font-size: 13px; font-weight: 600; color: var(--ink-2); }
 @media (max-width: 720px) {
-  .field-row, .rule-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); padding-bottom: 10px; border-bottom: 1px solid var(--border-color-light); }
+  .field-row, .rule-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); padding-bottom: 10px; border-bottom: 1px solid var(--line); }
   .field-row > :last-child, .rule-row > :last-child { justify-self: end; }
 }
 </style>

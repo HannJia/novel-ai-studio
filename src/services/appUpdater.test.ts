@@ -6,7 +6,7 @@ import path from 'node:path'
 const requireLocal = createRequire(path.resolve('app-main/main.js'))
 const { createUpdateController, parseRelease, validateManifest } = requireLocal('./updater.cjs')
 const { createUpdateHandshake } = requireLocal('./updateHandshake.cjs')
-const installer = 'AI-Novel-Writer-1.0.3-x64.exe'
+const installer = 'mobish-1.0.3.exe'
 function release() {
   return { tag_name: 'v1.0.3', body: '# 修复问题', published_at: '2026-09-13T08:00:00Z',
     assets: [{ name: installer, state: 'uploaded', size: 300 }, { name: 'latest.yml', state: 'uploaded', size: 200 }] }

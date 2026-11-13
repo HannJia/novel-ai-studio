@@ -161,21 +161,6 @@ describe('isolated autonomous chapter drafts', () => {
       mocks.requestCoveredContentReview.mockClear()
     }
   })
-  it('restores the incomplete marker for legacy runs before resuming them', async () => {
-    const novel = makeNovel(), runtime = makeRuntime(novel).runtime
-    mocks.callAI.mockResolvedValueOnce({ content: '未完成候选', finishReason: 'length' })
-    const previous = await execute(novel, runtime)
-    const legacy = JSON.parse(JSON.stringify(previous))
-    delete legacy.chapterDrafts[0].generationFinishReason
-    legacy.error = '生成输出未正常完成（length），已保存候选稿，请先检查后重试。'
-
-    const resumed = await execute(novel, runtime, legacy)
-    expect(resumed.status).toBe('needs_author')
-    expect(resumed.chapterDrafts?.[0].generationFinishReason).toBe('length')
-    expect(resumed.error).toContain('尚未进入审校')
-    expect(mocks.callAI).toHaveBeenCalledOnce()
-    expect(mocks.requestCoveredContentReview).not.toHaveBeenCalled()
-  })
   it('keeps exact generated content and review in the run without changing the formal manuscript', async () => {
     const novel = makeNovel(), before = JSON.stringify(novel), { runtime, saved, structuredReviews } = makeRuntime(novel)
     const content = String.fromCharCode(10) + '这是生成的正文。' + String.fromCharCode(10)
@@ -231,21 +216,6 @@ describe('isolated autonomous chapter drafts', () => {
     expect(mocks.callAI).toHaveBeenCalledTimes(1)
     expect(mocks.requestCoveredContentReview).toHaveBeenCalledTimes(1)
     expect(runtime.extractCandidates).toHaveBeenCalledTimes(2)
-  })
-  it.each(['review-v4:', 'review-v5:', 'review-v6:', 'review-v7:'])('preserves an older %s report without counting the resumed draft as currently reviewed', async protocol => {
-    const novel = makeNovel(), { runtime } = makeRuntime(novel)
-    mocks.callAI.mockResolvedValue({ content: '合成候选正文。' })
-    const old = await execute(novel, runtime)
-    old.status = 'needs_author'; old.checkpoint = 'chapter-0:review-needs-author'
-    old.chapterDrafts![0].review!.sourceVersionId = old.chapterDrafts![0].review!.sourceVersionId.replace('review-v8:', protocol)
-    const before = JSON.stringify(old.chapterDrafts)
-    const resumed = await execute(novel, runtime, old)
-    expect(resumed.status).toBe('needs_author')
-    expect(resumed.error).toContain('审核规则已变化')
-    expect(JSON.stringify(resumed.chapterDrafts)).toBe(before)
-    expect(mocks.callAI).toHaveBeenCalledOnce()
-    expect(mocks.requestCoveredContentReview).toHaveBeenCalledOnce()
-    expect(novel.chapters[0].content).toBe('')
   })
   it('uses earlier task drafts only in the task view when completing a range', async () => {
     const novel = makeNovel()

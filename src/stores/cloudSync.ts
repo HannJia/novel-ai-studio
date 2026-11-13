@@ -15,7 +15,7 @@ import { chapterBackgroundQueue } from '@/services/aiTaskQueue'
 import { activeAiCount } from '@/services/aiActivity'
 import { exportProjectSnapshot, projectTransferBusy } from '@/services/projectTransfer'
 
-const SESSION_KEY = 'novel-cloud-session'
+const SESSION_KEY = 'mojian-v3-cloud-session'
 
 export const useCloudSyncStore = defineStore('cloudSync', () => {
   const state = ref<SyncState>(emptySyncState())

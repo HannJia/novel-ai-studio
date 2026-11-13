@@ -1,6 +1,6 @@
-/* 墨笺 V3「朱批」设计系统。全部限定在 .v3 根节点下，不影响旧界面。
+/* 墨笔生花 V3「朱批」设计系统。全部限定在 .v3 根节点下。
    主题沿用 stores/theme.ts 的 data-theme：fanqie=宣纸，eyecare=青瓷（护眼），dark=夜墨。 */
-.v3 {
+:root {
   /* 内置字体由 main.ts 引入：思源宋体(Noto Serif SC)、思源黑体(Noto Sans SC)、霞鹜文楷、JetBrains Mono，离线随包。 */
   --f-ui: "Noto Sans SC Variable", "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
   --f-serif: "Noto Serif SC Variable", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", serif;
@@ -18,8 +18,13 @@
   --r-s: 6px; --r-m: 10px; --r-l: 14px;
   --ease: cubic-bezier(.2, .7, .2, 1);
   --art-blend: multiply; --art-filter: none;
+  --zhu-hover: color-mix(in srgb, var(--zhu), var(--ink) 12%); --zhu-pressed: color-mix(in srgb, var(--zhu), var(--ink) 20%); --dai-hover: color-mix(in srgb, var(--dai), var(--ink) 12%); --on-accent: #fffdf8;
+  --space-xs: 4px; --space-sm: 8px; --space-md: 16px; --space-lg: 24px; --space-xl: 32px; --space-2xl: 48px;
+  --motion-fast: .15s ease; --motion-normal: .25s ease; --motion-slow: .35s ease;
+  --scrollbar-track: transparent; --scrollbar-thumb: color-mix(in srgb, var(--ink), transparent 84%); --scrollbar-thumb-hover: color-mix(in srgb, var(--ink), transparent 72%); --content-max-width: 1440px;
+
 }
-[data-theme="dark"] .v3 {
+[data-theme="dark"] {
   --desk: #141311; --desk-2: #1A1916; --paper: #1F1D1A; --panel: #191815; --panel-2: #22201C;
   --line: #2E2B26; --line-2: #3A3630; --hover: #ffffff08;
   --ink: #E9E3D6; --ink-2: #BDB5A6; --ink-3: #8C8477; --ink-4: #5F594F;
@@ -31,7 +36,7 @@
   --shadow-1: 0 1px 2px #0006; --shadow-2: 0 2px 8px #0005, 0 12px 32px #0004; --shadow-3: 0 24px 64px #000a;
   --art-blend: normal; --art-filter: invert(.88) hue-rotate(180deg) saturate(.7) brightness(.9);
 }
-[data-theme="eyecare"] .v3 {
+[data-theme="eyecare"] {
   --desk: #E3E9E4; --desk-2: #D9E1DB; --paper: #F8FAF7; --panel: #F0F4F0; --panel-2: #E8EEE9;
   --line: #CCD7CF; --line-2: #B9C7BD; --ink: #18221D; --ink-2: #3E4C44; --ink-3: #6E7D74; --ink-4: #A0ADA5;
   --rail: #1C2A24; --rail-ink: #B9C9BF; --rail-hi: #EEF5F0; --zhu: #B23A2A; --dai: #2C5470; --qing: #2F7A5E;

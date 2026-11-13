@@ -18,9 +18,9 @@ function allConfirmed(contract = fixture().contract) {
   return contractCards.reduce((value, card) => toggleContractCard(value, card.id, now), contract)
 }
 describe('author contract cards and exploration', () => {
-  it('requires eight explicit confirmations for the new UI while retaining legacy whole-contract callers', () => {
+  it('requires eight explicit author confirmations for every contract approval', () => {
     const draft = fixture()
-    expect(confirmStoryContract(draft, draft.contract, now).contract.approval).toBe('approved')
+    expect(() => confirmStoryContract(draft, draft.contract, now)).toThrow('八张')
     expect(() => confirmStoryContract(draft, materializeContractConfirmations(draft.contract), now)).toThrow('八张')
     const confirmed = confirmStoryContract(draft, allConfirmed(draft.contract), now)
     expect(confirmed.stage).toBe('skeleton')
@@ -34,8 +34,8 @@ describe('author contract cards and exploration', () => {
     expect(revised.contract.worldRules).toEqual(['代价'])
     expect(revised.contract.cardConfirmations).toHaveLength(7)
   })
-  it('keeps approved plans and semantic signatures when materializing old confirmations, and invalidates on withdrawal', () => {
-    const draft = confirmStoryContract(fixture(), fixture().contract, now)
+  it('keeps confirmed plans and semantic signatures on reopening, and invalidates on withdrawal', () => {
+    const draft = confirmStoryContract(fixture(), allConfirmed(fixture().contract), now)
     draft.approval.skeleton = 'approved'
     draft.skeletons = [{ id: 's', title: '渡口', premise: '旧信', logline: '查信', promise: '解谜', ending: '离开', beats: [], approval: 'approved', updatedAt: now }]
     draft.selectedSkeletonId = 's'

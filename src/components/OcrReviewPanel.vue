@@ -145,17 +145,17 @@ defineExpose({ stop })
 </script>
 
 <style scoped>
-.ocr-review { display:grid; gap:12px; border-top:1px solid var(--border-color-light); padding-top:14px; min-width:0; }
+.ocr-review { display:grid; gap:12px; border-top:1px solid var(--line); padding-top:14px; min-width:0; }
 .ocr-heading,.ocr-controls,.ocr-issue-top { display:flex; gap:8px; align-items:center; flex-wrap:wrap; min-width:0; }
-.ocr-heading > span,.ocr-issue-top > span,.ocr-note { font-size:12px; color:var(--text-color-secondary); }
+.ocr-heading > span,.ocr-issue-top > span,.ocr-note { font-size:12px; color:var(--ink-2); }
 .ocr-controls label { display:flex; gap:8px; align-items:center; font-size:12px; }
 .ocr-controls :deep(.n-input-number) { width:100px; }
-.ocr-issue { border-top:1px solid var(--border-color-light); padding-top:10px; }
+.ocr-issue { border-top:1px solid var(--line); padding-top:10px; }
 .ocr-issue p,.ocr-note { overflow-wrap:anywhere; white-space:pre-wrap; margin:6px 0; }
 .ocr-issue p { font-size:13px; }
 .ocr-issue-top strong { font-size:13px; }
-.ocr-suggestion { color:var(--text-color-secondary); }
-.ocr-error { color:var(--color-error); font-size:13px; overflow-wrap:anywhere; }
+.ocr-suggestion { color:var(--ink-2); }
+.ocr-error { color:var(--zhu); font-size:13px; overflow-wrap:anywhere; }
 .ocr-native { max-height:180px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; font-size:12px; }
 :global(.ocr-detail) { width:min(900px,calc(100vw - 32px)); }
 .ocr-detail img { display:block; width:100%; max-height:50vh; object-fit:contain; background:white; margin-bottom:12px; }

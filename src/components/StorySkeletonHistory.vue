@@ -26,8 +26,8 @@ defineProps<{ history: SkeletonRevision[]; attempts: SkeletonGenerationAttempt[]
 const emit = defineEmits<{ restore: [id: string]; retry: [id: string]; continue: [id: string]; recover: [id: string] }>()
 const fields = [{ key: 'premise', label: '故事前提' }, { key: 'logline', label: '一句话主线' }, { key: 'promise', label: '读者承诺' }, { key: 'ending', label: '结局方向' }] as const
 const statusLabel = (status: SkeletonGenerationAttempt['status']) => ({ queued: '待发出', running: '未结束（离页或重开后可恢复）', completed: '已完整返回', partial: '未完整返回', failed: '失败', cancelled: '已取消', interrupted: '已中断', conflict: '基线冲突，输出已保留' }[status])
-const kindLabel = (kind: SkeletonRevision['kind']) => ({ legacy: '原有候选', model: '模型候选', author: '作者保存', mixed: '手工混合', restored: '历史恢复', confirmed: '作者确认', import: '大纲提取' }[kind])
+const kindLabel = (kind: SkeletonRevision['kind']) => ({ initial: '初始候选', model: '模型候选', author: '作者保存', mixed: '手工混合', restored: '历史恢复', confirmed: '作者确认', import: '大纲提取' }[kind])
 </script>
 <style scoped>
-.skeleton-history { width:100%; max-width:1100px; padding:24px; box-sizing:border-box; } details { border-top:1px solid var(--border-color); padding:12px 0; } summary { cursor:pointer; } pre, dd, li p { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.7; } pre { max-height:360px; overflow:auto; } .actions { display:flex; flex-wrap:wrap; gap:12px; } button { cursor:pointer; padding:8px; } p { color:var(--text-color-secondary); }
+.skeleton-history { width:100%; max-width:1100px; padding:24px; box-sizing:border-box; } details { border-top:1px solid var(--line-2); padding:12px 0; } summary { cursor:pointer; } pre, dd, li p { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.7; } pre { max-height:360px; overflow:auto; } .actions { display:flex; flex-wrap:wrap; gap:12px; } button { cursor:pointer; padding:8px; } p { color:var(--ink-2); }
 </style>

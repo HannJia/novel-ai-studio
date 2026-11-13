@@ -377,7 +377,7 @@ export function buildWritingContext(
   }
 
   const result = {
-    outlineContext: limitText('\n\n【V2 结构化故事状态】\n' + structuredState + storyClockContext + outlineContext + volumeContext + storyArcContext + timelineContext + characterContext + globalPlanContext + knowledgeContext + (semanticEvidence ? '\n\n【语义记忆召回】\n' + semanticEvidence : ''), maxContext),
+    outlineContext: limitText('\n\n【V3 结构化故事状态】\n' + structuredState + storyClockContext + outlineContext + volumeContext + storyArcContext + timelineContext + characterContext + globalPlanContext + knowledgeContext + (semanticEvidence ? '\n\n【语义记忆召回】\n' + semanticEvidence : ''), maxContext),
     previousSummary,
     lastParagraph,
     chapterGuidance,

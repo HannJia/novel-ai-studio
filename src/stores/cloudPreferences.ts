@@ -12,8 +12,8 @@ import { chapterBackgroundQueue } from '@/services/aiTaskQueue'
 import { cloudApplyBusy, cloudPreferencesBusy, cloudConfigApplying, appUpdateInstalling } from '@/services/appLifecycle'
 import { projectTransferBusy } from '@/services/projectTransfer'
 
-interface PreferenceState { enabled: boolean; version: number; hash: string; localDigest: string; schema: 1 | 2 }
-const emptyState = (): PreferenceState => ({ enabled: false, version: 0, hash: '', localDigest: '', schema: 1 })
+interface PreferenceState { enabled: boolean; version: number; hash: string; localDigest: string; schema: 2 }
+const emptyState = (): PreferenceState => ({ enabled: false, version: 0, hash: '', localDigest: '', schema: 2 })
 
 interface AccountKey { scope: string; token: string; key: string }
 
@@ -32,7 +32,6 @@ export const useCloudPreferencesStore = defineStore('cloudPreferences', () => {
   const conflict = ref(false)
   const initialized = ref(false)
   const archiveCount = ref(0)
-  const needsLegacyUnlock = computed(() => remote.value && parsePreferences(remote.value.payload).schema === 1)
 
   let scope = ''
   let accountKey: AccountKey | null = null
@@ -42,8 +41,8 @@ export const useCloudPreferencesStore = defineStore('cloudPreferences', () => {
   let ticking = false
 
   const currentScope = () => sync.session ? JSON.stringify([sync.session.endpoint, sync.session.user.id]) : ''
-  const stateKey = () => 'mojian-cloud-preferences:' + scope
-  const archiveKey = () => 'mojian-cloud-preference-archives:' + scope
+  const stateKey = () => 'mojian-v3-cloud-preferences:' + scope
+  const archiveKey = () => 'mojian-v3-cloud-preference-archives:' + scope
   const localSnapshot = () => ({ config: config.exportConfig(), theme: theme.currentTheme })
   const localDigest = () => hashPayload(canonicalJson(localSnapshot())) as Promise<string>
   const context = async (auth: CloudSession, bundle: Pick<PreferencesBundle, 'settings'>) => ({ endpoint: auth.endpoint, userId: auth.user.id, settingsHash: await settingsDigest(bundle.settings) })
@@ -73,7 +72,7 @@ export const useCloudPreferencesStore = defineStore('cloudPreferences', () => {
       const saved = JSON.parse(localStorage.getItem(stateKey()) || 'null')
       if (saved && typeof saved.enabled === 'boolean' && Number.isSafeInteger(saved.version) && saved.version >= 0
         && typeof saved.hash === 'string' && typeof saved.localDigest === 'string') {
-        state.value = { ...saved, schema: saved.schema === 2 ? 2 : 1 }
+        state.value = { ...saved, schema: 2 }
       }
       archiveCount.value = JSON.parse(localStorage.getItem(archiveKey()) || '[]').length
     } catch { error.value = '本机配置同步记录读取失败，原有模型配置未改变。' }
@@ -82,9 +81,9 @@ export const useCloudPreferencesStore = defineStore('cloudPreferences', () => {
 
   watch(() => JSON.stringify([currentScope(), sync.session?.token]), reset, { flush: 'sync' })
 
-  function archive(payload: string, schema: 1 | 2) {
+  function archive(payload: string, schema: 2) {
     parsePreferences(payload)
-    const saved = JSON.parse(localStorage.getItem(archiveKey()) || '[]') as { at: string; payload: string; schema: 1 | 2 }[]
+    const saved = JSON.parse(localStorage.getItem(archiveKey()) || '[]') as { at: string; payload: string; schema: 2 }[]
     const items = [{ at: new Date().toISOString(), payload, schema }, ...saved].slice(0, 5)
     while (items.length > 1 && new TextEncoder().encode(JSON.stringify(items)).length > 2 * 1024 * 1024) items.pop()
     localStorage.setItem(archiveKey(), JSON.stringify(items))
@@ -164,11 +163,10 @@ export const useCloudPreferencesStore = defineStore('cloudPreferences', () => {
       const hasLocalModels = config.models.length > 0 || !!config.embedding.apiKey
       conflict.value = !!result && result.version !== state.value.version
         && (state.value.localDigest ? digest !== state.value.localDigest : hasLocalModels)
-      const bundle = result ? parsePreferences(result.payload) : null
+      if (result) parsePreferences(result.payload)
       status.value = !result ? '云端为空，等待首次上传本机配置'
         : conflict.value ? '两端配置均有变化，请选择恢复或上传'
         : result.hash === state.value.hash && digest === state.value.localDigest ? '配置已同步'
-        : bundle?.schema === 1 ? '发现旧版云端配置，请迁移'
         : result.version !== state.value.version ? '发现云端配置，等待自动恢复' : '本机配置有变化，等待上传'
     })
   }
@@ -180,7 +178,6 @@ export const useCloudPreferencesStore = defineStore('cloudPreferences', () => {
       const result = await fetchRemote(auth, check, signal)
       if (result === undefined) return
       if (result?.hash !== displayed?.hash) { remote.value = result; throw new Error('云端配置刚刚更新，请重新比较后再上传。') }
-      if (result && parsePreferences(result.payload).schema === 1) throw new Error('请先解锁并升级旧版备份，原备份已保留。')
       const before = canonicalJson(localSnapshot())
       const selected = splitConfig(config.exportConfig(), theme.currentTheme)
       const key = await getAccountKey(auth, check, signal)
@@ -208,7 +205,6 @@ export const useCloudPreferencesStore = defineStore('cloudPreferences', () => {
       const result = await fetchRemote(auth, check, signal)
       if (!result) { if (result === null) throw new Error('云端还没有配置。'); return }
       const bundle = parsePreferences(result.payload)
-      if (bundle.schema !== 2) throw new Error('请先迁移旧版配置。')
       const before = canonicalJson(localSnapshot())
       if (expectedDigest !== undefined && await hashPayload(before) !== expectedDigest) {
         throw new Error('本机配置已变化，请重新比较后恢复。')
@@ -254,27 +250,6 @@ export const useCloudPreferencesStore = defineStore('cloudPreferences', () => {
     })
   }
 
-  async function migrateLegacy(password: string) {
-    if (!enabled.value) throw new Error('请先开启配置同步。')
-    await operate(async (auth, check, signal) => {
-      const result = await fetchRemote(auth, check, signal)
-      if (!result) throw new Error('云端没有配置需要迁移。')
-      const bundle = parsePreferences(result.payload)
-      if (bundle.schema !== 1) throw new Error('云端配置已是新版本，无需迁移。')
-      if (!bundle.vault) throw new Error('云端配置缺少加密密钥包。')
-      const secrets = await openVault(bundle.vault, password, await context(auth, bundle)); check()
-      const key = await getAccountKey(auth, check, signal)
-      const newVault = await sealVault(secrets, key, await context(auth, bundle)); check()
-      const payload = canonicalJson({ schema: 2, settings: bundle.settings, vault: newVault })
-      archive(result.payload, 1)
-      const response = await cloudRequest<{ record: unknown }>(auth.endpoint, 'sync/preferences', { token: auth.token, signal, body: { baseVersion: result.version, payload } })
-      const accepted = await checkPreferencesRecord(response.record); check()
-      if (!accepted || accepted.payload !== payload || accepted.version <= result.version) throw new Error('云端配置迁移写入失败。')
-      remote.value = accepted
-      status.value = '旧版配置已迁移，等待自动同步'
-    })
-    await syncNow()
-  }
 
   async function syncNow() {
     if (ticking || !enabled.value || busy.value || cloudPreferencesBusy.value || !idle() || cloudApplyBusy.value || !sync.session) return
@@ -283,7 +258,7 @@ export const useCloudPreferencesStore = defineStore('cloudPreferences', () => {
       const expectedScope = currentScope()
       const expectedToken = sync.session.token
       await refresh()
-      if (!enabled.value || expectedScope !== currentScope() || expectedToken !== sync.session?.token || !supported.value || conflict.value || needsLegacyUnlock.value) return
+      if (!enabled.value || expectedScope !== currentScope() || expectedToken !== sync.session?.token || !supported.value || conflict.value) return
       const baseline = state.value.localDigest
       const digest = await localDigest()
       if (!enabled.value || expectedScope !== currentScope() || expectedToken !== sync.session?.token) return
@@ -316,5 +291,5 @@ export const useCloudPreferencesStore = defineStore('cloudPreferences', () => {
 
   function dispose() { clearInterval(timer); controller?.abort(); epoch++; accountKey = null }
 
-  return { enabled, busy, supported, status, error, remote, conflict, initialized, archiveCount, needsLegacyUnlock, initialize, setEnabled, syncNow, refresh, upload, restore, migrateLegacy, exportArchives, dispose }
+  return { enabled, busy, supported, status, error, remote, conflict, initialized, archiveCount, initialize, setEnabled, syncNow, refresh, upload, restore, exportArchives, dispose }
 })

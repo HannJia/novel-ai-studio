@@ -22,10 +22,10 @@ export interface PublicSettings {
   pdfVisionEnabled: boolean
   theme: 'fanqie' | 'eyecare' | 'dark'
 }
-// Schema 1 uses a legacy recovery password; schema 2 uses account authorization.
-export interface PreferencesBundle { schema: 1 | 2; settings: PublicSettings; vault: VaultEnvelope | null }
+// Current account-authorized configuration bundle.
+export interface PreferencesBundle { schema: 2; settings: PublicSettings; vault: VaultEnvelope | null }
 export interface PreferencesRecord { version: number; hash: string; updatedAt: number; payload: string }
-const invalid = () => new Error('云端配置格式不兼容或包含不能同步的字段，本机配置已保留。')
+const invalid = () => new Error('云端配置格式无效或包含不能同步的字段，本机配置已保留。')
 function object(value: unknown, fields: string[]): Record<string, any> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalid()
   const result = value as Record<string, any>
@@ -128,8 +128,8 @@ export function parsePreferences(payload: string): PreferencesBundle {
   let raw: unknown
   try { raw = JSON.parse(payload) } catch { throw invalid() }
   const b = object(raw, ['schema', 'settings', 'vault'])
-  if ((b.schema !== 1 && b.schema !== 2) || !Object.prototype.hasOwnProperty.call(b, 'vault') || (b.schema === 2 && b.vault === null)) throw invalid()
-  return { schema: b.schema, settings: validatePublicSettings(b.settings), vault: b.vault === null ? null : validateVaultEnvelope(b.vault) }
+  if (b.schema !== 2 || !Object.prototype.hasOwnProperty.call(b, 'vault') || b.vault === null) throw invalid()
+  return { schema: b.schema, settings: validatePublicSettings(b.settings), vault: validateVaultEnvelope(b.vault) }
 }
 export const settingsDigest = async (settings: PublicSettings) => (await hashPayload(canonicalJson(settings)))!
 export async function checkPreferencesRecord(value: unknown): Promise<PreferencesRecord | null> {

@@ -8,7 +8,6 @@ import { countNovelWords } from '@/utils/format'
 import { resolveChapterLengthPolicy, type ChapterLengthPolicy } from '@/services/chapterLength'
 import { createChapterRevision, getChapterRevision, listChapterRevisions, updateChapterRevisionStatus } from '@/services/db/chapterRevisions'
 import { pruneDataPanelChangeHistory, type DataPanelHistoryCleanup } from '@/services/dataPanel'
-import { preserveDataPanelReferenceHistory } from '@/services/dataPanelReference'
 import { appendPlanningVersion, createPlanningSnapshot } from '@/services/planningVersions'
 import { captureDataPanelBaseline, captureDataClockBaseline as captureClockBaseline, editDataPanel, decideDataPanelProposals, queueDataPanelAutomation, editDataStoryClock } from '@/services/dataPanelTransactions'
 import { bindAuthorDataPanelProposalSource, dataPanelProposalSourceIsCurrent } from '@/services/dataPanelProposalSource'
@@ -1268,7 +1267,6 @@ export const useNovelStore = defineStore('novel', () => {
     return useReconstructionWorkspaceStore().transactStory(novelId, ({ novel }) => {
       const result = pruneDataPanelChangeHistory(novel.dataPanelChanges, captured)
       if (result.removed) {
-        preserveDataPanelReferenceHistory(novel)
         novel.dataPanelChanges = result.changes; novel.updatedAt = new Date().toISOString()
       }
       return result.removed

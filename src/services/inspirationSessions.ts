@@ -1,6 +1,5 @@
 import type { InspirationMessage } from './inspiration'
 
-export const LEGACY_INSPIRATION_KEY = 'novel-writer-inspiration-sessions'
 const MAX_INSPIRATION_SESSIONS = 5
 export interface InspirationSession {
   id: string

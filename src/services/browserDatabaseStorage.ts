@@ -1,7 +1,7 @@
-const DATABASE_NAME = 'mojian-browser-project-storage'
+const DATABASE_NAME = 'mojian-v3-project-storage'
 const STORE_NAME = 'database'
 const SNAPSHOT_KEY = 'current'
-export const BROWSER_DATABASE_KEY = 'novel-writer-sqlite-db'
+export const BROWSER_DATABASE_KEY = 'mojian-v3-sqlite-db'
 const stale = () => new Error('其他浏览器窗口已更新本地项目，已停止覆盖。请保留当前编辑并重新打开项目。')
 
 interface Snapshot {

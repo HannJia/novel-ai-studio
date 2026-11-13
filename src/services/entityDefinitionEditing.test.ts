@@ -42,8 +42,8 @@ describe('author definition editing', () => {
 
   it('updates the supplied relationship by ID and refuses self or absent targets', () => {
     const { novel, update } = fixture(), [left, right] = novel.characters
-    const result = update(left, 'character', { relationships: [{ targetId: right.id, targetName: '过时称呼', relation: '同伴' }] })
-    expect((result.entity as Character).relationships).toEqual([{ targetId: right.id, targetName: right.name, relation: '同伴' }])
+    const result = update(left, 'character', { relationships: [{ targetId: right.id, targetName: '过时称呼', relation: '同伴', dimension: 'allegiance' }] })
+    expect((result.entity as Character).relationships).toEqual([{ targetId: right.id, targetName: right.name, relation: '同伴', dimension: 'allegiance' }])
     const current = novel.characters[0], before = JSON.stringify(novel)
     for (const targetId of [left.id, 'missing']) expect(() => update(current, 'character', { relationships: [{ targetId, targetName: right.name, relation: '同伴' }] })).toThrow()
     expect(JSON.stringify(novel)).toBe(before)
@@ -51,7 +51,7 @@ describe('author definition editing', () => {
 
   it('changes only display fields for avatar edits and does not reaffirm canonical facts', () => {
     const { novel, update } = fixture(), character = novel.characters[0]
-    character.relationships = [{ targetId: novel.characters[1].id, targetName: '过去的称呼', relation: '同伴' }]
+    character.relationships = [{ targetId: novel.characters[1].id, targetName: '过去的称呼', relation: '同伴', dimension: 'allegiance' }]
     novel.chapters[0].status = 'finalized'; novel.chapters[0].contentReviewSignature = 'current'
     const result = update(character, 'character', { avatarId: 'ink-scholar-f' })
     expect(result.reviewChapterIds).toEqual([])
@@ -72,7 +72,7 @@ describe('author definition editing', () => {
   it('blocks current relation and event-role references, but does not infer references from prose', () => {
     const { novel, apply } = fixture(), [left, right] = novel.characters
     const deletion: EntityDefinitionEdit = { action: 'delete', kind: 'character', entityId: right.id, expectedEntity: JSON.stringify(right) }
-    left.relationships.push({ targetId: right.id, targetName: right.name, relation: '同伴' })
+    left.relationships.push({ targetId: right.id, targetName: right.name, relation: '同伴', dimension: 'allegiance' })
     expect(() => apply(deletion)).toThrow('引用')
     left.relationships = []
     const event = apply({ action: 'create', kind: 'event', data: { chapterIndex: 0, title: '相见', description: '遇见苏禾', characters: [right.name], type: '主线' } }).entity as EventLogEntry

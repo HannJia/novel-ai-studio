@@ -8,7 +8,7 @@ export interface PdfPageText {
   ocr?: LocalOcrResult
 }
 
-const DATABASE = 'novel-writer-pdf-recognition'
+const DATABASE = 'mojian-v3-pdf-recognition'
 const STORE = 'pages'
 let opening: Promise<IDBDatabase> | undefined
 

@@ -115,7 +115,7 @@ export function captureStoryImpact(novel: Novel, workspace: ReconstructionWorksp
     for (const id of plan.relatedArcIds) edge(k('arc', id), target, '章节计划关联剧情线', 'association')
     for (const id of plan.relatedEventIds) edge(k('event', id), target, '章节计划关联事件', 'association')
     chapterRange(target, plan.targetChapterStart, plan.targetChapterEnd, '章节计划覆盖范围')
-    edge(target, k('plan', 'chapter-plan-v2:' + plan.id), '对应的场景规划章纲', 'association')
+    edge(target, k('plan', 'chapter-plan:' + plan.id), '对应的场景规划章纲', 'association')
   }
   for (const plan of draft?.chapterPlans || []) if (plan.approval !== 'rejected' && plan.status !== 'archived') {
     const target = k('plan', plan.id)

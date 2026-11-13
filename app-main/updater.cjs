@@ -8,7 +8,7 @@ function parseRelease(data, currentVersion, arch = 'x64') {
   const version = typeof tag === 'string' && /^v?\d+\.\d+\.\d+$/.test(tag) ? semver.valid(tag) : null
   if (!version || data.draft || data.prerelease) throw new Error('发布版本号无效，或不是正式版本。')
   if (!semver.gt(version, currentVersion)) return null
-  const installer = `AI-Novel-Writer-${version}-${arch}.exe`
+  const installer = `mobish-${version}.exe`
   const assets = Array.isArray(data.assets) ? data.assets : []
   const hasAsset = name => assets.some(asset => asset.name === name && asset.state === 'uploaded' && asset.size > 0)
   return {
@@ -18,7 +18,7 @@ function parseRelease(data, currentVersion, arch = 'x64') {
     installer,
     notes: typeof data.body === 'string' ? data.body.slice(0, 24000) : '',
     publishedAt: typeof data.published_at === 'string' ? data.published_at : '',
-    canDownload: hasAsset(installer) && hasAsset('latest.yml'),
+    canDownload: arch === 'x64' && hasAsset(installer) && hasAsset('latest.yml'),
   }
 }
 

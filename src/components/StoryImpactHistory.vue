@@ -61,22 +61,22 @@ function more(id: string, section: string) { limits.value.set(JSON.stringify([id
 </script>
 
 <style scoped>
-.impact-history { padding: 16px; color: var(--text-primary); }
+.impact-history { padding: 16px; color: var(--ink); }
 .impact-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .impact-heading h3 { margin: 0; }
-.impact-note, .impact-policy, small, time { color: var(--text-secondary); }
+.impact-note, .impact-policy, small, time { color: var(--ink-2); }
 .impact-search { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 16px 0; }
-.impact-search input { padding: 8px 10px; color: inherit; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; max-width: 100%; }
-.impact-report { border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; margin: 10px 0; overflow-wrap: anywhere; }
+.impact-search input { padding: 8px 10px; color: inherit; background: var(--desk); border: 1px solid var(--line-2); border-radius: 6px; max-width: 100%; }
+.impact-report { border: 1px solid var(--line-2); border-radius: 8px; padding: 12px; margin: 10px 0; overflow-wrap: anywhere; }
 .impact-report > summary { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; }
 summary { cursor: pointer; }
 .impact-report > summary strong { flex: 1; min-width: 120px; }
-.impact-report > summary > span { width: 100%; color: var(--text-secondary); }
+.impact-report > summary > span { width: 100%; color: var(--ink-2); }
 .impact-targets { padding-left: 20px; }
 .impact-targets > li { margin: 14px 0; }
-.impact-targets ul, .impact-mentions { color: var(--text-secondary); }
-.impact-kind { font-size: 12px; color: var(--text-secondary); }
-a { color: var(--accent-primary); text-decoration: underline; }
-button { cursor: pointer; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary); color: inherit; padding: 6px 12px; margin: 8px 0; }
+.impact-targets ul, .impact-mentions { color: var(--ink-2); }
+.impact-kind { font-size: 12px; color: var(--ink-2); }
+a { color: var(--zhu); text-decoration: underline; }
+button { cursor: pointer; border: 1px solid var(--line-2); border-radius: 6px; background: var(--desk); color: inherit; padding: 6px 12px; margin: 8px 0; }
 @media (max-width: 600px) { .impact-history { padding: 10px; } .impact-targets ul { padding-left: 16px; } }
 </style>

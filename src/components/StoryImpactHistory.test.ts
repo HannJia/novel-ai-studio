@@ -41,9 +41,9 @@ describe('persisted impact history', () => {
     expect(wrapper.text()).toContain('修改后：林澈 → 事件参与人物编号')
     expect(wrapper.text()).toContain('章节可能已在之后重新审核')
     const routes = wrapper.findAll('a').map(link => JSON.parse(link.attributes('data-route') || 'null'))
-    expect(routes).toContainEqual({ name: 'WorkspaceCharacters', params: { novelId: novel.id }, query: { character: 'person-0' } })
-    expect(routes).toContainEqual({ name: 'WorkspacePlanning', params: { novelId: novel.id }, query: { tab: 'timeline', event: 'event' } })
-    expect(routes).toContainEqual({ name: 'WorkspaceEditor', params: { novelId: novel.id, chapterId: novel.chapters[0].id } })
+    expect(routes).toContainEqual({ name: 'V3Characters', params: { novelId: novel.id }, query: { character: 'person-0' } })
+    expect(routes).toContainEqual({ name: 'V3Plan', params: { novelId: novel.id }, query: { view: 'workbench', plannerTab: 'timeline', event: 'event', plannerSelection: 'event' } })
+    expect(routes).toContainEqual({ name: 'V3Write', params: { novelId: novel.id, chapterId: novel.chapters[0].id } })
     wrapper.unmount()
   })
 

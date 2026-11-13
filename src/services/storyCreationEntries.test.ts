@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { shallowMount } from '@vue/test-utils'
-import CreationModePicker from '@/components/CreationModePicker.vue'
+import CreationModePicker from '@/v3/create/CreationModePicker.vue'
 import CreationEntrySource from '@/components/CreationEntrySource.vue'
 import { createNovelDraft } from '@/stores/novel'
 import { prepareStoryCreation } from './storyCreation'

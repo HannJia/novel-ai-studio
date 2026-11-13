@@ -2,7 +2,7 @@
   <section class="inspiration-chat">
     <div class="inspiration-workspace">
       <main class="inspiration-conversation paper-panel">
-        <header class="inspiration-heading"><h2>从一个想法开始</h2><p>和墨笺一起梳理灵感，把模糊的想法变成清晰的故事。</p></header>
+        <header class="inspiration-heading"><h2>从一个想法开始</h2><p>和墨笔生花一起梳理灵感，把模糊的想法变成清晰的故事。</p></header>
         <details ref="historyDetails" class="inspiration-options"><summary>对话选项 · 历史与参考资料</summary>
     <div class="inspiration-search-toolbar">
       <button class="inspiration-search-toggle" :class="{ enabled: webSearch }" :aria-pressed="webSearch"
@@ -194,7 +194,7 @@ const contextPercent = computed(() => Math.min(100, Math.round(
 const contextRemainingPercent = computed(() => Math.max(0, 100 - contextPercent.value))
 const compressedMessageCount = computed(() => conversationContext.value?.messageCount || 0)
 const contextRingBackground = computed(() =>
-  `conic-gradient(var(--color-primary) ${contextPercent.value}%, var(--border-color-light) 0)`,
+  `conic-gradient(var(--zhu) ${contextPercent.value}%, var(--line) 0)`,
 )
 const contextStatus = computed(() => {
   if (!history.value.some(item => item.role === 'user')) return ''
@@ -450,55 +450,55 @@ onBeforeUnmount(() => { persistCurrentHistory(); stop() })
 
 <style scoped>
 .inspiration-chat { display: flex; flex-direction: column; flex: 1; min-height: 0; max-width: 960px; width: 100%; margin: 0 auto; }
-.inspiration-search-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 0; flex-shrink: 0; color: var(--text-color-tertiary); font-size: 12px; }
+.inspiration-search-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 0; flex-shrink: 0; color: var(--ink-3); font-size: 12px; }
 .inspiration-session-select { margin-left: auto; width: min(300px, 100%); }
 .inspiration-knowledge-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-bottom: 8px; flex-shrink: 0; }
-.inspiration-knowledge-toolbar label { font-size: 12px; color: var(--text-color-secondary); }
+.inspiration-knowledge-toolbar label { font-size: 12px; color: var(--ink-2); }
 .inspiration-knowledge-toolbar :deep(.n-select) { flex: 1 1 220px; min-width: 0; }
-.inspiration-search-toggle { cursor: pointer; flex-shrink: 0; border: 1px solid var(--border-color); border-radius: 100px; padding: 4px 12px; background: var(--bg-color-paper); color: var(--text-color-secondary); transition: all var(--transition-fast); }
-.inspiration-search-toggle:hover { border-color: var(--color-accent); color: var(--color-accent); }
-.inspiration-search-toggle.enabled { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-light); }
-.inspiration-progress { color: var(--text-color-tertiary); font-size: 12px; line-height: 1.6; }
+.inspiration-search-toggle { cursor: pointer; flex-shrink: 0; border: 1px solid var(--line-2); border-radius: 100px; padding: 4px 12px; background: var(--paper); color: var(--ink-2); transition: all var(--motion-fast); }
+.inspiration-search-toggle:hover { border-color: var(--dai); color: var(--dai); }
+.inspiration-search-toggle.enabled { color: var(--dai); border-color: var(--dai); background: var(--dai-soft); }
+.inspiration-progress { color: var(--ink-3); font-size: 12px; line-height: 1.6; }
 .inspiration-history { flex: 1; min-height: 80px; overflow-y: auto; padding: 12px 4px; overscroll-behavior: contain; overflow-anchor: none; }
 .inspiration-sticky-prompt { flex: 0 0 auto; margin-bottom: 8px; padding: 8px 12px;
-  border: 1px solid var(--border-color); border-left: 3px solid var(--color-primary); border-radius: var(--radius-lg);
-  background: var(--bg-color-card); color: var(--text-color-primary); }
+  border: 1px solid var(--line-2); border-left: 3px solid var(--zhu); border-radius: var(--r-l);
+  background: var(--paper); color: var(--ink); }
 .inspiration-sticky-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 4px; font-size: 12px; }
-.inspiration-sticky-header strong { color: var(--color-primary); }
+.inspiration-sticky-header strong { color: var(--zhu); }
 .inspiration-sticky-actions { display: flex; gap: 10px; }
-.inspiration-sticky-actions button { border: 0; background: transparent; color: var(--color-primary); cursor: pointer; font: inherit; padding: 2px; }
+.inspiration-sticky-actions button { border: 0; background: transparent; color: var(--zhu); cursor: pointer; font: inherit; padding: 2px; }
 .inspiration-sticky-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
   overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.6; }
 .inspiration-sticky-text.expanded { display: block; max-height: min(100px, 12vh); overflow-y: auto; overscroll-behavior: contain; }
 .inspiration-message { width: fit-content; min-width: 0; max-width: min(720px, 88%); padding: 14px 16px; margin: 12px 0;
-  border: 1px solid var(--border-color); border-radius: var(--radius-lg); overflow-wrap: anywhere; }
-.inspiration-message > strong { display: block; margin-bottom: 4px; color: var(--text-color-secondary); font-size: 12px; letter-spacing: 0.04em; }
+  border: 1px solid var(--line-2); border-radius: var(--r-l); overflow-wrap: anywhere; }
+.inspiration-message > strong { display: block; margin-bottom: 4px; color: var(--ink-2); font-size: 12px; letter-spacing: 0.04em; }
 .inspiration-message > div { line-height: 1.85; font-size: 15px; overflow-x: auto; }
 /* 用户侧：淡朱砂底 */
-.inspiration-message.user { margin-left: auto; background: var(--color-primary-light);
-  border-color: color-mix(in srgb, var(--color-primary) 28%, var(--border-color)); }
-.inspiration-message.user > strong { color: var(--color-primary); text-align: right; }
+.inspiration-message.user { margin-left: auto; background: var(--zhu-soft);
+  border-color: color-mix(in srgb, var(--zhu) 28%, var(--line-2)); }
+.inspiration-message.user > strong { color: var(--zhu); text-align: right; }
 .inspiration-message.user > div { text-align: left; }
 /* AI 侧：宣纸卡片 + 黛青左线 */
-.inspiration-message.assistant { margin-right: auto; max-width: min(720px, 94%); background: var(--bg-color-paper);
-  border-left: 3px solid var(--color-accent); box-shadow: var(--shadow-sm); }
-.inspiration-message.assistant > strong { color: var(--color-accent); font-family: var(--font-family-serif); }
+.inspiration-message.assistant { margin-right: auto; max-width: min(720px, 94%); background: var(--paper);
+  border-left: 3px solid var(--dai); box-shadow: var(--shadow-1); }
+.inspiration-message.assistant > strong { color: var(--dai); font-family: var(--f-serif); }
 .inspiration-message :deep(p + p) { margin-top: 10px; }
 .inspiration-message :deep(ul), .inspiration-message :deep(ol) { padding-left: 22px; }
-.inspiration-composer { flex: 0 0 auto; margin: 4px 0 12px; padding: 12px 14px; border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg); background: var(--bg-color-paper); }
-.inspiration-progress { padding-left: 4px; color: var(--color-accent); }
-.inspiration-input-hint { margin: 6px 0 0; color: var(--text-color-tertiary); font-size: 12px; line-height: 1.5; }
+.inspiration-composer { flex: 0 0 auto; margin: 4px 0 12px; padding: 12px 14px; border: 1px solid var(--line-2);
+  border-radius: var(--r-l); background: var(--paper); }
+.inspiration-progress { padding-left: 4px; color: var(--dai); }
+.inspiration-input-hint { margin: 6px 0 0; color: var(--ink-3); font-size: 12px; line-height: 1.5; }
 .inspiration-send-group { display: inline-flex; align-items: center; gap: 8px; }
-.inspiration-context-status { position: relative; display: inline-flex; align-items: center; color: var(--text-color-tertiary); font-size: 11px; line-height: 1; }
+.inspiration-context-status { position: relative; display: inline-flex; align-items: center; color: var(--ink-3); font-size: 11px; line-height: 1; }
 .inspiration-context-summary { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px;
   padding: 0; border: 0; border-radius: 6px; background: transparent; cursor: help; }
-.inspiration-context-summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.inspiration-context-summary:focus-visible { outline: 2px solid var(--zhu); outline-offset: 2px; }
 .inspiration-context-ring { position: relative; display: inline-block; width: 22px; height: 22px; flex: 0 0 22px; border-radius: 50%; }
-.inspiration-context-ring::after { content: ''; position: absolute; inset: 4px; border-radius: 50%; background: var(--bg-color-card); }
+.inspiration-context-ring::after { content: ''; position: absolute; inset: 4px; border-radius: 50%; background: var(--paper); }
 .inspiration-context-tooltip { position: absolute; z-index: 5; bottom: calc(100% + 8px); left: 0; display: flex; flex-direction: column; gap: 3px;
   width: max-content; max-width: min(280px, calc(100vw - 32px)); padding: 9px 11px; border-radius: 9px;
-  background: var(--text-color-primary); color: var(--bg-color-paper); box-shadow: var(--shadow-md);
+  background: var(--ink); color: var(--paper); box-shadow: var(--shadow-2);
   font-size: 11px; line-height: 1.45; opacity: 0; pointer-events: none; transform: translateY(3px);
   transition: opacity 120ms ease, transform 120ms ease; white-space: nowrap; }
 .inspiration-context-tooltip strong { color: inherit; font-weight: 600; }
@@ -507,7 +507,7 @@ onBeforeUnmount(() => { persistCurrentHistory(); stop() })
 .inspiration-context-progress-native { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; clip-path: inset(50%); }
 .inspiration-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; clip-path: inset(50%); }
 .inspiration-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-.inspiration-error { color: var(--color-error); margin-top: 8px; overflow-wrap: anywhere; }
+.inspiration-error { color: var(--zhu); margin-top: 8px; overflow-wrap: anywhere; }
 @media (max-width: 600px) {
   .inspiration-message { padding: 10px 12px; }
   .inspiration-sticky-prompt { padding: 6px 10px; }
@@ -518,27 +518,27 @@ onBeforeUnmount(() => { persistCurrentHistory(); stop() })
 .inspiration-workspace { flex: 1; display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(320px, 1fr); gap: 16px; width: 100%; min-height: 0; }
 .inspiration-conversation { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 24px; }
 .inspiration-heading h2 { font-size: 30px; margin: 0 0 6px; }
-.inspiration-heading p { color: var(--text-color-secondary); font-size: 14px; line-height: 1.7; }
-.inspiration-options { flex-shrink: 0; margin: 12px 0; color: var(--text-color-secondary); font-size: 12px; }
+.inspiration-heading p { color: var(--ink-2); font-size: 14px; line-height: 1.7; }
+.inspiration-options { flex-shrink: 0; margin: 12px 0; color: var(--ink-2); font-size: 12px; }
 .inspiration-options summary { cursor: pointer; padding: 4px 0; }
 .inspiration-options .inspiration-search-toolbar { padding-top: 10px; }
 .inspiration-history { flex: 1; min-height: 100px; padding: 4px 0 16px; }
 .inspiration-message { max-width: 88%; margin: 18px 0; padding: 16px 18px; }
-.inspiration-message.user { background: var(--color-primary-light); border-color: transparent; }
-.inspiration-message.assistant { max-width: calc(100% - 42px); margin-left: 42px; position: relative; border-left: 1px solid var(--border-color); box-shadow: none; }
-.inspiration-message.assistant::before { content: '墨'; position: absolute; top: 4px; left: -42px; display: grid; place-items: center; width: 30px; height: 32px; border-radius: 50%; background: var(--color-primary); color: var(--text-color-inverse); font: 20px var(--font-family-serif); }
+.inspiration-message.user { background: var(--zhu-soft); border-color: transparent; }
+.inspiration-message.assistant { max-width: calc(100% - 42px); margin-left: 42px; position: relative; border-left: 1px solid var(--line-2); box-shadow: none; }
+.inspiration-message.assistant::before { content: '墨'; position: absolute; top: 4px; left: -42px; display: grid; place-items: center; width: 30px; height: 32px; border-radius: 50%; background: var(--zhu); color: var(--on-accent); font: 20px var(--f-serif); }
 .inspiration-message.assistant > strong { display: none; }
 .inspiration-composer { margin: auto 0 0; padding: 12px; }
 .inspiration-composer :deep(.n-input) { background: transparent; }
 .inspiration-workspace > :deep(.inspiration-settings) { min-height: 0; overflow-y: auto; }
-.inspiration-sticky-prompt { margin: 0 0 8px; padding: 8px 12px; background: var(--bg-color-secondary); }
+.inspiration-sticky-prompt { margin: 0 0 8px; padding: 8px 12px; background: var(--panel); }
 @media (max-width: 1100px) { .inspiration-chat { padding: 0 20px 20px; } .inspiration-workspace { grid-template-columns: minmax(0, 1fr) 300px; } .inspiration-conversation { padding: 18px; } }
 @media (max-width: 850px) { .inspiration-chat { display: block; overflow-y: auto; padding: 0 12px 20px; } .inspiration-workspace { grid-template-columns: 1fr; } .inspiration-conversation { min-height: 620px; height: calc(100dvh - 160px); max-height: 850px; padding: 16px; } .inspiration-heading h2 { font-size: 26px; } }
-.inspiration-empty-guide { margin: auto; max-width: 440px; text-align: center; padding: 28px; color: var(--text-color-secondary); }
-.inspiration-empty-guide > .n-icon { color: var(--color-accent); margin-bottom: 16px; }
-.inspiration-empty-guide h3 { font-size: 24px; color: var(--text-color-primary); margin-bottom: 8px; }
+.inspiration-empty-guide { margin: auto; max-width: 440px; text-align: center; padding: 28px; color: var(--ink-2); }
+.inspiration-empty-guide > .n-icon { color: var(--dai); margin-bottom: 16px; }
+.inspiration-empty-guide h3 { font-size: 24px; color: var(--ink); margin-bottom: 8px; }
 .inspiration-empty-guide p { font-size: 14px; line-height: 1.8; }
 .inspiration-empty-guide > div { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 24px; }
-.inspiration-empty-guide button { padding: 8px 12px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-color-card); color: var(--color-accent); font: 13px var(--font-family); cursor: pointer; }
-.inspiration-empty-guide button:hover { border-color: var(--color-accent); }
+.inspiration-empty-guide button { padding: 8px 12px; border: 1px solid var(--line-2); border-radius: var(--r-m); background: var(--paper); color: var(--dai); font: 13px var(--f-ui); cursor: pointer; }
+.inspiration-empty-guide button:hover { border-color: var(--dai); }
 </style>

@@ -7,7 +7,7 @@ import {
   type PlotSkeleton,
   type StoryBeat,
   type StoryContract,
-  type ChapterPlanV2,
+  type StructuredChapterPlan,
   type VolumeOutline,
   type ScenePlan,
   validateCreationStage,
@@ -114,11 +114,10 @@ export function reviseStoryContract(draft: CreationDraft, contract: StoryContrac
   contract = { ...contract, worldRules: contract.worldRules.map(value => value.trim()).filter(Boolean),
     forbiddenTopics: contract.forbiddenTopics.map(value => value.trim()).filter(Boolean),
     authorPreferences: contract.authorPreferences.map(value => value.trim()).filter(Boolean) }
-  if (contract.cardConfirmations) contract = { ...contract, cardConfirmations: contract.cardConfirmations.filter(item =>
+  contract = { ...contract, cardConfirmations: (contract.cardConfirmations || []).filter(item =>
     contractCards.some(card => card.id === item.cardId) && item.signature === contractCardSignature(contract, item.cardId)) }
   const contentChanged = JSON.stringify(contractContent(draft.contract)) !== JSON.stringify(contractContent(contract))
-  const withdrawn = draft.contract.approval === 'approved' && contract.cardConfirmations
-    && contractCards.some(card => !contractCardConfirmed(contract, card.id))
+  const withdrawn = draft.contract.approval === 'approved' && contractCards.some(card => !contractCardConfirmed(contract, card.id))
   if (!contentChanged && !withdrawn) {
     if (JSON.stringify(draft.contract.cardConfirmations) === JSON.stringify(contract.cardConfirmations)) return draft
     return { ...draft, contract: { ...draft.contract, cardConfirmations: contract.cardConfirmations }, updatedAt: now }
@@ -136,7 +135,7 @@ export function reviseStoryContract(draft: CreationDraft, contract: StoryContrac
 export function confirmStoryContract(draft: CreationDraft, contract: StoryContract, now: string): CreationDraft {
   const revised = reviseStoryContract(draft, contract, now)
   const issues = validateCreationStage({ ...revised, stage: 'contract' })
-  if (revised.contract.cardConfirmations && contractCards.some(card => !contractCardConfirmed(revised.contract, card.id))) issues.push('请逐项确认全部八张契约卡片')
+  if (contractCards.some(card => !contractCardConfirmed(revised.contract, card.id))) issues.push('请逐项确认全部八张契约卡片')
   if (issues.length) throw new Error(issues.join('；'))
   return { ...revised, stage: revised.stage === 'contract' ? 'skeleton' : revised.stage,
     contract: { ...revised.contract, approval: 'approved', updatedAt: now },
@@ -251,7 +250,7 @@ export function buildConfirmedSkeletonConstraint(draft: CreationDraft): string {
 export function syncCreationDraftPlanning(draft: CreationDraft, novel: Novel, now: string): CreationDraft {
   const changedVolumes = new Set<string>()
   const volumes: VolumeOutline[] = (novel.volumes || []).map(volume => {
-    const id = 'volume-v2:' + volume.id
+    const id = 'volume:' + volume.id
     const old = draft.volumes.find(item => item.id === id)
     const sourceVersion = buildAnalysisSourceVersionId(JSON.stringify([volume.title, volume.summary, volume.keyTurningPoints, volume.characterChanges]))
     if (old?.sourceVersion === sourceVersion) return { ...old, chapterPlanIds: [] }
@@ -261,8 +260,8 @@ export function syncCreationDraftPlanning(draft: CreationDraft, novel: Novel, no
       chapterPlanIds: [], plotlineIds: old?.plotlineIds || [], approval: 'draft' }
   })
   const changed = new Set<string>()
-  const chapterPlans: ChapterPlanV2[] = (novel.chapterPlans || []).map(plan => {
-    const id = 'chapter-plan-v2:' + plan.id
+  const chapterPlans: StructuredChapterPlan[] = (novel.chapterPlans || []).map(plan => {
+    const id = 'chapter-plan:' + plan.id
     const old = draft.chapterPlans.find(item => item.id === id)
     const chapter = novel.chapters.find(item => item.chapterIndex === plan.targetChapterStart)
     let offset = 0
@@ -274,7 +273,7 @@ export function syncCreationDraftPlanning(draft: CreationDraft, novel: Novel, no
         offset += item.estimatedChapters
         return contains
       }) || (plan.targetChapterStart === 0 ? [...(novel.volumes || [])].sort((a, b) => a.volumeIndex - b.volumeIndex)[0] : undefined)
-    const volumeId = volume ? 'volume-v2:' + volume.id : undefined
+    const volumeId = volume ? 'volume:' + volume.id : undefined
     const sourceVersion = buildAnalysisSourceVersionId(JSON.stringify([plan.title, plan.objective, plan.summary, plan.beats,
       plan.targetChapterStart, plan.targetChapterEnd, plan.relatedEventIds, volumeId]))
     if (old?.sourceVersion === sourceVersion) {

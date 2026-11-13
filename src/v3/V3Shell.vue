@@ -1,7 +1,7 @@
 <template>
-  <div class="v3 shell" :class="{ writing: area === 'write' }">
+  <div class="v3 shell" :class="{ writing: area === 'write' && !route.meta.bookTool }">
     <nav class="rail" aria-label="主导航">
-      <router-link to="/" class="rail-seal" title="墨笺 · 回到书架" aria-label="墨笺，回到书架"><img :src="mojianIcon" alt="墨笺" /></router-link>
+      <router-link to="/" class="rail-seal" title="墨笔生花 · 回到书架" aria-label="墨笔生花，回到书架"><img :src="mojianIcon" alt="墨笔生花" /></router-link>
       <router-link to="/" class="rail-btn" :class="{ on: area === 'shelf' }"><V3Icon name="shelf" size="l" /><span>书架</span></router-link>
       <router-link :to="{ path: '/settings', query: { section: 'cloud' } }" class="rail-btn"
         :class="{ on: route.path === '/settings' && route.query.section === 'cloud' }" title="云同步设置">

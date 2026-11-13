@@ -1,8 +1,9 @@
 import initSqlJs, { Database, SqlJsStatic, SqlValue } from 'sql.js'
 import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url'
+import { initializeSchema, assertCurrentSchema, UnsupportedProjectSchemaError } from './databaseSchema'
 import { readIndexedDatabase, writeIndexedDatabase, archiveIndexedDatabase, retainIndexedProjectBackup } from './browserDatabaseStorage'
 
-const DB_STORAGE_KEY = 'novel-writer-sqlite-db'
+const DB_STORAGE_KEY = 'mojian-v3-sqlite-db'
 
 let SQL: SqlJsStatic | null = null
 let db: Database | null = null
@@ -30,8 +31,8 @@ export async function initDb(): Promise<Database> {
 }
 
 export class DatabaseRecoveryError extends Error {
-  constructor(public readonly backupAvailable: boolean) {
-    super('数据库无法通过完整性检查。已停止写入，原文件未被覆盖。')
+  constructor(public readonly backupAvailable: boolean, message = '数据库无法通过完整性检查。已停止写入，原文件未被覆盖。') {
+    super(message)
     this.name = 'DatabaseRecoveryError'
   }
 }
@@ -53,11 +54,15 @@ async function readBackup(): Promise<Database | null> {
   try {
     if (hasElectronIPC()) {
       const bytes = await window.electronAPI?.dbReadBackup?.()
-      return bytes ? checkedDatabase(new Uint8Array(bytes)) : null
+      if (!bytes) return null
+      const candidate = checkedDatabase(new Uint8Array(bytes))
+      try { assertCurrentSchema(candidate); return candidate } catch (error) { candidate.close(); throw error }
     }
     const indexed = await readIndexedDatabase()
     const encoded = indexed ? indexed.backup : localStorage.getItem(DB_BACKUP_KEY)
-    return encoded ? checkedDatabase(decodeStored(encoded)) : null
+    if (!encoded) return null
+    const candidate = checkedDatabase(decodeStored(encoded))
+    try { assertCurrentSchema(candidate); return candidate } catch (error) { candidate.close(); throw error }
   } catch { return null }
 }
 
@@ -78,40 +83,35 @@ async function initializeDatabase(): Promise<Database> {
   }
 
   let candidate: Database | null = null
-  let migrating = false
   let schemaChanged = false
   try {
     if (hasElectronIPC()) {
       const fileData = await window.electronAPI!.dbRead()
       if (fileData) candidate = checkedDatabase(new Uint8Array(fileData))
     }
-    // Migration is allowed only for an absent file, never for a failed read.
+    // Desktop and browser use their own V3 stores; neither imports the other.
     if (!candidate) {
       const indexed = hasElectronIPC() ? undefined : await readIndexedDatabase()
-      const saved = indexed ? indexed.main : localStorage.getItem(DB_STORAGE_KEY)
+      const saved = hasElectronIPC() ? null : indexed ? indexed.main : localStorage.getItem(DB_STORAGE_KEY)
       browserStorageBaseline = saved
       if (saved) {
         candidate = checkedDatabase(decodeStored(saved))
-        migrating = hasElectronIPC()
       } else if (!hasElectronIPC() && (indexed?.backup || localStorage.getItem(DB_BACKUP_KEY))) {
         throw new Error('主库缺失，存在备份')
       } else candidate = new SQL.Database()
     }
     schemaChanged = initializeSchema(candidate)
-  } catch {
+  } catch (cause) {
     candidate?.close()
     const backup = await readBackup()
     const available = !!backup
     backup?.close()
-    throw new DatabaseRecoveryError(available)
+    throw new DatabaseRecoveryError(available, cause instanceof UnsupportedProjectSchemaError ? cause.message : undefined)
   }
   db = candidate
   rowCacheEpoch++
   try {
-    if (schemaChanged || migrating) await persistDatabase()
-    if (migrating) {
-      localStorage.removeItem(DB_STORAGE_KEY)
-    }
+    if (schemaChanged) await persistDatabase()
   } catch (error) {
     db = null
     candidate.close()
@@ -228,7 +228,7 @@ export async function retainProjectRestorePoint(serialized: string): Promise<voi
   } else {
     if (await readIndexedDatabase()) await retainIndexedProjectBackup(serialized)
     else {
-      try { localStorage.setItem('novel-writer-before-import', serialized) }
+      try { localStorage.setItem('mojian-v3-before-import', serialized) }
       catch (error) {
         if (!(error instanceof Error) || error.name !== 'QuotaExceededError') throw error
         await retainIndexedProjectBackup(serialized)
@@ -237,428 +237,6 @@ export async function retainProjectRestorePoint(serialized: string): Promise<voi
   }
 }
 
-// 初始化表结构
-function initializeSchema(database: Database) {
-  const versionBefore = database.exec('PRAGMA schema_version')[0]?.values[0][0]
-  const schema = `
-    CREATE TABLE IF NOT EXISTS project_history (
-      revision TEXT PRIMARY KEY, created_at TEXT NOT NULL, label TEXT NOT NULL,
-      novel_id TEXT NOT NULL, source_revision TEXT, value TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS inspiration_sessions (id TEXT PRIMARY KEY, value TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS local_migrations (id TEXT PRIMARY KEY);
-    CREATE TABLE IF NOT EXISTS cloud_sync_state (
-      id TEXT PRIMARY KEY, value TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS cloud_sync_conflicts (
-      id TEXT PRIMARY KEY, value TEXT NOT NULL, created_at TEXT NOT NULL
-    );
-
-    -- 小说主表
-    CREATE TABLE IF NOT EXISTS novels (
-      id TEXT PRIMARY KEY,
-      title TEXT,
-      genre TEXT, sub_genre TEXT,
-      genre_label TEXT, sub_genre_label TEXT,
-      tags TEXT,           -- JSON 数组
-      target_min INTEGER, target_max INTEGER,
-      current_word_count INTEGER DEFAULT 0,
-      writing_style TEXT,  -- JSON
-      settings TEXT,       -- JSON
-      outline TEXT,
-      synopsis TEXT,
-      knowledge_base_ids TEXT, -- JSON 数组
-      chapter_plans TEXT DEFAULT '[]', -- next / near / far 章节计划
-      chapter_plan_confirmed INTEGER DEFAULT 0,
-      story_state_proposals TEXT DEFAULT '[]', -- 待审批的故事状态变更
-      story_clock TEXT DEFAULT '{}', -- JSON
-      status TEXT DEFAULT 'creating',
-      created_at TEXT, updated_at TEXT
-    );
-
-    -- 分卷表
-    CREATE TABLE IF NOT EXISTS volumes (
-      id TEXT PRIMARY KEY,
-      novel_id TEXT REFERENCES novels(id) ON DELETE CASCADE,
-      volume_index INTEGER,
-      title TEXT, theme TEXT, summary TEXT,
-      key_turning_points TEXT, character_changes TEXT,
-      estimated_chapters INTEGER, estimated_word_count INTEGER,
-      versions TEXT DEFAULT '[]'
-    );
-
-    -- 章节表
-    CREATE TABLE IF NOT EXISTS chapters (
-      id TEXT PRIMARY KEY,
-      novel_id TEXT REFERENCES novels(id) ON DELETE CASCADE,
-      volume_index INTEGER, chapter_index INTEGER,
-      title TEXT, content TEXT, summary TEXT,
-      summary_source TEXT,
-      banned_review TEXT DEFAULT '', content_review TEXT DEFAULT '',
-      content_review_signature TEXT DEFAULT '',
-      review_rewrite_blocked_signature TEXT DEFAULT '',
-      scene_notes TEXT DEFAULT '[]',
-      versions TEXT DEFAULT '[]',
-      word_count INTEGER DEFAULT 0,
-      story_days_elapsed REAL DEFAULT 0,
-      story_day REAL,
-      status TEXT DEFAULT 'draft',
-      archived_at TEXT,
-      created_at TEXT, updated_at TEXT
-    );
-
-    -- AI or user-proposed chapter changes. Proposals are applied only after approval.
-    CREATE TABLE IF NOT EXISTS chapter_revisions (
-      id TEXT PRIMARY KEY,
-      novel_id TEXT REFERENCES novels(id) ON DELETE CASCADE,
-      chapter_id TEXT REFERENCES chapters(id) ON DELETE CASCADE,
-      base_content TEXT NOT NULL,
-      proposed_content TEXT NOT NULL,
-      diff TEXT NOT NULL DEFAULT '',
-      source TEXT NOT NULL DEFAULT 'user',
-      reason TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL DEFAULT 'pending',
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      applied_at TEXT,
-      selection_json TEXT
-    );
-
-    -- 角色表
-    CREATE TABLE IF NOT EXISTS characters (
-      id TEXT PRIMARY KEY,
-      novel_id TEXT REFERENCES novels(id) ON DELETE CASCADE,
-      name TEXT, aliases TEXT,
-      identity TEXT, personality TEXT,
-      power_level TEXT, faction TEXT,
-      status TEXT DEFAULT '活跃',
-      first_appear_chapter INTEGER,
-      description TEXT, relationships TEXT, -- JSON
-      events TEXT, avatar_color TEXT, avatar_id TEXT, provenance TEXT
-    );
-
-    -- 剧情时间线事件
-    CREATE TABLE IF NOT EXISTS story_events (
-      id TEXT PRIMARY KEY,
-      novel_id TEXT REFERENCES novels(id) ON DELETE CASCADE,
-      chapter_index INTEGER,
-      category TEXT,        -- main_plot/sub_plot/foreshadowing/turning_point/battle/other
-      scope TEXT DEFAULT 'chapter', -- global/volume/chapter
-      title TEXT,
-      description TEXT,
-      characters TEXT,      -- JSON 数组
-      status TEXT,          -- planted/developing/resolved/abandoned
-      hint_count INTEGER DEFAULT 0,
-      story_time TEXT DEFAULT '',
-      location TEXT DEFAULT '',
-      target_chapter INTEGER,
-      importance INTEGER DEFAULT 3,
-      source TEXT DEFAULT 'user',
-      related_arc_ids TEXT DEFAULT '[]',
-      evidence TEXT DEFAULT '',
-      last_progress_chapter INTEGER,
-      resolved_chapter INTEGER,
-      provenance TEXT,
-      created_at TEXT,
-      updated_at TEXT
-    );
-
-    -- 跨章节叙事弧线；节点以 JSON 保存，随弧线一起原子更新。
-    CREATE TABLE IF NOT EXISTS story_arcs (
-      id TEXT PRIMARY KEY,
-      novel_id TEXT REFERENCES novels(id) ON DELETE CASCADE,
-      title TEXT NOT NULL,
-      description TEXT DEFAULT '',
-      arc_type TEXT NOT NULL DEFAULT 'sub',
-      importance INTEGER NOT NULL DEFAULT 3,
-      status TEXT NOT NULL DEFAULT 'active',
-      reactivate_at TEXT DEFAULT '',
-      character_ids TEXT DEFAULT '[]',
-      design TEXT DEFAULT '{}',
-      nodes TEXT DEFAULT '[]',
-      provenance TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    -- 数据面板对象表
-    CREATE TABLE IF NOT EXISTS data_panels (
-      id TEXT PRIMARY KEY,
-      novel_id TEXT REFERENCES novels(id) ON DELETE CASCADE,
-      category TEXT,
-      name TEXT,
-      fields TEXT,
-      related_keywords TEXT,
-      owner_item_id TEXT,
-      equipment_state TEXT DEFAULT 'stored',
-      last_mention_chapter_index INTEGER,
-      created_at TEXT,
-      updated_at TEXT
-    );
-
-    -- 数据面板变更建议表
-    CREATE TABLE IF NOT EXISTS data_panel_changes (
-      id TEXT PRIMARY KEY,
-      novel_id TEXT REFERENCES novels(id) ON DELETE CASCADE,
-      item_id TEXT,
-      field_id TEXT,
-      item_name TEXT,
-      field_name TEXT,
-      old_value TEXT,
-      new_value TEXT,
-      reason TEXT,
-      confidence TEXT DEFAULT 'clear',
-      mutation TEXT,
-      source_binding TEXT,
-      chapter_index INTEGER,
-      status TEXT,
-      created_at TEXT,
-      updated_at TEXT
-    );
-
-    -- AI 对话历史表
-    CREATE TABLE IF NOT EXISTS chat_messages (
-      id TEXT PRIMARY KEY,
-      novel_id TEXT REFERENCES novels(id) ON DELETE CASCADE,
-      role TEXT, content TEXT,
-      timestamp TEXT
-    );
-
-    -- 知识库表
-    CREATE TABLE IF NOT EXISTS knowledge_bases (
-      id TEXT PRIMARY KEY,
-      name TEXT,
-      description TEXT,
-      created_at TEXT
-    );
-
-    -- 知识库条目表
-    CREATE TABLE IF NOT EXISTS knowledge_entries (
-      id TEXT PRIMARY KEY,
-      kb_id TEXT REFERENCES knowledge_bases(id) ON DELETE CASCADE,
-      category TEXT,
-      title TEXT,
-      content TEXT,
-      summary TEXT DEFAULT '',
-      tags TEXT, -- JSON
-      created_at TEXT,
-      updated_at TEXT
-    );
-
-    -- 语义记忆索引：知识库、章节摘要、角色、事件、数据面板统一召回
-    CREATE TABLE IF NOT EXISTS semantic_index (
-      id TEXT PRIMARY KEY,
-      novel_id TEXT,
-      source_type TEXT,
-      source_id TEXT,
-      title TEXT,
-      content TEXT,
-      embedding TEXT,
-      metadata TEXT,
-      updated_at TEXT
-    );
-
-    -- AI 后台任务记录：用于批量任务、失败排查和重启后的任务状态保留
-    CREATE TABLE IF NOT EXISTS ai_tasks (
-      id TEXT PRIMARY KEY,
-      name TEXT,
-      group_name TEXT,
-      status TEXT,
-      error TEXT,
-      created_at TEXT,
-      updated_at TEXT,
-      completed_at TEXT
-    );
-
-    -- V2 创作工作区：与旧小说聚合解耦，保存创建草稿和作者确认边界。
-    CREATE TABLE IF NOT EXISTS reconstruction_editor_drafts (
-      novel_id TEXT NOT NULL,
-      id TEXT NOT NULL,
-      revision INTEGER NOT NULL,
-      status TEXT NOT NULL,
-      value TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      PRIMARY KEY (novel_id, id)
-    );
-    -- Also covers legacy delete/replace-import paths that delete novels directly.
-    CREATE TRIGGER IF NOT EXISTS delete_novel_editor_drafts AFTER DELETE ON novels
-    BEGIN
-      DELETE FROM reconstruction_editor_drafts WHERE novel_id = OLD.id;
-    END;
-
-    CREATE TABLE IF NOT EXISTS reconstruction_creation_drafts (
-      id TEXT PRIMARY KEY,
-      novel_id TEXT NOT NULL,
-      value TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS reconstruction_candidates (
-      id TEXT PRIMARY KEY,
-      novel_id TEXT NOT NULL,
-      chapter_id TEXT,
-      status TEXT NOT NULL,
-      value TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS reconstruction_review_findings (
-      id TEXT PRIMARY KEY,
-      novel_id TEXT NOT NULL,
-      chapter_id TEXT NOT NULL,
-      status TEXT NOT NULL,
-      value TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS reconstruction_chapter_reviews (
-      id TEXT PRIMARY KEY,
-      novel_id TEXT NOT NULL,
-      chapter_id TEXT NOT NULL,
-      source_version_id TEXT NOT NULL,
-      status TEXT NOT NULL,
-      value TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS reconstruction_story_memories (
-      id TEXT NOT NULL,
-      novel_id TEXT NOT NULL,
-      value TEXT NOT NULL,
-      PRIMARY KEY (novel_id, id)
-    );
-
-    CREATE TABLE IF NOT EXISTS reconstruction_impact_reports (
-      id TEXT NOT NULL,
-      novel_id TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      value TEXT NOT NULL,
-      PRIMARY KEY (novel_id, id)
-    );
-
-    CREATE TABLE IF NOT EXISTS reconstruction_canon_mutations (
-      id TEXT PRIMARY KEY,
-      candidate_id TEXT NOT NULL UNIQUE,
-      novel_id TEXT NOT NULL,
-      value TEXT NOT NULL,
-      applied_at TEXT NOT NULL
-    );
-
-    -- V2 AI runs: one novel may have multiple runs, keyed by (novel_id, id).
-    -- The value column keeps the complete AiRun contract while the scalar
-    -- columns make the current state available for future queries.
-    CREATE TABLE IF NOT EXISTS reconstruction_ai_runs (
-      id TEXT NOT NULL,
-      novel_id TEXT NOT NULL,
-      mode TEXT NOT NULL,
-      task_type TEXT NOT NULL,
-      target_id TEXT,
-      chapter_start INTEGER,
-      chapter_end INTEGER,
-      token_budget INTEGER,
-      used_tokens INTEGER,
-      status TEXT NOT NULL,
-      checkpoint TEXT,
-      error TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      value TEXT NOT NULL,
-      PRIMARY KEY (novel_id, id)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_novels_updated_at ON novels(updated_at);
-    CREATE INDEX IF NOT EXISTS idx_chapters_novel_index ON chapters(novel_id, chapter_index);
-    CREATE INDEX IF NOT EXISTS idx_story_events_novel_category_status ON story_events(novel_id, category, status);
-    CREATE INDEX IF NOT EXISTS idx_story_arcs_novel_status ON story_arcs(novel_id, status, importance);
-    CREATE INDEX IF NOT EXISTS idx_knowledge_entries_kb_category ON knowledge_entries(kb_id, category);
-    CREATE INDEX IF NOT EXISTS idx_data_panel_changes_novel_status_chapter ON data_panel_changes(novel_id, status, chapter_index);
-    CREATE INDEX IF NOT EXISTS idx_semantic_index_novel_source ON semantic_index(novel_id, source_type);
-    CREATE INDEX IF NOT EXISTS idx_ai_tasks_status_created ON ai_tasks(status, created_at);
-    CREATE INDEX IF NOT EXISTS idx_chapter_revisions_chapter_status ON chapter_revisions(chapter_id, status, created_at);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_reconstruction_creation_novel ON reconstruction_creation_drafts(novel_id);
-    CREATE INDEX IF NOT EXISTS idx_reconstruction_candidates_novel_chapter ON reconstruction_candidates(novel_id, chapter_id, status);
-    CREATE INDEX IF NOT EXISTS idx_reconstruction_findings_novel_chapter ON reconstruction_review_findings(novel_id, chapter_id, status);
-    CREATE INDEX IF NOT EXISTS idx_reconstruction_reviews_novel_chapter ON reconstruction_chapter_reviews(novel_id, chapter_id, updated_at);
-    CREATE INDEX IF NOT EXISTS idx_reconstruction_mutations_novel_applied ON reconstruction_canon_mutations(novel_id, applied_at);
-    CREATE INDEX IF NOT EXISTS idx_reconstruction_ai_runs_novel_updated ON reconstruction_ai_runs(novel_id, updated_at);
-    CREATE INDEX IF NOT EXISTS idx_reconstruction_impact_reports_novel_created ON reconstruction_impact_reports(novel_id, created_at, id);
-  `
-
-  database.exec(schema)
-  if (!database.exec('PRAGMA table_info(project_history)')[0].values.some(column => column[1] === 'project_ids')) {
-    database.run('ALTER TABLE project_history ADD COLUMN project_ids TEXT')
-  }
-  // Existing local databases predate planning version snapshots.
-  try { database.run("ALTER TABLE novels ADD COLUMN writing_mode TEXT") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE characters ADD COLUMN avatar_id TEXT") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE novels ADD COLUMN chapter_length_policy TEXT") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE novels ADD COLUMN cover_id TEXT") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE chapters ADD COLUMN content_review_coverage TEXT") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE knowledge_bases ADD COLUMN summary TEXT DEFAULT ''") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE knowledge_bases ADD COLUMN summary_level TEXT DEFAULT 'standard'") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE knowledge_bases ADD COLUMN summary_updated_at TEXT DEFAULT ''") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE novels ADD COLUMN chat_web_search INTEGER DEFAULT 0") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE novels ADD COLUMN chapter_plans TEXT DEFAULT '[]'") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE novels ADD COLUMN chapter_plan_confirmed INTEGER DEFAULT 0") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE novels ADD COLUMN story_clock TEXT DEFAULT '{}'") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE novels ADD COLUMN story_state_proposals TEXT DEFAULT '[]'") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE chat_messages ADD COLUMN search_record TEXT") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE chat_messages ADD COLUMN failed INTEGER DEFAULT 0") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE volumes ADD COLUMN versions TEXT DEFAULT '[]'") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE chapters ADD COLUMN scene_notes TEXT DEFAULT '[]'") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE chapters ADD COLUMN versions TEXT DEFAULT '[]'") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE chapters ADD COLUMN review_rewrite_blocked_signature TEXT DEFAULT ''") } catch { /* already migrated */ }
-  try { database.run('ALTER TABLE chapter_revisions ADD COLUMN selection_json TEXT') } catch { /* already migrated */ }
-  try { database.run('ALTER TABLE chapters ADD COLUMN summary_source TEXT') } catch { /* already migrated */ }
-  try { database.run('ALTER TABLE chapters ADD COLUMN archived_at TEXT') } catch { /* already migrated */ }
-  try { database.run('ALTER TABLE characters ADD COLUMN provenance TEXT') } catch { /* already migrated */ }
-  try { database.run('ALTER TABLE story_events ADD COLUMN provenance TEXT') } catch { /* already migrated */ }
-  try { database.run('ALTER TABLE knowledge_entries ADD COLUMN summary_source TEXT') } catch { /* already present */ }
-  try { database.run('ALTER TABLE knowledge_entries ADD COLUMN summary_history TEXT') } catch { /* already present */ }
-  try { database.run('ALTER TABLE knowledge_bases ADD COLUMN summary_source TEXT') } catch { /* already present */ }
-  try { database.run('ALTER TABLE knowledge_bases ADD COLUMN summary_history TEXT') } catch { /* already present */ }
-  try { database.run("ALTER TABLE chapters ADD COLUMN story_days_elapsed REAL DEFAULT 0") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE chapters ADD COLUMN story_day REAL") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE story_events ADD COLUMN related_arc_ids TEXT DEFAULT '[]'") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE story_events ADD COLUMN evidence TEXT DEFAULT ''") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE story_events ADD COLUMN last_progress_chapter INTEGER") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE story_events ADD COLUMN resolved_chapter INTEGER") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE story_arcs ADD COLUMN design TEXT DEFAULT '{}'") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE story_arcs ADD COLUMN provenance TEXT") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE data_panels ADD COLUMN versions TEXT DEFAULT '[]'") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE data_panels ADD COLUMN owner_item_id TEXT") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE data_panels ADD COLUMN reference_history TEXT") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE data_panels ADD COLUMN equipment_state TEXT DEFAULT 'stored'") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE data_panel_changes ADD COLUMN mutation TEXT") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE data_panel_changes ADD COLUMN source_binding TEXT") } catch { /* already migrated */ }
-  try { database.run("ALTER TABLE data_panel_changes ADD COLUMN updated_at TEXT") } catch { /* already migrated */ }
-  // One-time separation of explicitly tagged inspiration messages in existing
-  // test books. Move complete records atomically; never infer from message text.
-  const novelColumns = database.exec('PRAGMA table_info(novels)')[0].values
-  if (!novelColumns.some(column => column[1] === 'inspiration_history')) {
-    database.run('BEGIN')
-    try {
-      database.run("ALTER TABLE novels ADD COLUMN inspiration_history TEXT NOT NULL DEFAULT '[]'")
-      const rows = database.exec('SELECT id, novel_id, role, content, timestamp, search_record, failed FROM chat_messages ORDER BY timestamp ASC, rowid ASC')[0]?.values || []
-      const archives = new Map<string, import('@/types/novel').DialogueMessage[]>()
-      for (const [id, novelId, role, content, timestamp, search, failed] of rows) {
-        const prefix = `inspiration-${novelId}-`
-        if (typeof id !== 'string' || !id.startsWith(prefix) || !/^\d+$/.test(id.slice(prefix.length))) continue
-        const messages = archives.get(String(novelId)) || []
-        messages.push({ id, role: role as 'user' | 'assistant', content: String(content), timestamp: String(timestamp),
-          search: search ? JSON.parse(String(search)) : undefined, failed: failed === 1 })
-        archives.set(String(novelId), messages)
-      }
-      for (const [novelId, messages] of archives) {
-        database.run('UPDATE novels SET inspiration_history = ? WHERE id = ?', [JSON.stringify(messages), novelId])
-        if (database.getRowsModified() !== 1) continue
-        for (const message of messages) database.run('DELETE FROM chat_messages WHERE id = ? AND novel_id = ?', [message.id, novelId])
-      }
-      database.run('COMMIT')
-    } catch (error) { database.run('ROLLBACK'); throw error }
-  }
-  return database.exec('PRAGMA schema_version')[0]?.values[0][0] !== versionBefore
-}
 
 // 辅助函数：执行查询并返回 JSON 数组
 export function queryAll<T>(sql: string, params?: SqlValue[]): T[] {

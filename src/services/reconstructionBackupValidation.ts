@@ -129,10 +129,6 @@ const finding: Check = (value, path) => {
 }
 const review = object({ id, chapterId: id, sourceVersionId: id, startedAt: date, completedAt: optional(date), deterministicChecksPassed: boolean,
   semanticChecksPassed: optional(boolean), findings: list(finding), candidateChanges: list(candidate),
-  findingReconciliations: optional(list(object({ id, parserVersion: oneOf('grouped-details-v1'), reconciledAt: date, report: text,
-    reviewStatus: optional(oneOf('running', 'needs_revision', 'ready_to_finalize', 'approved', 'failed')),
-    workspaceFindings: list(finding), reviewFindings: list(finding),
-  }))),
   status: oneOf('running', 'needs_revision', 'ready_to_finalize', 'approved', 'failed'),
 })
 const knowledge: Check = (value, path) => {
@@ -265,7 +261,7 @@ const skeleton = object({ id, ...strings('title premise logline promise ending')
   relatedPlotlineIds: list(id), relatedCharacterIds: list(id),
 })), approval, sourceRunId: optional(id), complete: optional(boolean), revisionId: optional(id), updatedAt: date })
 const skeletonSource = object({ revisionId: id, field: oneOf('title', 'premise', 'logline', 'promise', 'ending', 'beat'), beatId: optional(id), targetBeatId: optional(id) })
-const skeletonRevision = object({ id, skeletonId: id, kind: oneOf('legacy', 'model', 'author', 'mixed', 'restored', 'confirmed', 'import'),
+const skeletonRevision = object({ id, skeletonId: id, kind: oneOf('initial', 'model', 'author', 'mixed', 'restored', 'confirmed', 'import'),
   snapshot: skeleton, parentRevisionId: optional(id), attemptId: optional(id), sources: list(skeletonSource), createdAt: date })
 const skeletonAttempt = object({ id, parentAttemptId: optional(id), mode: oneOf('generate', 'retry', 'continue'),
   status: oneOf('queued', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted', 'conflict'),
@@ -421,7 +417,7 @@ export function validateReconstructionCreationDraft(value: unknown): void {
   checkPlanning(value as CreationDraft, 'creationDraft')
 }
 
-/** Validate a complete V2 workspace collection without normalizing or approving it. */
+/** Validate a complete V3 workspace collection without normalizing or approving it. */
 export function validateReconstructionWorkspaces(value: unknown, novels: Novel[]): void {
   const path = 'reconstructionWorkspaces'
   checkTree(value, path)
@@ -452,7 +448,6 @@ export function validateReconstructionWorkspaces(value: unknown, novels: Novel[]
     for (const review of item.chapterReviews) {
       unique(review.findings, `${path}.chapterReviews.${review.id}.findings`)
       unique(review.candidateChanges, `${path}.chapterReviews.${review.id}.candidateChanges`)
-      unique(review.findingReconciliations || [], `${path}.chapterReviews.${review.id}.findingReconciliations`)
     }
     if (item.creationDraft) checkPlanning(item.creationDraft, `${path}.${item.novelId}.creationDraft`)
   }
@@ -478,8 +473,8 @@ export function validateReconstructionWorkspaces(value: unknown, novels: Novel[]
       for (const row of chapter.versions || []) add(row.id, novel.id, 'version')
     }
     for (const arc of novel.storyArcs || []) for (const node of arc.nodes) add(node.id, novel.id, 'node')
-    for (const row of novel.volumes || []) add('volume-v2:' + row.id, novel.id, 'volume')
-    for (const row of novel.chapterPlans || []) add('chapter-plan-v2:' + row.id, novel.id, 'outline')
+    for (const row of novel.volumes || []) add('volume:' + row.id, novel.id, 'volume')
+    for (const row of novel.chapterPlans || []) add('chapter-plan:' + row.id, novel.id, 'outline')
   }
   for (const item of workspaces) {
     const d = item.creationDraft
@@ -564,11 +559,6 @@ export function validateReconstructionWorkspaces(value: unknown, novels: Novel[]
       const at = `${base}.chapterReviews.${row.id}`
       ref(row.chapterId, `${at}.chapterId`, 'chapter'); ref(row.sourceVersionId, `${at}.sourceVersionId`, 'version')
       row.findings.forEach(f => checkFinding(f, `${at}.findings.${f.id}`))
-      for (const archive of row.findingReconciliations || []) {
-        const archived = [...archive.workspaceFindings, ...archive.reviewFindings]
-        archived.forEach(f => checkFinding(f, `${at}.findingReconciliations.${archive.id}.${f.id}`))
-        if (archived.some(f => f.chapterId !== row.chapterId)) fail(at + '.findingReconciliations（归属错误）')
-      }
       row.candidateChanges.forEach(c => checkCandidate(c, `${at}.candidateChanges.${c.id}`))
       if (row.findings.some(f => f.chapterId !== row.chapterId) || row.candidateChanges.some(c => c.chapterId !== undefined && c.chapterId !== row.chapterId)) fail(`${at}.chapterId（内嵌审核归属错误）`)
     }

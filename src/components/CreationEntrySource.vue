@@ -19,6 +19,6 @@ defineProps<{ input: CreationEntryInput }>()
 </script>
 <style scoped>
 .creation-entry-source { width:100%; max-width:1000px; padding:24px; box-sizing:border-box; } p { line-height:1.7; } .source-text { white-space:pre-wrap; overflow-wrap:anywhere; }
-textarea { box-sizing:border-box; width:100%; margin:12px 0; padding:10px; resize:vertical; font:inherit; color:var(--text-color-primary); background:var(--bg-color); border:1px solid var(--border-color); }
+textarea { box-sizing:border-box; width:100%; margin:12px 0; padding:10px; resize:vertical; font:inherit; color:var(--ink); background:var(--desk); border:1px solid var(--line-2); }
 summary { cursor:pointer; }
 </style>

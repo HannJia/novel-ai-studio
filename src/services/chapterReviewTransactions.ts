@@ -50,15 +50,12 @@ export function saveChapterReviewSnapshot(aggregate: StoryAggregate, input: Chap
   const verdict = contentReviewVerdict(input.report)
   if (verdict === 'unknown') throw new Error('审核报告格式未能识别，未保存为已完成审核。')
   const semanticChecksPassed = verdict === 'passed'
-  const archives = [...new Map([...replaced.flatMap(row => row.findingReconciliations || []),
-    ...(input.review.findingReconciliations || [])].map(row => [row.id, row])).values()]
   const review: ChapterReview = { ...input.review, id: previous?.id || input.review.id,
     startedAt: previous?.startedAt || input.review.startedAt, completedAt: input.review.completedAt || now,
     findings, semanticChecksPassed, candidateChanges: workspace.candidates.filter(row => row.chapterId === chapter.id
       && (!row.sourceVersionId || row.sourceVersionId === bodyVersion)),
     status: input.review.deterministicChecksPassed && semanticChecksPassed && !findings.some(isFindingBlocking)
       ? 'ready_to_finalize' : 'needs_revision',
-    ...(archives.length ? { findingReconciliations: archives } : {}),
   }
   const reviewMeaning = (value: ChapterReview) => {
     const { startedAt: _start, completedAt: _end, ...rest } = value

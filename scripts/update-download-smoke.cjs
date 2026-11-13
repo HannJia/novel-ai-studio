@@ -18,7 +18,7 @@ async function main() {
   const sha512 = crypto.createHash('sha512').update(payload).digest('base64')
   let corrupt = false
   let downloads = 0
-  const filename = 'AI-Novel-Writer-1.0.3-x64.exe'
+  const filename = 'mobish-1.0.3.exe'
   const metadata = { version: '1.0.3', files: [{ url: filename, size: payload.length, sha512 }] }
   const server = http.createServer((request, response) => {
     if (request.url.startsWith('/latest.yml')) {

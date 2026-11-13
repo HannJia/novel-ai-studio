@@ -37,7 +37,7 @@ describe('模型密钥存储', () => {
   it('defaults PDF vision to off for new and legacy configurations and persists explicit choices', async () => {
     const store = useConfigStore()
     expect(store.pdfVisionEnabled).toBe(false)
-    local.setItem('novel-writer-config', JSON.stringify({ models: [], assignments: {} }))
+    local.setItem('mojian-v3-config', JSON.stringify({ models: [], assignments: {} }))
     await store.loadConfig()
     expect(store.pdfVisionEnabled).toBe(false)
     store.setPdfVisionEnabled(true)
@@ -61,25 +61,18 @@ describe('模型密钥存储', () => {
     })
     await store.saveConfig()
 
-    expect(local.getItem('novel-writer-config')).not.toContain('session-secret')
-    expect(session.getItem('novel-writer-session-secrets')).toContain('session-secret')
+    expect(local.getItem('mojian-v3-config')).not.toContain('session-secret')
+    expect(session.getItem('mojian-v3-session-secrets')).toContain('session-secret')
     expect(store.securityStatus.storage).toBe('session-only')
   })
 
-  it('加载旧版明文配置时自动迁移并保持本次会话可用', async () => {
-    local.setItem('novel-writer-config', JSON.stringify({
-      models: [{
-        id: 'legacy', name: '旧配置', baseUrl: 'https://example.test', apiKey: 'legacy-secret', modelName: 'test-model',
-        maxTokens: 4096, temperature: 0.7, topP: 0.9,
-      }],
-      assignments: { writing: 'legacy' },
-    }))
-    const store = useConfigStore()
-    await store.loadConfig()
-
-    expect(store.models[0].apiKey).toBe('legacy-secret')
-    expect(local.getItem('novel-writer-config')).not.toContain('legacy-secret')
-    expect(session.getItem('novel-writer-session-secrets')).toContain('legacy-secret')
+  it('rejects persisted plaintext browser credentials without converting historical data', async () => {
+    const original = JSON.stringify({ models: [{ id: 'retired', name: '旧配置', baseUrl: 'https://example.test', apiKey: 'synthetic-retired-secret', modelName: 'test', maxTokens: 4096, temperature: 0.7, topP: 0.9 }], assignments: { writing: 'retired' } })
+    local.setItem('mojian-v3-config', original)
+    const store = useConfigStore(); await store.loadConfig()
+    expect(store.models).toEqual([])
+    expect(local.getItem('mojian-v3-config')).toBe(original)
+    expect(session.getItem('mojian-v3-session-secrets')).toBeNull()
   })
 })
 
@@ -93,7 +86,7 @@ describe('本地开发环境', () => {
     })
     await store.saveConfig()
 
-    expect(local.getItem('novel-writer-config')).toContain('local-dev-secret')
+    expect(local.getItem('mojian-v3-config')).toContain('local-dev-secret')
     expect(store.securityStatus.storage).toBe('local-development')
 
     setActivePinia(createPinia())
@@ -105,14 +98,14 @@ describe('本地开发环境', () => {
 
   it('本地开发环境可从会话密钥恢复旧版脱敏配置', async () => {
     setBrowserLocation('localhost')
-    local.setItem('novel-writer-config', JSON.stringify({
+    local.setItem('mojian-v3-config', JSON.stringify({
       models: [{
         id: 'redacted', name: '旧配置', baseUrl: 'https://example.test', apiKey: '', modelName: 'test-model',
         maxTokens: 4096, temperature: 0.7, topP: 0.9,
       }],
       assignments: { writing: 'redacted' },
     }))
-    session.setItem('novel-writer-session-secrets', JSON.stringify({
+    session.setItem('mojian-v3-session-secrets', JSON.stringify({
       models: { redacted: 'recovered-secret' },
       embedding: '',
     }))
@@ -159,7 +152,7 @@ describe('对话 / 联网模型分配', () => {
     expect(restored.getModelForTask('outline')?.id).toBe(outline.id)
     expect(restored.getModelForTask('writing')?.id).toBe(first.id)
     expect(restored.getModelForTask('review')?.id).toBe(first.id)
-    expect(local.getItem('novel-writer-config')).not.toContain('session-secret')
+    expect(local.getItem('mojian-v3-config')).not.toContain('session-secret')
     restored.setAssignment('chat', '')
     expect(restored.getModelForTask('chat')?.id).toBe(outline.id)
     await restored.saveConfig()
@@ -178,9 +171,9 @@ describe('对话 / 联网模型分配', () => {
   it.each([undefined, 'deleted-model'])('loads missing or stale chat assignments safely: %s', async chat => {
     const { store, outline } = addModels()
     await store.saveConfig()
-    const saved = JSON.parse(local.getItem('novel-writer-config')!)
+    const saved = JSON.parse(local.getItem('mojian-v3-config')!)
     saved.assignments = { ...saved.assignments, outline: outline.id, chat }
-    local.setItem('novel-writer-config', JSON.stringify(saved))
+    local.setItem('mojian-v3-config', JSON.stringify(saved))
     setActivePinia(createPinia())
     const restored = useConfigStore()
     await restored.loadConfig()

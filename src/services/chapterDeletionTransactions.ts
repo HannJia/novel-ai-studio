@@ -59,7 +59,7 @@ function assertNumericLinks(novel: Novel, workspace: ReconstructionWorkspaceSnap
     && (chapter.storyDay !== undefined || (chapter.storyDaysElapsed !== undefined && chapter.storyDaysElapsed !== 0))) {
     issues.push(`章节「${chapter.title}」.storyDay/storyDaysElapsed`)
   }
-  // Source-bound time records are invalidated below. Legacy numeric associations
+  // Source-bound time records are invalidated below. Numeric form associations
   // above must be reviewed before the chapter order changes.
   for (const item of novel.dataPanels || []) {
     check(item.lastMentionChapterIndex, `数据「${item.name}」.lastMentionChapterIndex`)

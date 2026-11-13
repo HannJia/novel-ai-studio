@@ -213,10 +213,12 @@ async function saveProposal(action: 'save' | 'defer' | 'reject') {
 
 <style scoped>
 .causality-panel { display: grid; gap: 1rem; }
-article, fieldset { padding: 1rem; border: 1px solid var(--border-color, #ccc); border-radius: 8px; }
+article, fieldset { padding: 1rem; border: 1px solid var(--line-2); border-radius: 8px; }
 label { display: grid; gap: .4rem; margin: .8rem 0; }
 textarea, select, input { max-width: 100%; padding: .5rem; color: inherit; background: transparent; }
+textarea, select, input:not([type=checkbox]):not([type=radio]) { box-sizing: border-box; min-width: 0; border: 1px solid var(--line-2); border-radius: var(--r-s); background: var(--paper); font: inherit; }
 textarea { min-height: 5rem; }
-button { padding: .5rem .8rem; margin-right: .5rem; cursor: pointer; }
-[role=alert] { color: #c53c3c; }
+button { padding: .5rem .8rem; margin-right: .5rem; border: 1px solid var(--line-2); border-radius: var(--r-s); color: var(--ink-2); background: var(--paper); cursor: pointer; }
+button:disabled { opacity: .55; cursor: default; }
+[role=alert] { color: var(--zhu); }
 </style>

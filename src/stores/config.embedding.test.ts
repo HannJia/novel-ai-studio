@@ -74,35 +74,26 @@ describe('统一模型的向量用途', () => {
 
   it('never returns an embedding model from malformed legacy chat assignments', async () => {
     const store = useConfigStore()
-    localStorage.setItem('novel-writer-config', JSON.stringify({ models: [{ id: 'vector', ...makeModel('embedding') }], assignments: { outline: 'vector', writing: 'vector', review: 'vector', chat: 'vector' } }))
+    localStorage.setItem('mojian-v3-config', JSON.stringify({ models: [{ id: 'vector', ...makeModel('embedding') }], assignments: { outline: 'vector', writing: 'vector', review: 'vector', chat: 'vector' } }))
     await store.loadConfig()
     for (const task of ['outline', 'writing', 'review', 'chat'] as const) expect(store.getModelForTask(task)).toBeNull()
   })
 
-  it('migrates configured legacy vectors once and keeps their key in the existing secret store', async () => {
-    const store = useConfigStore()
-    localStorage.setItem('novel-writer-config', JSON.stringify({ models: [], assignments: {}, embedding: {
-      enabled: true, baseUrl: 'https://legacy.example.test/v1', modelName: 'legacy-vector', apiKey: 'legacy-synthetic-secret', batchSize: 4,
+  it('does not synthesize model records from unassigned standalone retrieval settings', async () => {
+    localStorage.setItem('mojian-v3-config', JSON.stringify({ models: [], assignments: {}, embedding: {
+      enabled: true, baseUrl: 'https://unassigned.example.test/v1', modelName: 'standalone-vector', apiKey: '', batchSize: 4,
     } }))
+    const store = useConfigStore()
     await store.loadConfig()
-    const id = store.assignments.embedding
-    expect(store.models).toHaveLength(1)
-    expect(store.getModelForTask('embedding')).toMatchObject({ kind: 'embedding', apiKey: 'legacy-synthetic-secret', modelName: 'legacy-vector' })
-    expect(store.embedding).toMatchObject({ enabled: true, batchSize: 4 })
-    await store.saveConfig()
-    expect(localStorage.getItem('novel-writer-config')).not.toContain('legacy-synthetic-secret')
-    setActivePinia(createPinia())
-    const restored = useConfigStore()
-    await restored.loadConfig()
-    expect(restored.models).toHaveLength(1)
-    expect(restored.assignments.embedding).toBe(id)
-    expect(restored.getModelForTask('embedding')?.apiKey).toBe('legacy-synthetic-secret')
+    expect(store.models).toEqual([])
+    expect(store.assignments.embedding).toBe('')
+    expect(store.embedding.enabled).toBe(false)
+    expect(store.getModelForTask('embedding')).toBeNull()
   })
 
-  it('does not create a default disabled vector model and preserves ordinary legacy models', async () => {
-    const chat = { id: 'old-chat', ...makeModel() }
-    delete chat.kind
-    localStorage.setItem('novel-writer-config', JSON.stringify({ models: [chat], assignments: { outline: chat.id }, embedding: {
+  it('does not invent a vector model for an unassigned current configuration', async () => {
+    const chat = { id: 'native-chat', ...makeModel(), apiKey: '' }
+    localStorage.setItem('mojian-v3-config', JSON.stringify({ models: [chat], assignments: { outline: chat.id }, embedding: {
       enabled: false, baseUrl: 'http://127.0.0.1:11434', modelName: 'bge-m3', apiKey: '', batchSize: 16,
     } }))
     const store = useConfigStore()

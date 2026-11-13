@@ -47,7 +47,7 @@ describe('complete project snapshots', () => {
   it('exports unloaded planning, reviews and evidence; round trips them with the manuscript through a full restore', async () => {
     const ctx = await setup()
     const backup = await ctx.exportProjectSnapshot()
-    expect(backup.version).toBe(2)
+    expect(backup.version).toBe(3)
     expect(backup.reconstructionWorkspaces).toEqual([ctx.state])
     const { replaceProjectInDb } = await import('./db/project')
     const { createTestProjectBackup } = await import('@/test/projectBackupFixture')
@@ -120,7 +120,7 @@ describe('complete project snapshots', () => {
     expect(ctx.workspace.getCanonMutations(ctx.novel.id)).toEqual([])
   })
 
-  it('refuses corrupt V2 records instead of exporting an apparently complete backup with missing history', async () => {
+  it('refuses corrupt V3 records instead of exporting an apparently complete backup with missing history', async () => {
     const ctx = await setup()
     const { execute, runTransaction } = await import('./database')
     await runTransaction(() => execute("UPDATE reconstruction_canon_mutations SET value = '{broken'"))

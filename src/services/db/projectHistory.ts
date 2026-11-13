@@ -31,7 +31,7 @@ export async function readSqlHistoryRuns(projectId: string, baseRevision: string
         WHERE json_extract(n.value, '$.id') = ?) AS novel_count
     FROM project_history h WHERE h.rowid > ? ORDER BY h.rowid LIMIT 1`, [projectId, projectId, projectId, cursor])[0]
   if (!row) return { projectId, baseRevision, source: null, nextCursor: null }
-  if (row.format !== 'ai-novel-writer-backup' || row.version !== 2 || row.count > 1 || row.count !== row.novel_count) throw new Error('历史账本来源无效。')
+  if (row.format !== 'ai-novel-writer-backup' || row.version !== 3 || row.count > 1 || row.count !== row.novel_count) throw new Error('历史账本来源无效。')
   const runs: AiRun[] = row.count === 0 ? [] : JSON.parse(row.ledger || 'null')
   if (!Array.isArray(runs) || new Set(runs.map(run => run.id)).size !== runs.length) throw new Error('历史账本损坏。')
   for (const run of runs) validateReconstructionAiRun(run)

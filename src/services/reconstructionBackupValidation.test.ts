@@ -1,3 +1,4 @@
+import { confirmTestStoryContract as confirmStoryContract } from '@/test/contractCardsFixture'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { Novel } from '@/types/novel'
@@ -12,7 +13,7 @@ import { buildAnalysisSourceVersionId } from './reconstructionCandidates'
 import { buildChapterReviewSourceVersion, buildChapterReviewSignature } from './chapterReviewIdentity'
 import { createAiRun } from './reconstructionAiRun'
 import { approveScenePlans, confirmChapterPlan, normalizeScenePlans, proposeScenePlans } from './reconstructionPlanning'
-import { confirmCreationSkeleton, confirmStoryContract, reviseStoryContract, syncCreationDraftPlanning } from './reconstructionCreation'
+import { confirmCreationSkeleton,  reviseStoryContract, syncCreationDraftPlanning } from './reconstructionCreation'
 
 beforeEach(() => setActivePinia(createPinia()))
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value))
@@ -77,25 +78,6 @@ describe('V2 reconstruction backup validation', () => {
   })
 
   it.each([
-    ['parserVersion', 'unknown'], ['reconciledAt', 'yesterday'], ['report', null], ['reviewStatus', 'done'],
-    ['workspaceFindings.0.status', 'done'], ['reviewFindings.0.authorNote', 1],
-    ['workspaceFindings.0.chapterId', 'foreign-chapter'], ['reviewFindings.0.chapterId', 'missing-other-chapter'],
-    ['workspaceFindings.0.evidence.0.sourceId', 'foreign-chapter'],
-  ])('validates reconciliation archive %s and preserves valid preimages', (field, value) => {
-    const { novel, workspace } = fixture()
-    const review = workspace.chapterReviews[0]
-    const archive = { id: 'archive', parserVersion: 'grouped-details-v1' as const, reconciledAt: now,
-      report: '保留原报告', reviewStatus: review.status,
-      workspaceFindings: clone(workspace.reviewFindings), reviewFindings: clone(review.findings) }
-    review.findingReconciliations = [archive]
-    const original = clone(workspace)
-    expect(() => validate([workspace, emptyProjectWorkspace('other')], [novel, otherNovel()])).not.toThrow()
-    expect(workspace).toEqual(original)
-    changeAt(archive, field as string, value)
-    expect(() => validate([workspace, emptyProjectWorkspace('other')], [novel, otherNovel()])).toThrow()
-  })
-
-  it.each([
     ['content', '被替换的正文'], ['contextVersion', 'changed-context'],
     ['review.sourceVersionId', 'wrong-review'], ['review.findings.0.sourceVersionId', 'wrong-body'],
     ['review.candidateChanges.0.sourceVersionId', 'wrong-body'], ['review.chapterId', 'foreign-chapter'],
@@ -113,7 +95,7 @@ describe('V2 reconstruction backup validation', () => {
     expect(() => validate([workspace], [novel])).toThrow()
   })
 
-  it.each([4, 5, 6, 7])('preserves a v%s candidate review as history without accepting it as current', protocol => {
+  it.each([4, 5, 6, 7])('rejects a retired v%s candidate review protocol', protocol => {
     const { novel, workspace } = fixture(), chapter = novel.chapters[0]
     const content = chapter.content, contextVersion = 'historical-context'
     const signature = buildChapterReviewSignature(content, contextVersion).replace('review-v8:', 'review-v' + protocol + ':')
@@ -126,7 +108,7 @@ describe('V2 reconstruction backup validation', () => {
     workspace.aiRuns = [{ ...createAiRun({ id: 'historical-run', mode: 'autonomous', taskType: 'draft', targetId: novel.id, chapterStart: 0, chapterEnd: 2, tokenBudget: 10000, now }),
       status: 'completed', chapterDrafts: [draft] }]
     const before = clone(workspace)
-    expect(() => validate([workspace], [novel])).not.toThrow()
+    expect(() => validate([workspace], [novel])).toThrow()
     expect(workspace).toEqual(before)
     expect(signature).not.toBe(buildChapterReviewSignature(content, contextVersion))
     draft.reviewCoverage.signature = buildChapterReviewSignature(content, contextVersion)

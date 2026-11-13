@@ -96,7 +96,7 @@ export function buildSemanticMemoryGraph(records: GraphRecord[], beforeChapterIn
     if (m.stateKind === 'knowledge' || m.stateKind === 'relationship') {
       const owner = target('character',m.characterId)
       if (owner) add(r,owner,r.id,'character_state','人物 → 认知/关系状态（非客观事实断言）')
-      if (m.stateKind === 'relationship') add(r,r.id,target('character',m.targetCharacterId),'character_relationship','单向关系｜' + String(m.dimensionLabel || '未分类历史') + '：' + String(m.relation || ''))
+      if (m.stateKind === 'relationship') add(r,r.id,target('character',m.targetCharacterId),'character_relationship','单向关系｜' + String(m.dimensionLabel || '待分类') + '：' + String(m.relation || ''))
       else if (typeof m.factId === 'string') {
         const proposition = propositions.get(m.factId)
         add(r,r.id,proposition,'proposition_reference','人物认知 → 原命题身份（非事实断言）')

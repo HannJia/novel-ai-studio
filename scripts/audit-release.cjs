@@ -7,13 +7,14 @@ const yaml = require('js-yaml')
 
 const root = path.resolve(__dirname, '..')
 const version = require('../package.json').version
-const archive = path.join(root, 'release/win-unpacked/resources/app.asar')
-const name = `AI-Novel-Writer-${version}-x64.exe`
-const installer = path.join(root, 'release', name)
+const releaseDir = path.resolve(process.argv[2] || path.join(root, 'release'))
+const archive = path.join(releaseDir, 'win-unpacked/resources/app.asar')
+const name = `mobish-${version}.exe`
+const installer = path.join(releaseDir, name)
 const bytes = fs.readFileSync(installer)
 const sha256 = crypto.createHash('sha256').update(bytes).digest('hex')
 const sha512 = crypto.createHash('sha512').update(bytes).digest('base64')
-const manifest = yaml.load(fs.readFileSync(path.join(root, 'release/latest.yml'), 'utf8'))
+const manifest = yaml.load(fs.readFileSync(path.join(releaseDir, 'latest.yml'), 'utf8'))
 assert.equal(manifest.version, version)
 assert.equal(manifest.path, name)
 assert.equal(manifest.sha512, sha512)
@@ -23,7 +24,7 @@ assert.equal(manifest.files[0].sha512, sha512)
 assert.ok(fs.statSync(`${installer}.blockmap`).size > 0)
 
 const files = asar.listPackage(archive).map(file => file.replace(/^[/\\]/, '').replaceAll('\\', '/'))
-const privateFiles = /(?:^|\/)(?:\.env(?:\..*)?|\.ssh|\.local-recovery|server|novel-writer-config\.json|novel-writer-cloud-session)(?:\/|$)|\.(?:db|sqlite|sqlite3|pfx|p12|pem|key)(?:-(?:wal|shm))?$/
+const privateFiles = /(?:^|\/)(?:\.env(?:\..*)?|\.ssh|\.local-recovery|server|mojian-v3-config\.json|mojian-v3-cloud-session)(?:\/|$)|\.(?:db|sqlite|sqlite3|pfx|p12|pem|key)(?:-(?:wal|shm))?$/
 assert.deepEqual(files.filter(file => privateFiles.test(file)), [], 'Private or server-side files included')
 const packaged = JSON.parse(asar.extractFile(archive, 'package.json').toString())
 assert.equal(packaged.version, version)

@@ -1,35 +1,25 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import { readShellPref, rememberBook, writeShellPref } from '@/v3/shell'
+import { rememberBook } from '@/v3/shell'
 
 const router = createRouter({
   // 使用 hash 模式，兼容 Electron 文件协议
   history: createWebHashHistory(),
   routes: [
-    // 新界面（V3）。每个地址只由一套界面负责；新界面完成一个区域就在这里接管对应地址。
+    // 所有产品页面均为 V3；退役版本没有路由或参数适配。
     {
       path: '/',
       name: 'NovelList',
       component: () => import('@/v3/views/ShelfView.vue'),
-      meta: { title: '我的书架', shell: 'v3', area: 'shelf', legacyPath: '/legacy' },
+      meta: { title: '我的书架', shell: 'v3', area: 'shelf' },
     },
-    {
-      path: '/legacy',
-      name: 'LegacyNovelList',
-      component: () => import('@/views/NovelList.vue'),
-      meta: { title: '我的书架（旧界面）' },
-    },
+
     {
       path: '/create',
       name: 'CreateWizard',
       component: () => import('@/v3/views/CreateView.vue'),
-      meta: { title: '创建新书', shell: 'v3', area: 'create', legacyPath: '/legacy-create' },
+      meta: { title: '创建新书', shell: 'v3', area: 'create' },
     },
-    {
-      path: '/legacy-create',
-      name: 'LegacyCreateWizard',
-      component: () => import('@/views/CreateWizard.vue'),
-      meta: { title: '创建新书（旧界面）', v3Path: '/create' },
-    },
+
     {
       path: '/settings',
       name: 'Settings',
@@ -69,111 +59,50 @@ const router = createRouter({
     {
       path: '/knowledge/:novelId?',
       name: 'KnowledgeLibrary',
-      component: () => import('@/views/workspace/KnowledgeBase.vue'),
+      component: () => import('@/v3/knowledge/KnowledgeLibrary.vue'),
       meta: { title: '知识库', shell: 'v3', area: 'knowledge' },
     },
     {
-      path: '/workspace/:novelId',
-      component: () => import('@/views/Workspace.vue'),
-      meta: { title: '工作台' },
-      children: [
-        {
-          path: '',
-          redirect: (to) => `/workspace/${to.params.novelId}/chapters`,
-        },
-        {
-          path: 'outline',
-          name: 'WorkspaceOutline',
-          component: () => import('@/views/workspace/OutlineView.vue'),
-          meta: { title: '大纲' },
-        },
-        {
-          path: 'volumes',
-          name: 'WorkspaceVolumes',
-          redirect: (to) => ({
-            path: `/workspace/${to.params.novelId}/planning`,
-            query: { tab: 'volumes' },
-          }),
-          meta: { title: '分卷规划' },
-        },
-        {
-          path: 'chapters',
-          name: 'WorkspaceChapters',
-          component: () => import('@/views/workspace/ChapterList.vue'),
-          meta: { title: '章节列表' },
-        },
-        {
-          path: 'inspiration',
-          name: 'WorkspaceInspiration',
-          component: () => import('@/views/workspace/InspirationArchive.vue'),
-          meta: { title: '灵感记录' },
-        },
-        {
-          path: 'characters',
-          name: 'WorkspaceCharacters',
-          component: () => import('@/views/workspace/CharacterLibrary.vue'),
-          meta: { title: '角色库' },
-        },
-        {
-          path: 'knowledge',
-          name: 'WorkspaceKnowledge',
-          redirect: to => ({ name: 'KnowledgeLibrary', params: { novelId: String(to.params.novelId) }, query: to.query, hash: to.hash }),
-          meta: { title: '知识库' },
-        },
-        {
-          path: 'planning',
-          name: 'WorkspacePlanning',
-          component: () => import('@/views/workspace/StoryPlanner.vue'),
-          meta: { title: '剧情规划' },
-        },
-        {
-          path: 'data',
-          name: 'WorkspaceDataPanel',
-          component: () => import('@/views/workspace/DataPanelWorkspace.vue'),
-          meta: { title: '数据面板' },
-        },
-        {
-          path: 'editor/:chapterId',
-          name: 'WorkspaceEditor',
-          redirect: to => ({ path: `/write/${String(to.params.novelId)}/${String(to.params.chapterId)}`, query: to.query, hash: to.hash }),
-          meta: { title: '写作' },
-        },
-      ],
+      path: '/characters/:novelId',
+      name: 'V3Characters',
+      component: () => import('@/v3/characters/CharacterManager.vue'),
+      meta: { title: '人物资料', shell: 'v3', area: 'codex', bookTool: 'characters' },
+    },
+    {
+      path: '/data/:novelId',
+      name: 'V3Data',
+      component: () => import('@/v3/data/DataManager.vue'),
+      meta: { title: '数据面板', shell: 'v3', area: 'codex', bookTool: 'data' },
+    },
+    {
+      path: '/inspiration/:novelId',
+      name: 'V3Inspiration',
+      component: () => import('@/v3/create/InspirationArchive.vue'),
+      meta: { title: '灵感记录', shell: 'v3', area: 'codex', bookTool: 'inspiration' },
+    },
+    {
+      path: '/chapters/:novelId',
+      name: 'V3Chapters',
+      component: () => import('@/v3/chapters/ChapterManager.vue'),
+      meta: { title: '章节管理', shell: 'v3', area: 'write', bookTool: 'chapters' },
+    },
+    {
+      path: '/outline/:novelId',
+      name: 'V3Outline',
+      component: () => import('@/v3/planning/OutlineEditor.vue'),
+      meta: { title: '总纲修订', shell: 'v3', area: 'plan', bookTool: 'outline' },
     },
     {
       path: '/generate/:novelId',
       name: 'V3CreateFlow',
       component: () => import('@/v3/views/CreateFlowView.vue'),
-      meta: { title: '作品创建流程', shell: 'v3', area: 'create', legacyPath: '/legacy-generate/:novelId' },
+      meta: { title: '作品创建流程', shell: 'v3', area: 'create' },
     },
-    {
-      path: '/legacy-generate/:novelId',
-      name: 'LegacyGenerateOutline',
-      component: () => import('@/views/GenerateOutline.vue'),
-      meta: { title: '生成大纲（旧界面）', v3Path: '/generate/:novelId' },
-    },
+
+    { path: '/:pathMatch(.*)*', name: 'V3NotFound', component: () => import('@/v3/views/NotFoundView.vue'), meta: { title: '页面不存在', shell: 'v3' } },
   ],
 })
 
-// ?ui=legacy / ?ui=v3 切换界面偏好；偏好为旧界面时，已被新界面接管的地址改走旧界面的对应页面。
-router.beforeEach(to => {
-  const ui = to.query.ui
-  if (ui === 'legacy' || ui === 'v3') {
-    writeShellPref(ui)
-    const query = { ...to.query }
-    delete query.ui
-    const routeTarget = ui === 'legacy' ? to.meta.legacyPath : to.meta.v3Path
-    const path = typeof routeTarget === 'string'
-      ? routeTarget.replace(/:([A-Za-z][A-Za-z0-9_]*)/g, (_match, key: string) => encodeURIComponent(String(to.params[key] || '')))
-      : to.path
-    return { path, query, hash: to.hash, replace: true }
-  }
-  const routeTarget = readShellPref() === 'legacy' ? to.meta.legacyPath : to.meta.v3Path
-  if (typeof routeTarget === 'string') {
-    const path = routeTarget.replace(/:([A-Za-z][A-Za-z0-9_]*)/g, (_match, key: string) => encodeURIComponent(String(to.params[key] || '')))
-    return { path, query: to.query, hash: to.hash, replace: true }
-  }
-})
 router.afterEach(to => { if (typeof to.params.novelId === 'string') rememberBook(to.params.novelId) })
 
 export default router

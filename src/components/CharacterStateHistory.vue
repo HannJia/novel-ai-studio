@@ -39,7 +39,7 @@
           <p v-if="item.issue" class="state-warning">{{ item.issue }}；保留历史，不作为当前事实。</p>
           <blockquote v-for="evidence in item.record.characterState!.after.evidence" :key="evidence.id">{{ evidence.quote }}</blockquote>
           <router-link v-if="novel.chapters.some(chapter => chapter.id === item.record.chapterId)"
-            :to="{ name: 'WorkspaceEditor', params: { novelId: novel.id, chapterId: item.record.chapterId } }">打开来源章节</router-link>
+            :to="{ name: 'V3Write', params: { novelId: novel.id, chapterId: item.record.chapterId } }">打开来源章节</router-link>
         </article>
       </details>
     </template>
@@ -74,13 +74,13 @@ const history = computed(() => getCharacterStateHistory(props.novel, props.recor
 </script>
 
 <style scoped>
-.character-state-history { padding: 16px; color: var(--text-color-secondary); line-height: 1.75; }
+.character-state-history { padding: 16px; color: var(--ink-2); line-height: 1.75; }
 .state-filters { display: flex; flex-wrap: wrap; gap: 18px; }
 .state-filters label { display: grid; gap: 4px; }
-select { max-width: 100%; padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-color-primary); background: var(--bg-color-card); }
-h4 { color: var(--text-color-primary); margin: 14px 0 6px; }
+select { max-width: 100%; padding: 6px 10px; border: 1px solid var(--line-2); border-radius: 6px; color: var(--ink); background: var(--paper); }
+h4 { color: var(--ink); margin: 14px 0 6px; }
 summary { cursor: pointer; }
-.state-entry { display: grid; gap: 5px; margin-top: 12px; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; overflow-wrap: anywhere; }
-.state-entry blockquote { margin: 0; padding-left: 10px; border-left: 2px solid var(--border-color); white-space: pre-wrap; }
-.state-warning { color: var(--color-warning); }
+.state-entry { display: grid; gap: 5px; margin-top: 12px; padding: 12px; border: 1px solid var(--line-2); border-radius: 8px; overflow-wrap: anywhere; }
+.state-entry blockquote { margin: 0; padding-left: 10px; border-left: 2px solid var(--line-2); white-space: pre-wrap; }
+.state-warning { color: var(--jin); }
 </style>

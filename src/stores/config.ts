@@ -43,7 +43,7 @@ export interface ModelAssignments {
   writing: string    // 写作模型 ID
   review: string     // 审查模型 ID
   chat: string       // 对话 / 联网模型 ID；空值动态跟随大纲模型
-  embedding?: string // 向量模型 ID；可选，向后兼容
+  embedding?: string // 未分配时禁用向量检索
 }
 
 export interface EmbeddingConfig {
@@ -74,8 +74,8 @@ export interface ConfigSecurityStatus {
   encryptionAvailable: boolean
 }
 
-const STORAGE_KEY = 'novel-writer-config'
-const SESSION_SECRET_KEY = 'novel-writer-session-secrets'
+const STORAGE_KEY = 'mojian-v3-config'
+const SESSION_SECRET_KEY = 'mojian-v3-session-secrets'
 
 function hasElectronConfig(): boolean {
   return !!window.electronAPI?.configRead && !!window.electronAPI?.configWrite
@@ -178,23 +178,6 @@ const DEFAULT_EMBEDDING_CONFIG: EmbeddingConfig = {
   batchSize: 16,
 }
 
-function migrateLegacyEmbedding(data: ConfigData): ConfigData {
-  // An explicitly cleared assignment must stay cleared; only old files lack this field.
-  if (Object.prototype.hasOwnProperty.call(data.assignments || {}, 'embedding')) return data
-  const e = data.embedding
-  const explicit = e && (e.enabled || e.apiKey?.trim()
-    || (e.baseUrl && e.baseUrl !== DEFAULT_EMBEDDING_CONFIG.baseUrl)
-    || (e.modelName && e.modelName !== DEFAULT_EMBEDDING_CONFIG.modelName))
-  if (!explicit) return data
-  const baseUrl = e.baseUrl || DEFAULT_EMBEDDING_CONFIG.baseUrl
-  const modelName = e.modelName || DEFAULT_EMBEDDING_CONFIG.modelName
-  const match = data.models.find(m => m.kind === 'embedding' && m.baseUrl === baseUrl && m.modelName === modelName && m.apiKey === (e.apiKey || ''))
-  if (match) return { ...data, assignments: { ...data.assignments, embedding: match.id } }
-  let id = 'embedding-legacy'
-  for (let suffix = 1; data.models.some(m => m.id === id); suffix++) id = 'embedding-legacy-' + suffix
-  const model: ModelConfig = { id, name: '资料检索', kind: 'embedding', baseUrl, modelName, apiKey: e.apiKey || '', maxTokens: 8192, temperature: 0, topP: 1 }
-  return { ...data, models: [...data.models, model], assignments: { ...data.assignments, embedding: id } }
-}
 
 function mergeSkills(saved: WritingSkill[] | undefined): WritingSkill[] {
   const builtIns = createBuiltInSkills()
@@ -278,7 +261,7 @@ export const useConfigStore = defineStore('config', () => {
 
   function applyConfig(input: ConfigData | null) {
     invalidateAllModelConnections()
-    const data = input ? migrateLegacyEmbedding(input) : null
+    const data = input
     models.value = data?.models || []
     Object.assign(assignments, { outline: '', writing: '', review: '', chat: '', embedding: '', ...(data?.assignments || {}) })
     for (const task of ['outline', 'writing', 'review', 'chat'] as const) {
@@ -322,42 +305,17 @@ export const useConfigStore = defineStore('config', () => {
         const saved = await window.electronAPI!.configRead()
         const persisted = saved ? JSON.parse(saved) as ConfigData : null
         if (persisted && status.encryptionAvailable) {
-          const needsEncryptionMigration = persisted.models.some(model => Boolean(model.apiKey) && !model.apiKey.startsWith('enc:'))
-            || Boolean(persisted.embedding?.apiKey && !persisted.embedding.apiKey.startsWith('enc:'))
+          if (persisted.models.some(model => model.apiKey && !model.apiKey.startsWith('enc:'))
+            || persisted.embedding?.apiKey && !persisted.embedding.apiKey.startsWith('enc:')) throw new Error('V3 桌面配置密钥必须加密保存。')
           data = await decryptConfig(persisted)
-          if (needsEncryptionMigration) {
-            await window.electronAPI!.configWrite(JSON.stringify(await encryptConfig(data!)))
-          }
         } else if (persisted) {
-          writeSessionSecrets(persisted)
           data = mergeSessionSecrets(redactConfigSecrets(persisted))
-          if (containsPersistedSecrets(persisted)) {
-            await window.electronAPI!.configWrite(JSON.stringify(redactConfigSecrets(persisted)))
-          }
-        }
-        if (!data) {
-          data = readLocalConfig()
-          if (data) {
-            writeSessionSecrets(data)
-            const stored = status.encryptionAvailable ? await encryptConfig(data) : redactConfigSecrets(data)
-            await window.electronAPI!.configWrite(JSON.stringify(stored))
-            localStorage.removeItem(STORAGE_KEY)
-          }
         }
       } else {
         const persisted = readLocalConfig()
         if (persisted) {
-          if (isLocalDevelopment()) {
-            // Keep local development convenient even if an earlier build
-            // redacted the browser copy and left the secret in sessionStorage.
-            data = mergeSessionSecrets(persisted)
-          } else if (containsPersistedSecrets(persisted)) {
-            writeSessionSecrets(persisted)
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(redactConfigSecrets(persisted)))
-            data = mergeSessionSecrets(redactConfigSecrets(persisted))
-          } else {
-            data = mergeSessionSecrets(persisted)
-          }
+          if (!isLocalDevelopment() && containsPersistedSecrets(persisted)) throw new Error('V3 网页配置只持久保存公开设置。')
+          data = mergeSessionSecrets(persisted)
         }
         if (isLocalDevelopment()) securityStatus.storage = 'local-development'
       }
@@ -416,7 +374,7 @@ export const useConfigStore = defineStore('config', () => {
       if (!stillCurrent() || JSON.stringify(exportConfig()) !== before) throw new Error('本机配置已变化，请重新比较后恢复。')
       try { await persistConfig(candidate) }
       catch (cause) {
-        // A write can fail after an OS-config write but before local migration
+        // A write can fail after an OS-config write but before local publication
         // cleanup. Restore the current snapshot where storage still permits it.
         try { await persistConfig(exportConfig()) } catch { /* In-memory original remains available. */ }
         throw cause

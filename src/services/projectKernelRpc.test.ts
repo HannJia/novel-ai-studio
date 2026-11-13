@@ -33,7 +33,7 @@ describe('typed project IPC handler', () => {
     expect(await handle(trusted, request)).toMatchObject({ ok: false, error: { code: 'PROJECT_INVALID' } })
     expect(await readdir(root)).toEqual([])
   })
-  it('uses the generated full V2 validator at the main-process boundary', () => {
+  it('uses the generated full V3 validator at the main-process boundary', () => {
     const backup = createTestProjectBackup([], [])
     expect(() => validateBackup(backup)).not.toThrow()
     expect(() => validateBackup({ ...backup, version: 1 })).toThrow()

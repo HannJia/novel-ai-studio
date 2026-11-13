@@ -105,11 +105,11 @@ onBeforeUnmount(stop)
 .model-search-test--compact, .model-search-test--compact .search-actions { display: contents; }
 .model-search-test--compact .search-protocol, .model-search-test--compact .search-result { order: 1; flex-basis: 100%; min-width: 0; }
 .search-protocol, .search-result { margin: 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
-.search-protocol, time { color: var(--text-color-tertiary); }
+.search-protocol, time { color: var(--ink-3); }
 .search-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.search-result { border-top: 1px solid var(--border-color-light); padding-top: 8px; }
+.search-result { border-top: 1px solid var(--line); padding-top: 8px; }
 .search-result p { margin: 4px 0; white-space: pre-wrap; }
-.search-verified strong { color: var(--color-success); }
-.search-failed strong { color: var(--color-error); }
-.search-unverified strong { color: var(--color-warning); }
+.search-verified strong { color: var(--qing); }
+.search-failed strong { color: var(--zhu); }
+.search-unverified strong { color: var(--jin); }
 </style>

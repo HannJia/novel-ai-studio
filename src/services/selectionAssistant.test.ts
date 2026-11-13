@@ -9,7 +9,7 @@ const snapshot = captureSelectionSnapshot({ novelId: 'book', chapterId: 'chapter
   startOffset: 3, endOffset: 8, mode: 'polish', contextVersion: 'context-1' })
 const options = { snapshot, model: { id: 'model', modelName: 'test', maxTokens: 2000 } as ModelConfig,
   authorInstruction: '保留对白', factCard: '林澈尚不知道真相。', guidance: '本场景只揭示线索。' }
-beforeEach(() => vi.mocked(callAI).mockReset())
+beforeEach(() => { vi.mocked(callAI).mockReset() })
 
 describe('selection AI request', () => {
   it('preserves prose punctuation and whitespace while sending bounded context and author intent', async () => {
@@ -34,6 +34,16 @@ describe('selection AI request', () => {
   it('rejects truncated output and does not retry it', async () => {
     vi.mocked(callAI).mockResolvedValue({ content: '{"replacement":"新文字"}', finishReason: 'length' })
     await expect(requestSelectionReplacement(options)).rejects.toThrow('未完整结束')
+    expect(callAI).toHaveBeenCalledTimes(1)
+  })
+
+  it('allows a reasoning model to reach visible output for a short selection within the configured cap', async () => {
+    vi.mocked(callAI).mockImplementation(async request => Number(request.maxTokens) <= 1200
+      ? { content: '', finishReason: 'length' }
+      : { content: '{"replacement":"修订后的片段。"}', finishReason: 'stop' })
+    await expect(requestSelectionReplacement({ ...options, model: { ...options.model, maxTokens: 8192 } }))
+      .resolves.toBe('修订后的片段。')
+    expect(vi.mocked(callAI).mock.calls[0][0].maxTokens).toBe(8192)
     expect(callAI).toHaveBeenCalledTimes(1)
   })
 

@@ -30,11 +30,11 @@ const statusLabel = computed(() => {
 
 <style scoped>
 .search-evidence { font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
-.search-status { color: var(--color-primary); margin-top: 6px; }
-.search-status.warning { color: var(--text-color-secondary); }
+.search-status { color: var(--zhu); margin-top: 6px; }
+.search-status.warning { color: var(--ink-2); }
 .search-sources { margin-top: 6px; }
-.search-sources summary { cursor: pointer; color: var(--color-primary); }
-.search-sources a { color: var(--color-primary); text-decoration: underline; }
-.search-sources q { display: block; color: var(--text-color-secondary); }
+.search-sources summary { cursor: pointer; color: var(--zhu); }
+.search-sources a { color: var(--zhu); text-decoration: underline; }
+.search-sources q { display: block; color: var(--ink-2); }
 .search-sources > div { padding: 4px 0; }
 </style>

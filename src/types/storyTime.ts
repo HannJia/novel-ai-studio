@@ -2,7 +2,7 @@ import type { Chapter, Novel, StoryClock } from './novel'
 
 export type StoryTimeBoundary = 'origin' | 'chapter'
 export type StoryTimeRecordKind = 'origin' | 'absolute' | 'relative'
-export type StoryTimeRecordStatus = 'current' | 'superseded' | 'invalid' | 'legacy'
+export type StoryTimeRecordStatus = 'current' | 'superseded' | 'invalid' | 'unverified'
 
 /** A durable, replayable time fact. The record is never rebound to a new chapter number. */
 export interface StoryTimeRecord {
@@ -17,7 +17,7 @@ export interface StoryTimeRecord {
   elapsedDays: number
   confirmedAt: string
   confirmationOrder: number
-  source: 'author' | 'canon' | 'legacy'
+  source: 'author' | 'canon' | 'unverified'
   sourceVersionId?: string
   dependsOnRecordId?: string
   label?: string
@@ -29,7 +29,7 @@ export interface StoryTimeOrigin {
   day: number
   label: string
   confirmedAt: string
-  source: 'author' | 'legacy'
+  source: 'author' | 'unverified'
 }
 
 export interface StoryTimeProjection {
@@ -83,15 +83,15 @@ export function storyTimeOriginWellFormed(value: unknown): value is StoryTimeOri
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const row = value as StoryTimeOrigin
   return nonempty(row.id) && finiteDay(row.day) && row.day >= 0 && typeof row.label === 'string'
-    && validDate(row.confirmedAt) && ['author', 'legacy'].includes(row.source)
+    && validDate(row.confirmedAt) && ['author', 'unverified'].includes(row.source)
 }
 
 export function storyTimeRecordWellFormed(value: unknown): value is StoryTimeRecord {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const row = value as StoryTimeRecord
   if (!nonempty(row.id) || !['origin', 'absolute', 'relative'].includes(row.kind)
-    || !['current', 'superseded', 'invalid', 'legacy'].includes(row.status)
-    || !['origin', 'chapter'].includes(row.boundary) || !['author', 'canon', 'legacy'].includes(row.source)
+    || !['current', 'superseded', 'invalid', 'unverified'].includes(row.status)
+    || !['origin', 'chapter'].includes(row.boundary) || !['author', 'canon', 'unverified'].includes(row.source)
     || !finiteDay(row.startDay) || !finiteDay(row.endDay) || !finiteDay(row.elapsedDays)
     || row.startDay < 0 || row.endDay < row.startDay || row.elapsedDays < 0
     || Math.abs(roundDay(row.endDay - row.startDay) - row.elapsedDays) > 0.000001
@@ -146,7 +146,7 @@ export function normalizeStoryClock(value: unknown, fallbackUpdatedAt: string): 
       startDay, endDay, elapsedDays: finiteDay(row.elapsedDays) && row.elapsedDays >= 0 ? row.elapsedDays : roundDay(endDay - startDay),
       confirmedAt: validDate(row.confirmedAt) ? row.confirmedAt : fallbackUpdatedAt,
       confirmationOrder: orderValid(row.confirmationOrder) ? row.confirmationOrder : maxStoredOrder + index + 1,
-      source: row.source && ['author', 'canon', 'legacy'].includes(row.source) ? row.source : 'legacy', invalidReason: '故事时间历史记录格式无效。' }
+      source: row.source && ['author', 'canon', 'unverified'].includes(row.source) ? row.source : 'unverified', invalidReason: '故事时间历史记录格式无效。' }
   }
   const history = Array.isArray(raw.history) ? raw.history.map(normalizeRecord) : undefined
   // A corrupt append still shadows the old head; preserve both as history.
@@ -195,7 +195,7 @@ function recordValidator(novel: Novel): (row: StoryTimeRecord) => boolean {
     while (true) {
       if (memo.has(row)) { valid = memo.get(row)!; break }
       path.push(row)
-      if (!storyTimeRecordWellFormed(row) || row.status !== 'current' || row.source === 'legacy'
+      if (!storyTimeRecordWellFormed(row) || row.status !== 'current' || row.source === 'unverified'
         || seen.has(row.id) || counts.get(row.id) !== 1) break
       seen.add(row.id)
       if (row.boundary === 'origin') {

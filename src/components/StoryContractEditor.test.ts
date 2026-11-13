@@ -4,12 +4,14 @@ import { createPinia, setActivePinia } from 'pinia'
 import { mount } from '@vue/test-utils'
 import { createEmptyCreationDraft, type StoryContract } from '@/types/reconstruction'
 import StoryContractEditor from './StoryContractEditor.vue'
+import { confirmTestContractCards } from '@/test/contractCardsFixture'
 
 beforeEach(() => setActivePinia(createPinia()))
 describe('contract card author confirmation', () => {
   it('uses compact cards, expands editing and revokes only the changed card until explicitly confirmed', async () => {
     const contract = createEmptyCreationDraft({ id: 'test', now: '2026-11-10T00:00:00.000Z' }).contract
     Object.assign(contract, { approval: 'approved', title: '渡口', genre: '悬疑', centralConflict: '查信', endingDirection: '离开' })
+    Object.assign(contract, confirmTestContractCards(contract, contract.updatedAt))
     const wrapper = mount(StoryContractEditor, { props: { contract, cancelable: true } })
     await wrapper.get('footer .cancel').trigger('click')
     expect(wrapper.emitted('cancel')).toHaveLength(1)

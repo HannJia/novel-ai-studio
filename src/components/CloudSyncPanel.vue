@@ -235,7 +235,7 @@ async function copy(value: string, kind: 'recovery' | 'invite') {
   } catch { result.value = '复制失败，请选中文字后按 Ctrl+C，或下载保存。' }
 }
 function downloadRecovery() {
-  const blob = new Blob([`墨笺云同步账号：${username.value.trim()}\n恢复码：${recoveryCode.value}\n请勿向他人提供恢复码。\n`], { type: 'text/plain;charset=utf-8' })
+  const blob = new Blob([`墨笔生花云同步账号：${username.value.trim()}\n恢复码：${recoveryCode.value}\n请勿向他人提供恢复码。\n`], { type: 'text/plain;charset=utf-8' })
   if (recoveryDownloadUrl.value) URL.revokeObjectURL(recoveryDownloadUrl.value)
   const url = URL.createObjectURL(blob)
   recoveryDownloadUrl.value = url
@@ -266,8 +266,8 @@ function resolve(id: string, side: 'local' | 'remote') {
 .cloud-heading,.cloud-account { justify-content:space-between; }
 .cloud-heading h3 { display:flex; align-items:center; gap:8px; margin:0; }
 .cloud-panel { min-width:0; }
-.cloud-state,.cloud-role,.cloud-note,.cloud-details { font-size:12px; color:var(--text-color-secondary); overflow-wrap:anywhere; }
-.cloud-state.problem,.cloud-feedback { color:var(--color-error); }
+.cloud-state,.cloud-role,.cloud-note,.cloud-details { font-size:12px; color:var(--ink-2); overflow-wrap:anywhere; }
+.cloud-state.problem,.cloud-feedback { color:var(--zhu); }
 .cloud-feedback { font-size:13px; overflow-wrap:anywhere; }
 .cloud-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-top:16px; }
 .cloud-form label { display:grid; gap:6px; font-size:13px; min-width:0; }
@@ -281,19 +281,19 @@ summary { cursor:pointer; padding:8px 0; }
 .cloud-consent { display:block; margin-bottom:12px; }
 .cloud-toggle { font-size:13px; }
 .cloud-note { margin:12px 0; line-height:1.6; }
-.cloud-explanation { margin-top:12px; font-size:12px; color:var(--text-color-secondary); }
-.cloud-invites,.cloud-conflicts,.cloud-archives { margin-top:20px; padding-top:14px; border-top:1px solid var(--border-color-light); }
+.cloud-explanation { margin-top:12px; font-size:12px; color:var(--ink-2); }
+.cloud-invites,.cloud-conflicts,.cloud-archives { margin-top:20px; padding-top:14px; border-top:1px solid var(--line); }
 h4 { font-size:14px; margin:0 0 12px; }
 .cloud-secret { margin-top:12px; padding:10px 0; overflow-wrap:anywhere; }
 .cloud-secret code { min-width:0; flex:1; word-break:break-all; user-select:all; }
-.cloud-secret span { font-size:12px; color:var(--text-color-secondary); }
+.cloud-secret span { font-size:12px; color:var(--ink-2); }
 .cloud-copy-feedback { font-size:12px; line-height:1.6; margin:8px 0 0; overflow-wrap:anywhere; }
-.cloud-download-fallback { display:inline-block; margin-top:8px; color:var(--color-primary); font-size:12px; text-decoration:underline; }
-.cloud-conflict { padding:14px 0; border-bottom:1px solid var(--border-color-light); }
+.cloud-download-fallback { display:inline-block; margin-top:8px; color:var(--zhu); font-size:12px; text-decoration:underline; }
+.cloud-conflict { padding:14px 0; border-bottom:1px solid var(--line); }
 .cloud-conflict > strong { display:block; overflow-wrap:anywhere; }
 .cloud-versions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin:12px 0; }
 .cloud-versions b { font-size:13px; }
-.cloud-versions p { font-size:12px; color:var(--text-color-secondary); overflow-wrap:anywhere; }
+.cloud-versions p { font-size:12px; color:var(--ink-2); overflow-wrap:anywhere; }
 .cloud-archive { display:flex; flex-wrap:wrap; gap:8px; padding:8px 0; }
 .cloud-archive > span { flex:1 1 180px; font-size:12px; overflow-wrap:anywhere; }
 :global(.cloud-recovery-modal) { width:min(520px,calc(100vw - 32px)); }
@@ -302,15 +302,15 @@ h4 { font-size:14px; margin:0 0 12px; }
 .cloud-page { display: flex; flex-direction: column; gap: 20px; padding: 0; }
 .cloud-heading { margin-bottom: 4px; }
 .cloud-heading h2 { margin: 0; font-size: 30px; }
-.cloud-page-subtitle { margin-top: 6px; font-size: 14px; color: var(--text-color-secondary); }
+.cloud-page-subtitle { margin-top: 6px; font-size: 14px; color: var(--ink-2); }
 .cloud-account-card, .cloud-sync-settings, .cloud-auth-card { padding: 24px; }
 .cloud-account-card > h3, .cloud-sync-settings > h3 { font-size: 21px; margin: 0 0 20px; }
 .cloud-account { gap: 16px; }
 .cloud-account strong { font-size: 18px; }
 .cloud-account > .cloud-controls { margin-left: auto; }
-.cloud-account-avatar { width: 48px; height: 48px; display: grid; place-items: center; background: var(--color-accent); color: var(--text-color-inverse); border-radius: 50%; font-size: 24px; }
-.cloud-quota-track { height: 5px; background: var(--progress-track); margin-top: 22px; border-radius: 8px; overflow: hidden; }
-.cloud-quota-track > span { display: block; min-width: 2px; height: 100%; background: var(--color-accent); }
+.cloud-account-avatar { width: 48px; height: 48px; display: grid; place-items: center; background: var(--dai); color: var(--on-accent); border-radius: 50%; font-size: 24px; }
+.cloud-quota-track { height: 5px; background: var(--panel-2); margin-top: 22px; border-radius: 8px; overflow: hidden; }
+.cloud-quota-track > span { display: block; min-width: 2px; height: 100%; background: var(--dai); }
 .cloud-details { margin-bottom: 0; justify-content: space-between; }
 .cloud-sync-settings > .cloud-controls { justify-content: space-between; }
 .cloud-sync-settings .cloud-toggle { flex: 1; justify-content: space-between; padding-right: 20px; }

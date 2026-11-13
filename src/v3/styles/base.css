@@ -1,0 +1,289 @@
+/* ========================================
+   V3 基础排版与共享控件
+   ======================================== */
+
+/* Reset 与基础 */
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--f-ui);
+  background-color: var(--desk);
+  color: var(--ink);
+  line-height: 1.6;
+  overflow: hidden;
+  transition: background-color var(--motion-normal), color var(--motion-normal);
+}
+
+/* 标题统一使用宋体 */
+h1, h2, h3,
+.page-title,
+.serif {
+  font-family: var(--f-serif);
+  letter-spacing: 0.02em;
+}
+
+/* Naive UI 卡片、弹窗标题也使用宋体 */
+.n-card-header__main,
+.n-dialog__title,
+.n-modal .n-card-header__main {
+  font-family: var(--f-serif);
+  font-weight: 700;
+}
+
+#app {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 链接 */
+a {
+  color: var(--zhu);
+  text-decoration: none;
+  transition: color var(--motion-fast);
+}
+
+a:hover {
+  color: var(--zhu-hover);
+}
+
+/* 滚动条美化 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+/* 选中文字颜色 */
+::selection {
+  background-color: var(--zhu-soft);
+  color: var(--ink);
+}
+
+/* 输入框聚焦统一 */
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+}
+
+/* 页面容器 */
+.page-container {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-xl);
+}
+
+/* 页面标题 */
+.page-title { font-size: 23px; font-weight: 600; line-height: 1.4; color: var(--ink); }
+
+.page-subtitle {
+  margin-top: -16px;
+  margin-bottom: var(--space-lg);
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+/* 纸张式面板 */
+.paper-panel {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-l);
+  box-shadow: var(--shadow-1);
+  padding: var(--space-lg);
+  transition: box-shadow var(--motion-normal), background-color var(--motion-normal);
+}
+
+button:focus-visible, a:focus-visible, [tabindex="0"]:focus-visible {
+  outline: 2px solid var(--dai);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* 方形朱砂印章 */
+.seal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 4px;
+  background: var(--zhu);
+  color: var(--on-accent);
+  font-family: var(--f-serif);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: inset 0 0 0 2px rgba(255, 253, 248, 0.35);
+}
+
+/* 小节标题：左侧朱砂短竖线 */
+.section-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--f-serif);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.section-heading::before {
+  content: '';
+  width: 3px;
+  height: 15px;
+  border-radius: 2px;
+  background: var(--zhu);
+}
+
+/* 空状态里的淡墨远山 */
+.ink-mountains {
+  width: 220px;
+  max-width: 70%;
+  height: auto;
+  color: var(--ink);
+  opacity: 0.12;
+}
+
+/* 各页空状态图标容器内的远山不再沿用 emoji 字号 */
+.empty-icon:has(.ink-mountains) {
+  display: flex;
+  justify-content: center;
+  font-size: 0 !important;
+  line-height: 0;
+  animation: none !important;
+}
+
+.empty-icon .ink-mountains {
+  width: 180px;
+}
+
+/* 印章作为图标时的尺寸 */
+.kb-card-icon.seal,
+.ai-icon.seal,
+.exit-dialog-icon.seal {
+  width: 40px;
+  height: 40px;
+  font-size: 22px !important;
+  animation: none !important;
+}
+
+/* 违禁词等级点 */
+.banned-level {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.banned-level--must { background: var(--zhu); }
+.banned-level--warn { background: var(--jin); }
+
+/* 对话助手未读提示 */
+
+.paper-panel:hover {
+  box-shadow: var(--shadow-2);
+}
+
+/* 淡入动画 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.4s ease forwards;
+}
+
+/* 渐变分隔线 */
+.gradient-divider {
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--line-2),
+    transparent
+  );
+  margin: var(--space-lg) 0;
+}
+
+/* 标签样式 */
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  font-size: 12px;
+  border-radius: var(--r-s);
+  background: var(--panel-2);
+  color: var(--ink-2);
+  border: 1px solid transparent;
+  transition: all var(--motion-fast);
+  cursor: default;
+  user-select: none;
+}
+
+.tag-chip.clickable {
+  cursor: pointer;
+}
+
+.tag-chip.clickable:hover {
+  background: var(--zhu-soft);
+  border-color: var(--zhu);
+  color: var(--zhu);
+}
+
+.tag-chip.tag-accent {
+  background: var(--dai-soft);
+  color: var(--dai);
+}
+
+.tag-chip.active {
+  background: var(--zhu);
+  color: var(--on-accent);
+  border-color: var(--zhu);
+}
+
+/* 路由过渡 */

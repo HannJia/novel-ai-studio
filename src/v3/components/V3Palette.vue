@@ -22,7 +22,7 @@ import V3Icon from './V3Icon.vue'
 import type { IconName } from '../icons'
 import type { Novel } from '@/types/novel'
 import { useThemeStore, type ThemeName } from '@/stores/theme'
-import { areaPath, THEME_LABEL, THEME_ORDER, toast, writeShellPref } from '../shell'
+import { areaPath, THEME_LABEL, THEME_ORDER, toast } from '../shell'
 import { chapterTitleForDisplay } from '@/v3/write/chapterNumber'
 
 interface Item { key: string; group: string; icon: IconName; label: string; hint: string; run: () => void }
@@ -45,8 +45,9 @@ const all = computed<Item[]>(() => {
       { key: 'b-write', group: '当前作品', icon: 'pen', label: '章节与写作', hint: t, run: go(areaPath('write', b.id)) },
       { key: 'b-plan', group: '当前作品', icon: 'layers', label: '结构与剧情规划', hint: t, run: go(areaPath('plan', b.id)) },
       { key: 'b-codex', group: '当前作品', icon: 'book', label: '人物与典籍', hint: t, run: go(areaPath('codex', b.id)) },
-      { key: 'b-data', group: '当前作品', icon: 'grid', label: '数据面板', hint: t, run: go(`/workspace/${b.id}/data`) },
-      { key: 'b-insp', group: '当前作品', icon: 'bulb', label: '灵感记录', hint: t, run: go(`/workspace/${b.id}/inspiration`) },
+      { key: 'b-data', group: '当前作品', icon: 'grid', label: '数据面板', hint: t, run: go(`/data/${b.id}`) },
+      { key: 'b-insp', group: '当前作品', icon: 'bulb', label: '灵感记录', hint: t, run: go(`/inspiration/${b.id}`) },
+      { key: 'b-chapters', group: '当前作品', icon: 'file', label: '章节管理', hint: t, run: go(`/chapters/${b.id}`) },
     )
     for (const c of [...b.chapters].sort((x, y) => x.chapterIndex - y.chapterIndex)) {
       list.push({ key: 'c-' + c.id, group: '章节', icon: 'file', label: `第${c.chapterIndex + 1}章 ${chapterTitleForDisplay(c.title, c.chapterIndex, '未命名')}`, hint: `${c.wordCount} 字`, run: go(areaPath('write', b.id, c.id)) })
@@ -59,7 +60,6 @@ const all = computed<Item[]>(() => {
   }
   list.push(
     { key: 'guide', group: '帮助', icon: 'info', label: '使用说明', hint: '', run: () => emit('guide') },
-    { key: 'legacy', group: '帮助', icon: 'history', label: '切换回旧界面', hint: '可随时切回', run: () => { writeShellPref('legacy'); router.push('/legacy') } },
   )
   return list
 })

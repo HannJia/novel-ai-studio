@@ -1,5 +1,5 @@
 import type { Novel } from '@/types/novel'
-import type { ChapterPlanV2, CreationDraft, ScenePlan } from '@/types/reconstruction'
+import type { StructuredChapterPlan, CreationDraft, ScenePlan } from '@/types/reconstruction'
 import type { StoryImpactChange, StoryImpactKind } from '@/types/storyImpact'
 import type { StoryAggregate } from './storyAggregate'
 import { captureCreationBaseline } from './creationTransactions'
@@ -12,7 +12,7 @@ import { assertScenePlanningRecovery } from './planningRecoveryValidation'
 
 export type ScenePlanningEdit =
   | { action: 'sync' }
-  | { action: 'chapter'; plan: ChapterPlanV2; confirm: boolean }
+  | { action: 'chapter'; plan: StructuredChapterPlan; confirm: boolean }
   | { action: 'scenes'; planId: string; scenes: ScenePlan[]; confirm: boolean; revisionId?: string }
 
 export function captureScenePlanningBaseline(novel: Novel, draft?: CreationDraft): string {

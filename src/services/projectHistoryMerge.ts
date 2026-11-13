@@ -14,6 +14,9 @@ export function historyScope(backup: ProjectBackup, novelId: string): ProjectHis
 
 /** Stream one validated source at a time; retain only target-book run records. */
 export function mergeHistoryRuns(previous: AiRun[], incoming: AiRun[], now: string): AiRun[] {
+  for (const run of [...previous, ...incoming]) {
+    if (!run.requests?.length && (run.usedTokens || 0) > 0) throw new Error('任务用量缺少可核对的请求记录，已停止恢复。')
+  }
   const source = historyClone(incoming)
   for (const run of source) {
     const old = previous.find(row => row.id === run.id)
@@ -30,15 +33,6 @@ export function mergeHistoryRuns(previous: AiRun[], incoming: AiRun[], now: stri
   // The common ledger helper omits unbilled runs absent from its target. Preserve them as history too.
   for (const run of source) if (!result.some(row => row.id === run.id)) result.push(run)
   for (const run of result) {
-    const latest = source.find(row => row.id === run.id)
-    const old = previous.find(row => row.id === run.id)
-    const legacyUsage = Math.max(!old?.requests ? old?.usedTokens || 0 : 0, !latest?.requests ? latest?.usedTokens || 0 : 0)
-    if (!old?.requests && !latest?.requests && run.taskType !== 'memory_update') {
-      delete run.requests; delete run.requestLimit
-      run.usedTokens = Math.max(run.usedTokens || 0, legacyUsage)
-    } else if (legacyUsage > (run.usedTokens || 0)) {
-      throw new Error('旧任务累计用量缺少可核对的请求记录，不能降低已消费预算；请先补全该任务账本。')
-    }
     run.status = 'paused'; run.checkpoint = 'history-restored-needs-author'; run.updatedAt = now
     for (const draft of run.chapterDrafts || []) {
       // Keep author decisions and pending text; invalidate approval evidence, never invent rejection.

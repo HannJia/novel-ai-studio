@@ -64,7 +64,7 @@ onBeforeUnmount(() => { disposed = true; request++; emit('reading', false) })
 </script>
 <style scoped>
 .outline-import { display:grid; gap:12px; } h3,p { margin:0; } p { line-height:1.7; } label { display:grid; gap:8px; }
-textarea { width:100%; box-sizing:border-box; resize:vertical; font:inherit; padding:12px; color:var(--text-color-primary); background:var(--bg-color); border:1px solid var(--border-color); border-radius:6px; }
+textarea { width:100%; box-sizing:border-box; resize:vertical; font:inherit; padding:12px; color:var(--ink); background:var(--desk); border:1px solid var(--line-2); border-radius:6px; }
 pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:260px; overflow:auto; } .actions { display:flex; flex-wrap:wrap; gap:10px; }
-button { cursor:pointer; font:inherit; padding:10px; border:1px solid var(--border-color); border-radius:6px; color:var(--text-color-primary); background:var(--bg-color); } button:disabled { opacity:.5; cursor:default; }
+button { cursor:pointer; font:inherit; padding:10px; border:1px solid var(--line-2); border-radius:6px; color:var(--ink); background:var(--desk); } button:disabled { opacity:.5; cursor:default; }
 </style>

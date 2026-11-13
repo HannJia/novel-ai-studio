@@ -3,7 +3,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.skeletonContentSignature = skeletonContentSignature;
 exports.skeletonCompletionIssues = skeletonCompletionIssues;
-exports.ensureSkeletonHistory = ensureSkeletonHistory;
+exports.captureSkeletonBaselines = captureSkeletonBaselines;
 exports.saveSkeletonRevision = saveSkeletonRevision;
 exports.mixSkeletonRevisions = mixSkeletonRevisions;
 exports.applyCreationRecovery = applyCreationRecovery;
@@ -25,20 +25,20 @@ function skeletonCompletionIssues(value) {
         issues.push('这是未完整生成的候选，请核对补齐并明确保存作者版本');
     return issues;
 }
-/** The initial snapshots preserve legacy candidates before the first new edit. */
-function ensureSkeletonHistory(draft, now, id) {
+/** Capture a native candidate baseline before its first author edit. */
+function captureSkeletonBaselines(draft, now, id) {
     const next = copy(draft);
     next.skeletonHistory || (next.skeletonHistory = []);
     for (const skeleton of next.skeletons) {
         if (skeleton.revisionId)
             continue;
         skeleton.revisionId = id();
-        next.skeletonHistory.push({ id: skeleton.revisionId, skeletonId: skeleton.id, kind: 'legacy', snapshot: copy(skeleton), sources: [], createdAt: now });
+        next.skeletonHistory.push({ id: skeleton.revisionId, skeletonId: skeleton.id, kind: 'initial', snapshot: copy(skeleton), sources: [], createdAt: now });
     }
     return next;
 }
 function saveSkeletonRevision(draft, skeleton, kind, now, id, source = {}) {
-    const next = ensureSkeletonHistory(draft, now, id);
+    const next = captureSkeletonBaselines(draft, now, id);
     const old = next.skeletons.find(item => item.id === skeleton.id);
     const saved = copy({ ...skeleton, revisionId: id(), updatedAt: now });
     next.skeletonHistory.push({ id: saved.revisionId, skeletonId: saved.id, kind, snapshot: copy(saved),

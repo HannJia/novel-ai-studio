@@ -159,36 +159,18 @@ describe('desktop project kernel integration', () => {
     expect(await reopened.read()).toEqual(committed)
   }, 20000)
 
-  it('transfers the complete current SQL project once and leaves the source database intact', async () => {
-    const backup = await fixture()
-    backup.inspirationSessions = [{ id: 'idea', title: '保存的灵感', updatedAt: backup.exportedAt,
-      messages: [{ role: 'user', content: '雨夜里的线索' }], knowledgeIds: ['library'], draft: '下一条想法', webSearch: false }]
-    const { replaceProjectInDb } = await import('./db/project')
-    const { persistCloudState, readCloudState, readCloudConflicts } = await import('./db/cloudSync')
-    const { emptySyncState } = await import('./cloudSyncModel')
-    const state = { ...emptySyncState(), lastSync: backup.exportedAt }
-    const conflict = { id: 'conflict', key: 'novel:' + backup.novels[0].id, title: '冲突', local: '作者版', remote: '云端版', remoteVersion: 2, remoteHash: null, createdAt: backup.exportedAt }
-    await replaceProjectInDb(backup)
-    await persistCloudState(state, [conflict])
-    const { createChapterRevision } = await import('./db/chapterRevisions')
-    const revision = await createChapterRevision(backup.novels[0].id, backup.novels[0].chapters[0].id, '原文', '候选', 'ai')
-    const original = Buffer.from(oldWrite.mock.calls[oldWrite.mock.calls.length - 1][0])
-    const writesBefore = oldWrite.mock.calls.length
+  it('starts a new native V3 library without opening or importing historical SQL', async () => {
+    oldRead.mockResolvedValue(new Uint8Array([1, 2, 3]))
     const client = await import('./projectKernelClient')
     await client.initializeProjectKernel()
-    const library = await client.readProjectLibrary(true)
-    expect(library.backup?.novels[0].chapters[0].content).toBe(backup.novels[0].chapters[0].content)
-    expect(library.backup?.reconstructionWorkspaces).toEqual(backup.reconstructionWorkspaces)
-    expect(library.backup?.chapterRevisions).toEqual([revision])
-    expect(library.backup?.inspirationSessions).toEqual(backup.inspirationSessions)
-    expect(await readCloudState()).toEqual(state)
-    expect(await readCloudConflicts()).toEqual([conflict])
-    expect(oldWrite).toHaveBeenCalledTimes(writesBefore)
-    expect(Buffer.from(oldWrite.mock.calls[oldWrite.mock.calls.length - 1][0])).toEqual(original)
-    const commits = requests.filter(request => request.method === 'commit').length
+    const library = await client.readProjectLibrary()
+    expect(library.backup).toMatchObject({ version: 3, novels: [], knowledgeBases: [], chapterRevisions: [], inspirationSessions: [], reconstructionWorkspaces: [] })
+    expect(library.sync).toEqual({ state: null, conflicts: [] })
+    expect(oldRead).not.toHaveBeenCalled()
+    expect(oldWrite).not.toHaveBeenCalled()
     await client.initializeProjectKernel()
-    expect(requests.filter(request => request.method === 'commit')).toHaveLength(commits)
-  }, 20000)
+    expect(requests.filter(request => request.method === 'commit')).toHaveLength(1)
+  })
 
   it('opens the authoritative project without consulting a missing or broken old database', async () => {
     const backup = await fixture()
@@ -333,19 +315,17 @@ describe('desktop project kernel integration', () => {
     expect(revision?.baseContent).toBe('作者初稿')
   }, 20000)
 
-  it('leaves first-time transfer disabled on a failed commit and retries the complete source', async () => {
-    const backup = await fixture()
-    const { replaceProjectInDb } = await import('./db/project')
-    await replaceProjectInDb(backup)
+  it('keeps native initialization retryable after a failed first commit', async () => {
     const client = await import('./projectKernelClient')
     failure = true
     await expect(client.initializeProjectKernel()).rejects.toThrow('测试磁盘失败')
     expect(client.usesProjectKernel()).toBe(false)
     failure = false
     await client.initializeProjectKernel()
-    expect((await client.readKernelBackup()).reconstructionWorkspaces).toEqual(backup.reconstructionWorkspaces)
-    expect(client.usesProjectKernel()).toBe(true)
-  }, 20000)
+    expect((await client.readKernelBackup()).novels).toEqual([])
+    expect(oldRead).not.toHaveBeenCalled()
+    expect(oldWrite).not.toHaveBeenCalled()
+  })
 
   it('restores a deleted novel through the author-confirmed per-novel history flow', async () => {
     const backup = await fixture()

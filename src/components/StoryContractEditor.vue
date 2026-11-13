@@ -89,38 +89,38 @@ const confirmedCount = computed(() => contractCards.filter(card => contractCardC
 const issues = computed(() => validateCreationStage({ ...createEmptyCreationDraft({ id: 'validation', now: '' }), contract: form.value }))
 </script>
 <style scoped>
-.story-contract { --c-line: var(--line, var(--border-color-light, #ddd)); --c-paper: var(--paper, var(--bg-color-card, #fff)); --c-ink: var(--ink, var(--text-color-primary, #222)); --c-ink3: var(--ink-3, var(--text-color-secondary, #666)); --c-zhu: var(--zhu, var(--color-primary, #b8321f)); --c-jin: var(--jin, var(--color-warning, #a87a1e)); --c-serif: var(--f-serif, var(--font-family-serif, serif));
-  display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px 20px; align-items: stretch; width: 100%; color: var(--c-ink); }
+.story-contract {
+  display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px 20px; align-items: stretch; width: 100%; color: var(--ink); }
 form { display: contents; }
 .contract-heading { grid-column: 1 / -1; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .story-contract > :deep(.explore) { grid-column: 1; grid-row: 2; align-self: stretch; height: auto; min-height: 0; contain: size; }
-h3 { margin: 0 0 4px; font: 600 18px var(--c-serif); }
-header p, footer p { margin: 0; color: var(--c-ink3); font-size: 12px; line-height: 1.7; }
-.confirmation-count { flex-shrink: 0; border: 1px solid var(--c-line); border-radius: 20px; padding: 4px 9px; color: var(--c-jin); font-size: 11px; }
+h3 { margin: 0 0 4px; font: 600 18px var(--f-serif); }
+header p, footer p { margin: 0; color: var(--ink-3); font-size: 12px; line-height: 1.7; }
+.confirmation-count { flex-shrink: 0; border: 1px solid var(--line); border-radius: 20px; padding: 4px 9px; color: var(--jin); font-size: 11px; }
 .contract-grid { grid-column: 2; grid-row: 2; align-self: stretch; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-fieldset { min-width: 0; margin: 0; padding: 14px 16px; border: 1px solid var(--c-line); border-radius: 10px; background: var(--c-paper); }
-fieldset.confirmed { border-color: color-mix(in srgb, var(--qing, #527465) 45%, var(--c-line)); }
+fieldset { min-width: 0; margin: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
+fieldset.confirmed { border-color: color-mix(in srgb, var(--qing) 45%, var(--line)); }
 .card-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-h4 { margin: 0; color: var(--c-ink3); font-size: 12px; font-weight: 600; letter-spacing: .1em; }
+h4 { margin: 0; color: var(--ink-3); font-size: 12px; font-weight: 600; letter-spacing: .1em; }
 .card-heading button { height: 26px; padding: 0 8px; font-size: 11px; }
-.card-summary { display: block; width: 100%; min-height: 54px; height: auto; padding: 0; border: 0; border-radius: 4px; background: transparent; text-align: left; overflow-wrap: anywhere; font: 15px/1.7 var(--c-serif); }
-.card-summary:hover { background: var(--panel-2, #f4f2ee); }
-.collapse-card { height: 24px; margin-top: 8px; padding: 0; border: 0; font-size: 11px; color: var(--c-ink3); }
-.confirmed .card-heading button { color: var(--qing, #527465); }
-label { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; color: var(--c-ink3); font-size: 10px; }
-textarea, input, select { box-sizing: border-box; width: 100%; padding: 3px 0; border: 0; border-bottom: 1px solid transparent; border-radius: 0; background: transparent; color: var(--c-ink); font: 14px/1.7 var(--c-serif); }
+.card-summary { display: block; width: 100%; min-height: 54px; height: auto; padding: 0; border: 0; border-radius: 4px; background: transparent; text-align: left; overflow-wrap: anywhere; font: 15px/1.7 var(--f-serif); }
+.card-summary:hover { background: var(--panel-2); }
+.collapse-card { height: 24px; margin-top: 8px; padding: 0; border: 0; font-size: 11px; color: var(--ink-3); }
+.confirmed .card-heading button { color: var(--qing); }
+label { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; color: var(--ink-3); font-size: 10px; }
+textarea, input, select { box-sizing: border-box; width: 100%; padding: 3px 0; border: 0; border-bottom: 1px solid transparent; border-radius: 0; background: transparent; color: var(--ink); font: 14px/1.7 var(--f-serif); }
 textarea { min-height: 30px; resize: vertical; }
-textarea:focus, input:focus, select:focus { outline: none; border-bottom-color: var(--c-zhu); }
-textarea::placeholder { color: var(--ink-4, #999); font-size: 12px; }
+textarea:focus, input:focus, select:focus { outline: none; border-bottom-color: var(--zhu); }
+textarea::placeholder { color: var(--ink-4); font-size: 12px; }
 select, input { min-height: 28px; font-family: inherit; font-size: 13px; }
-.contract-issues { grid-column: 2; margin: 0; padding: 10px 14px 10px 30px; border-radius: 8px; background: color-mix(in srgb, var(--c-jin) 10%, var(--c-paper)); color: var(--c-jin); font-size: 12px; line-height: 1.8; }
-.contract-footer { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; box-sizing: border-box; padding: 14px; border: 1px solid var(--c-line); border-radius: 10px; background: var(--panel, var(--c-paper)); }
+.contract-issues { grid-column: 2; margin: 0; padding: 10px 14px 10px 30px; border-radius: 8px; background: color-mix(in srgb, var(--jin) 10%, var(--paper)); color: var(--jin); font-size: 12px; line-height: 1.8; }
+.contract-footer { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; box-sizing: border-box; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .contract-actions { display: flex; flex-shrink: 0; gap: 8px; }
-button { height: 32px; padding: 0 12px; border: 1px solid var(--c-line); border-radius: 6px; background: var(--c-paper); color: var(--c-ink); font-family: inherit; font-size: 12px; cursor: pointer; }
-button.primary { border-color: var(--c-zhu); background: var(--c-zhu); color: #fff; }
-button.cancel { background: transparent; color: var(--c-ink3); }
+button { height: 32px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink); font-family: inherit; font-size: 12px; cursor: pointer; }
+button.primary { border-color: var(--zhu); background: var(--zhu); color: #fff; }
+button.cancel { background: transparent; color: var(--ink-3); }
 button:disabled { opacity: .5; cursor: not-allowed; }
-button:focus-visible { outline: 2px solid var(--c-zhu); outline-offset: 2px; }
+button:focus-visible { outline: 2px solid var(--zhu); outline-offset: 2px; }
 @media (max-width: 1100px) { .story-contract { grid-template-columns: minmax(0, 1fr); } .story-contract > :deep(.explore) { height: 360px; contain: none; } .contract-grid { grid-column: 1; grid-row: 3; } .contract-issues, .contract-footer { grid-column: 1; } }
 @media (max-width: 680px) { .contract-grid { grid-template-columns: minmax(0, 1fr); } header, .contract-footer { flex-wrap: wrap; } .contract-actions { width: 100%; flex-wrap: wrap; } .contract-footer button { flex: 1 1 auto; } }
 </style>

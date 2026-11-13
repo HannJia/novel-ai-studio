@@ -40,12 +40,12 @@ it('keeps the recovery backup while publishing an explicitly restored main', asy
 
 it('retains the cloud merge protection snapshot when localStorage quota is exhausted', async () => {
   vi.stubGlobal('window', {})
-  memory.set('novel-writer-before-import', 'legacy-protection')
+  memory.set('mojian-v3-before-import', 'legacy-protection')
   const setItem = vi.fn(() => { throw new DOMException('full', 'QuotaExceededError') })
   vi.stubGlobal('localStorage', { getItem: (name: string) => memory.get(name) ?? null, setItem })
   await retainProjectRestorePoint('synthetic-project-before-cloud-merge')
   const connection = await new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open('mojian-browser-project-storage', 1)
+    const request = indexedDB.open('mojian-v3-project-storage', 1)
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)
   })
@@ -57,7 +57,7 @@ it('retains the cloud merge protection snapshot when localStorage quota is exhau
       transaction.onabort = () => reject(transaction.error)
     })
     expect(saved).toBe('synthetic-project-before-cloud-merge')
-    expect(memory.get('novel-writer-before-import')).toBe('legacy-protection')
+    expect(memory.get('mojian-v3-before-import')).toBe('legacy-protection')
     expect(memory.get(key)).toBe('legacy-main')
     expect(setItem).toHaveBeenCalledOnce()
   } finally { connection.close() }

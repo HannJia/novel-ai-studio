@@ -1,11 +1,16 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": [
-    "app-main/preload.js"
+    "src/main.ts!",
+    "app-main/main.js!",
+    "app-main/preload.js!"
   ],
   "project": [
-    "src/**/*.{ts,vue}",
-    "app-main/**/*.js",
-    "scripts/**/*.js"
+    "src/**/*.{ts,vue}!",
+    "app-main/**/*.{js,cjs}!",
+    "scripts/**/*.{js,cjs}"
+  ],
+  "ignore": [
+    "src/test/**"
   ]
 }

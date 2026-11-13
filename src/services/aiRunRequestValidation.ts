@@ -16,8 +16,8 @@ export function assertAiRunRequests(run: AiRun): void {
   if (run.taskType === 'memory_update') { assertMemoryRequests(run); return }
   const integer = (value: unknown, min = 0): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= min
   const date = (value: unknown): boolean => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value) && Number.isFinite(Date.parse(value))
-  // Historical records may be read, but the executor requires a new request ledger.
-  if (run.requestLimit === undefined && run.requests === undefined) return
+  // Author/collaborative tasks without automatic execution do not own this ledger.
+  if (run.mode !== 'autonomous' && run.requestLimit === undefined && run.requests === undefined) return
   if (run.mode !== 'autonomous' || !integer(run.requestLimit, 1) || run.requestLimit > 2000) fail('requestLimit')
   if (!integer(run.tokenBudget, 1) || !integer(run.usedTokens)) fail('tokenBudget/usedTokens')
   if (!integer(run.chapterStart) || !integer(run.chapterEnd) || run.chapterEnd! < run.chapterStart!) fail('chapterRange')

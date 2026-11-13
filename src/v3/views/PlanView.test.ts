@@ -1,3 +1,4 @@
+import { confirmTestStoryContract as confirmStoryContract } from '@/test/contractCardsFixture'
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
@@ -6,7 +7,7 @@ import { defineComponent, nextTick } from 'vue'
 import PlanView from './PlanView.vue'
 import { useNovelStore } from '@/stores/novel'
 import { useReconstructionWorkspaceStore } from '@/stores/reconstructionWorkspace'
-import { buildPlotSkeletonFromOutline, confirmCreationSkeleton, confirmStoryContract, createCreationDraftFromNovel, syncCreationDraftPlanning } from '@/services/reconstructionCreation'
+import { buildPlotSkeletonFromOutline, confirmCreationSkeleton,  createCreationDraftFromNovel, syncCreationDraftPlanning } from '@/services/reconstructionCreation'
 import { approveScenePlans, confirmChapterPlan, normalizeScenePlans, proposeScenePlans } from '@/services/reconstructionPlanning'
 import { appendEntityRevision, captureEntityRevision } from '@/services/entityProvenance'
 import { buildAnalysisSourceVersionId } from '@/services/reconstructionCandidates'
@@ -46,7 +47,7 @@ function planningBook() {
   draft.skeletons = [{ ...buildPlotSkeletonFromOutline(novel, '追查旧案', now), logline: '沈砚追查渡口旧案。', promise: '每个线索都推进旧案调查。', ending: '沈砚查清旧案并作出选择。',
     beats: [{ id: 'opening', title: '旧案线索', description: '沈砚在渡口找到线索。', kind: 'opening', relatedPlotlineIds: [], relatedCharacterIds: [] }] }]
   draft = syncCreationDraftPlanning(confirmCreationSkeleton(draft, now), novel, now)
-  const planId = 'chapter-plan-v2:' + plan.id
+  const planId = 'chapter-plan:' + plan.id
   draft = confirmChapterPlan(draft, planId, now)
   const scenes = normalizeScenePlans([{ title: '雨落渡口', purpose: '守灯时试探旧事', outputState: '问题仍未得到回答' }], planId, 'approved')
   draft = approveScenePlans(proposeScenePlans(draft, planId, scenes, now), planId, scenes.map(scene => scene.id), now)

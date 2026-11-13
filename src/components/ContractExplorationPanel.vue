@@ -94,23 +94,23 @@ async function send() {
 onUnmounted(() => { disposed = true; controller?.abort() })
 </script>
 <style scoped>
-.explore { display: flex; flex-direction: column; min-width: 0; height: 560px; overflow: hidden; border: 1px solid var(--c-line); border-radius: 10px; background: var(--c-paper); }
-header { display: flex; align-items: center; justify-content: space-between; padding: 16px; border-bottom: 1px solid var(--c-line); }
-h3 { margin: 0; font: 600 15px var(--c-serif); }
-header span { color: var(--c-ink3); font-size: 11px; }
+.explore { display: flex; flex-direction: column; min-width: 0; height: 560px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
+header { display: flex; align-items: center; justify-content: space-between; padding: 16px; border-bottom: 1px solid var(--line); }
+h3 { margin: 0; font: 600 15px var(--f-serif); }
+header span { color: var(--ink-3); font-size: 11px; }
 .messages { flex: 1; min-height: 0; padding: 16px; overflow: auto; }
-.empty { color: var(--c-ink3); font-size: 12px; line-height: 1.8; }
-article { margin-bottom: 14px; padding: 10px 12px; border-radius: 8px; background: var(--panel, #f4f2ee); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
-article.user { margin-left: 24px; background: color-mix(in srgb, var(--c-zhu) 6%, var(--c-paper)); }
-article b { color: var(--c-ink3); font-size: 10px; font-weight: 500; }
+.empty { color: var(--ink-3); font-size: 12px; line-height: 1.8; }
+article { margin-bottom: 14px; padding: 10px 12px; border-radius: 8px; background: var(--panel); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+article.user { margin-left: 24px; background: color-mix(in srgb, var(--zhu) 6%, var(--paper)); }
+article b { color: var(--ink-3); font-size: 10px; font-weight: 500; }
 article p { margin: 4px 0; white-space: pre-wrap; }
-small, .error { color: var(--c-jin); font-size: 11px; }
+small, .error { color: var(--jin); font-size: 11px; }
 .error { padding: 0 16px; }
-details { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--c-line); }
-summary { color: var(--c-zhu); cursor: pointer; }
-form { display: flex; align-items: flex-end; gap: 8px; padding: 12px; border-top: 1px solid var(--c-line); }
-textarea { flex: 1; min-width: 0; resize: vertical; box-sizing: border-box; padding: 8px; border: 1px solid var(--c-line); border-radius: 6px; background: var(--c-paper); color: var(--c-ink); font-family: inherit; font-size: 12px; line-height: 1.7; }
-button { flex-shrink: 0; padding: 6px 10px; border: 1px solid var(--c-line); border-radius: 6px; background: var(--c-paper); color: var(--c-zhu); font-family: inherit; font-size: 11px; cursor: pointer; }
+details { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); }
+summary { color: var(--zhu); cursor: pointer; }
+form { display: flex; align-items: flex-end; gap: 8px; padding: 12px; border-top: 1px solid var(--line); }
+textarea { flex: 1; min-width: 0; resize: vertical; box-sizing: border-box; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink); font-family: inherit; font-size: 12px; line-height: 1.7; }
+button { flex-shrink: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--zhu); font-family: inherit; font-size: 11px; cursor: pointer; }
 button:disabled { opacity: .5; cursor: not-allowed; }
 @media (max-width: 1100px) { .explore { height: 360px; } }
 </style>

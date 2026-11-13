@@ -119,7 +119,7 @@ const reviewPills = computed(() => {
   const counts = new Map<ReviewHeat, number>()
   for (const row of rows.value) counts.set(row.heat, (counts.get(row.heat) || 0) + 1)
   return [
-    // 入典是逐条故事变化的记录数，不是按章统计；V2 没有“章级入典”状态，所以这里不按章冒充。
+    // 入典是逐条故事变化的记录数，不是按章统计；入典记录没有“章级入典”状态，所以这里不按章冒充。
     { key: 'canon', label: '入典', value: workspace.getCanonMutations(novelId.value).length, hint: '已逐条确认入典的故事记录条数，不按章计' },
     ...heatOrder.filter(key => counts.get(key)).map(key => ({ key, label: heatLabel[key], value: counts.get(key)!, hint: '按章统计' })),
   ]

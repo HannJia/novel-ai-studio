@@ -110,6 +110,8 @@ describe('V3 典籍原型布局与真实按章投影', () => {
     expect(wrapper!.findAll('.history-item')).toHaveLength(0)
     expect(wrapper!.find('input[type="range"]').exists()).toBe(false)
     expect(wrapper!.get('.codex-detail').text()).toContain('选择人物或矩阵单元格')
+    const characterLink = wrapper!.findAllComponents(RouterLinkStub).find(link => link.text() === '管理人物资料')
+    expect(characterLink?.props('to')).toBe('/characters/' + created.id)
   })
 
   it('滑条投影到实际章节，只显示当时已确认的认知与来源历史', async () => {
@@ -219,6 +221,23 @@ describe('V3 典籍原型布局与真实按章投影', () => {
     route.query = { tab: 'characters', atChapter: '2', character: 'person-1' }; await flushPromises()
     expect(wrapper!.get('.codex-tabs .on').text()).toBe('人物')
     expect(wrapper!.get('.detail-person h2').text()).toBe('苏禾')
+  })
+
+  it('典籍资源与人物编辑链接使用 V3 工具路由', async () => {
+    const data = fixture()
+    await mountCodex()
+
+    await tab('资料与回顾')
+    const resourceTargets = new Map(wrapper!.findAllComponents(RouterLinkStub)
+      .filter(link => link.find('strong').exists())
+      .map(link => [link.get('strong').text(), link.props('to')]))
+    expect(resourceTargets.get('灵感记录')).toBe('/inspiration/' + data.novel.id)
+    expect(resourceTargets.get('资料库')).toBe('/knowledge/' + data.novel.id)
+    expect(resourceTargets.get('数据面板')).toBe('/data/' + data.novel.id)
+
+    await tab('人物')
+    const characterLink = wrapper!.findAllComponents(RouterLinkStub).find(link => link.text() === '编辑人物')
+    expect(characterLink?.props('to')).toEqual({ path: '/characters/' + data.novel.id, query: { character: 'person-0' } })
   })
 
   it('人物卡只显示真实转折，不制造固定五阶段成长进度', async () => {

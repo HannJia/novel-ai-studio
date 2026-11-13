@@ -28,7 +28,6 @@ import { mergeCommittedSnapshot } from '@/services/committedSnapshotMerge'
 import { verifyEvidence } from '@/services/reconstructionCanon'
 import { createCharacterStateChange } from '@/services/reconstructionCharacterState'
 import { buildAnalysisSourceVersionId } from '@/services/reconstructionCandidates'
-import { reconcileLegacyChapterFindings, type FindingsReconciliationResult } from '@/services/reconstructionFindings'
 import { applyCreationEdit, captureCreationBaseline, type CreationEdit } from '@/services/creationTransactions'
 import { applyCreationRecovery, type CreationRecoveryEdit } from '@/services/creationDraft'
 import { canFlushSceneRecovery, isSceneRecoveryEdit } from '@/services/planningRecovery'
@@ -226,26 +225,9 @@ export const useReconstructionWorkspaceStore = defineStore('reconstructionWorksp
 
   function replaceChapterReview(novelId: string, review: ChapterReview) {
     const current = getChapterReviews(novelId)
-    const replaced = current.filter(item => item.id === review.id
-      || (item.chapterId === review.chapterId && item.sourceVersionId === review.sourceVersionId))
-    const archives = [...new Map([...replaced.flatMap(item => item.findingReconciliations || []),
-      ...(review.findingReconciliations || [])].map(item => [item.id, item])).values()]
     const next = current.filter(item => item.id !== review.id
       && !(item.chapterId === review.chapterId && item.sourceVersionId === review.sourceVersionId))
-    reviewsByNovel.value[novelId] = [...next, archives.length ? { ...review, findingReconciliations: archives } : review]
-  }
-
-  async function reconcileChapterFindings(novelId: string, chapterId: string): Promise<FindingsReconciliationResult> {
-    const chapter = useNovelStore().getNovel(novelId)?.chapters.find(row => row.id === chapterId)
-    if (!chapter?.contentReview) return 'unchanged'
-    const baseline = JSON.stringify([chapter.content, chapter.contentReview, chapter.contentReviewSignature])
-    return transactStory(novelId, aggregate => {
-      const current = aggregate.novel.chapters.find(row => row.id === chapterId)
-      if (!current || JSON.stringify([current.content, current.contentReview, current.contentReviewSignature]) !== baseline) {
-        throw new Error('正文或审核报告已变化，未迁移旧问题，请重新打开章节。')
-      }
-      return reconcileLegacyChapterFindings(aggregate, chapterId, new Date().toISOString())
-    }, result => result !== 'reconciled')
+    reviewsByNovel.value[novelId] = [...next, review]
   }
 
   function getAiRuns(novelId: string): AiRun[] {
@@ -864,7 +846,6 @@ export const useReconstructionWorkspaceStore = defineStore('reconstructionWorksp
     updateCreationDraft,
     getReviewFindings,
     replaceChapterFindings,
-    reconcileChapterFindings,
     updateReviewFinding,
     getChapterReviews,
     getLatestChapterReview,

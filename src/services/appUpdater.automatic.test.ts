@@ -6,7 +6,7 @@ import path from 'node:path'
 const requireLocal = createRequire(path.resolve('app-main/main.js'))
 const { createUpdateController } = requireLocal('./updater.cjs')
 const controllers: { dispose(): void }[] = []
-const installer = 'AI-Novel-Writer-1.0.3-x64.exe'
+const installer = 'mobish-1.0.3.exe'
 function setup(autoCheck?: boolean) {
   const token = { cancel: vi.fn() }
   const manifest = { version: '1.0.3', files: [{ url: installer, size: 300, sha512: Buffer.alloc(64, 1).toString('base64') }] }

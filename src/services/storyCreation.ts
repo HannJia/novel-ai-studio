@@ -6,7 +6,7 @@ import { createNovelDraft } from '@/stores/novel'
 import { createCreationDraftFromNovel } from './reconstructionCreation'
 import { assertCreationEntryInput } from './creationEntryInput'
 
-/** Setup choices collapse onto the V2 creation entry; "custom" keeps its historical blank-entry meaning. */
+/** Each setup choice enters the native creation flow; custom options start with a blank contract. */
 export const creationEntryForMethod: Record<CreationSetupMethod, CreationEntry> = {
   inspiration: 'idea', outline: 'import', blank: 'blank', custom: 'blank',
 }

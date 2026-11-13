@@ -183,9 +183,9 @@ async function save() {
 
 <style scoped>
 .knowledge-draft-form { display: grid; gap: 8px; min-width: 0; }
-.knowledge-draft-form label { font-size: 13px; color: var(--text-color-secondary); }
-.knowledge-save-error { color: var(--color-error); overflow-wrap: anywhere; margin: 0; }
-.knowledge-extract-status { color: var(--text-color-tertiary); font-size: 12px; margin: 0; }
+.knowledge-draft-form label { font-size: 13px; color: var(--ink-2); }
+.knowledge-save-error { color: var(--zhu); overflow-wrap: anywhere; margin: 0; }
+.knowledge-extract-status { color: var(--ink-3); font-size: 12px; margin: 0; }
 .knowledge-save-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .knowledge-save-actions :deep(.n-button) { width: 108px; height: 36px; }
 @media (max-width: 420px) {

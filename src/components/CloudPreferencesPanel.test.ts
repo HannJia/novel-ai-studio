@@ -11,9 +11,9 @@ vi.mock('@/stores/cloudSync', () => ({ useCloudSyncStore: () => holder.cloud }))
 vi.mock('@/stores/config', () => ({ useConfigStore: () => ({ models: [] }) }))
 beforeEach(() => {
   holder.prefs = reactive({ enabled: false, busy: false, supported: true, status: '尚未启用配置同步', error: '', remote: null,
-    conflict: false, needsLegacyUnlock: false, archiveCount: 0, initialize: vi.fn().mockResolvedValue(undefined),
+    conflict: false, archiveCount: 0, initialize: vi.fn().mockResolvedValue(undefined),
     setEnabled: vi.fn().mockResolvedValue(undefined), syncNow: vi.fn().mockResolvedValue(undefined),
-    upload: vi.fn().mockResolvedValue(undefined), restore: vi.fn().mockResolvedValue(undefined), migrateLegacy: vi.fn().mockResolvedValue(undefined) })
+    upload: vi.fn().mockResolvedValue(undefined), restore: vi.fn().mockResolvedValue(undefined) })
   holder.cloud = reactive({ busy: false, session: { token: 'fixture-login' } })
 })
 function mountPanel() {
@@ -45,17 +45,6 @@ describe('automatic cloud configuration controls', () => {
     await wrapper.findAll('button').find(button => button.text() === '使用云端配置')!.trigger('click')
     await flushPromises()
     expect(holder.prefs.restore).toHaveBeenCalledExactlyOnceWith(true)
-    wrapper.unmount()
-  })
-  it('shows a one-time unlock only for an existing legacy backup and clears it after migration', async () => {
-    holder.prefs.enabled = true; holder.prefs.needsLegacyUnlock = true
-    const wrapper = mountPanel()
-    await flushPromises()
-    await wrapper.get('input[type="password"]').setValue('synthetic-legacy-password')
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
-    expect(holder.prefs.migrateLegacy).toHaveBeenCalledExactlyOnceWith('synthetic-legacy-password')
-    expect((wrapper.get('input').element as HTMLInputElement).value).toBe('')
     wrapper.unmount()
   })
 })

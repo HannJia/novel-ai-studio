@@ -88,28 +88,28 @@ onMounted(() => { void store.init() })
 .update-overview { display: grid; gap: 16px; grid-template-columns: 1fr; min-width: 0; }
 .update-col { display: grid; gap: 8px; align-content: start; min-width: 0; }
 .update-col-current strong { font-size: 18px; line-height: 1.35; overflow-wrap: anywhere; }
-.update-description { margin:0; font-size:12px; color:var(--text-color-secondary); line-height:1.6; }
+.update-description { margin:0; font-size:12px; color:var(--ink-2); line-height:1.6; }
 .update-preference { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-.update-release-version, .update-date, .update-progress > span { color: var(--text-color-secondary); font-size: 12px; margin: 0; }
+.update-release-version, .update-date, .update-progress > span { color: var(--ink-2); font-size: 12px; margin: 0; }
 .update-status, .update-error { margin: 0; overflow-wrap: anywhere; line-height: 1.6; }
-.update-error { color: var(--color-error); }
+.update-error { color: var(--zhu); }
 .update-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.update-notes { border-top: 1px solid var(--border-color-light); padding-top: 12px; min-width: 0; }
+.update-notes { border-top: 1px solid var(--line); padding-top: 12px; min-width: 0; }
 .update-notes summary { cursor: pointer; line-height: 1.6; overflow-wrap: anywhere; }
-.update-notes summary span { color: var(--text-color-secondary); font-size: 12px; }
+.update-notes summary span { color: var(--ink-2); font-size: 12px; }
 .update-notes pre { max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.7; margin: 10px 0 0; }
-.update-release-link { color: var(--color-info); }
+.update-release-link { color: var(--dai); }
 @media (min-width: 900px) {
   .update-overview { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1.6fr); align-items: start; }
 }
-.update-overview { padding: 24px; border: 1px solid var(--border-color-light); border-radius: var(--radius-lg); gap: 24px; }
+.update-overview { padding: 24px; border: 1px solid var(--line); border-radius: var(--r-l); gap: 24px; }
 .update-version-label { font-size: 16px; font-weight: 600; }
-.update-col-current .update-version-number { font: 600 48px/1.3 var(--font-family-serif); }
-.update-col-status .update-status { font: 600 21px/1.6 var(--font-family-serif); }
-.update-release-version { color: var(--color-primary); font-size: 16px; }
+.update-col-current .update-version-number { font: 600 48px/1.3 var(--f-serif); }
+.update-col-status .update-status { font: 600 21px/1.6 var(--f-serif); }
+.update-release-version { color: var(--zhu); font-size: 16px; }
 .update-col-actions .update-preference label { font-weight: 600; font-size: 16px; }
-.update-notes { padding: 24px; border: 1px solid var(--border-color-light); border-radius: var(--radius-lg); }
-.update-notes summary { font: 600 24px var(--font-family-serif); }
-@media (min-width: 900px) { .update-col + .update-col { border-left: 1px solid var(--border-color-light); padding-left: 24px; } }
+.update-notes { padding: 24px; border: 1px solid var(--line); border-radius: var(--r-l); }
+.update-notes summary { font: 600 24px var(--f-serif); }
+@media (min-width: 900px) { .update-col + .update-col { border-left: 1px solid var(--line); padding-left: 24px; } }
 @media (max-width: 650px) { .update-overview, .update-notes { padding: 16px; } }
 </style>

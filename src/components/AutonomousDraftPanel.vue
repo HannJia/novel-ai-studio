@@ -301,34 +301,34 @@ async function rejectDraft() {
 </script>
 
 <style scoped>
-.autonomous-draft-panel { display: grid; gap: 16px; min-width: 0; color: var(--text-color-primary, #242424); }
+.autonomous-draft-panel { display: grid; gap: 16px; min-width: 0; color: var(--ink); }
 .panel-header, .draft-card-heading, .editor-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-width: 0; }
 .panel-header h2, .draft-card h3, .draft-editor h3 { margin: 0; overflow-wrap: anywhere; }
 .panel-description, .task-summary, .editor-description, .empty-state, .read-only-hint, .accept-notice, .notice-message, .error-message { margin: 5px 0 0; overflow-wrap: anywhere; }
-.panel-description, .task-summary, .editor-description, .empty-state, .read-only-hint { color: var(--text-color-secondary, #666); }
-.candidate-count, .editor-status { flex: 0 0 auto; color: var(--text-color-secondary, #666); font-size: 13px; }
+.panel-description, .task-summary, .editor-description, .empty-state, .read-only-hint { color: var(--ink-2); }
+.candidate-count, .editor-status { flex: 0 0 auto; color: var(--ink-2); font-size: 13px; }
 .draft-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 12px; }
-.draft-card, .draft-editor { min-width: 0; padding: 14px; border: 1px solid var(--border-color, #d9d9d9); border-radius: 8px; background: var(--card-color, #fff); }
-.metadata { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 12px; font-size: 13px; color: var(--text-color-secondary, #666); }
+.draft-card, .draft-editor { min-width: 0; padding: 14px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--paper); }
+.metadata { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 12px; font-size: 13px; color: var(--ink-2); }
 .metadata-item { overflow-wrap: anywhere; }
 .readonly-history { margin-top: 12px; min-width: 0; }
-.readonly-history summary { cursor: pointer; color: var(--text-color-secondary, #666); overflow-wrap: anywhere; }
-.readonly-history pre { max-width: 100%; margin: 8px 0 0; padding: 9px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--code-color, #f5f5f5); border-radius: 5px; font: inherit; font-size: 12px; }
+.readonly-history summary { cursor: pointer; color: var(--ink-2); overflow-wrap: anywhere; }
+.readonly-history pre { max-width: 100%; margin: 8px 0 0; padding: 9px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--panel-2); border-radius: 5px; font: inherit; font-size: 12px; }
 .readonly-history ol { margin: 8px 0 0; padding-left: 22px; }
 .readonly-history li { min-width: 0; margin-bottom: 10px; }
-.history-time { color: var(--text-color-secondary, #666); font-size: 12px; }
+.history-time { color: var(--ink-2); font-size: 12px; }
 .candidate-form { display: grid; gap: 12px; margin-top: 14px; }
 .content-field { display: grid; gap: 6px; min-width: 0; font-weight: 600; }
-.content-field textarea { box-sizing: border-box; width: 100%; min-width: 0; resize: vertical; padding: 9px; border: 1px solid var(--border-color, #d9d9d9); border-radius: 5px; color: inherit; background: var(--input-color, #fff); font: inherit; line-height: 1.55; }
-.content-field textarea[readonly] { background: var(--code-color, #f5f5f5); }
+.content-field textarea { box-sizing: border-box; width: 100%; min-width: 0; resize: vertical; padding: 9px; border: 1px solid var(--line-2); border-radius: 5px; color: inherit; background: var(--paper); font: inherit; line-height: 1.55; }
+.content-field textarea[readonly] { background: var(--panel-2); }
 .editor-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.editor-actions button, .secondary-button { min-height: 34px; padding: 6px 11px; border: 1px solid var(--border-color, #c8c8c8); border-radius: 5px; color: inherit; background: var(--button-color, #f7f7f7); cursor: pointer; }
-.editor-actions button:first-child { border-color: var(--color-primary, #3366cc); color: #fff; background: var(--color-primary, #3366cc); }
-.editor-actions button:nth-child(2) { border-color: var(--color-success, #2f855a); color: #fff; background: var(--color-success, #2f855a); }
+.editor-actions button, .secondary-button { min-height: 34px; padding: 6px 11px; border: 1px solid var(--line-2); border-radius: 5px; color: inherit; background: var(--panel); cursor: pointer; }
+.editor-actions button:first-child { border-color: var(--zhu); color: #fff; background: var(--zhu); }
+.editor-actions button:nth-child(2) { border-color: var(--qing); color: #fff; background: var(--qing); }
 button:disabled { opacity: .55; cursor: default; }
-.accept-notice { color: var(--text-color-secondary, #666); font-size: 13px; }
-.notice-message { color: var(--color-success, #2f855a); }
-.error-message { color: var(--color-error, #c53030); }
+.accept-notice { color: var(--ink-2); font-size: 13px; }
+.notice-message { color: var(--qing); }
+.error-message { color: var(--zhu); }
 @media (max-width: 520px) {
   .panel-header, .draft-card-heading, .editor-heading { display: grid; }
   .candidate-count, .editor-status { justify-self: start; }

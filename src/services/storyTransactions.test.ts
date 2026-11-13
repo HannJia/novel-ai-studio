@@ -8,7 +8,8 @@ import type { CandidateChange, ChapterReview, ReconstructionWorkspaceSnapshot } 
 import type { ProjectKernelRequest } from '@/types/projectKernel'
 import type { Novel } from '@/types/novel'
 import type { StoredReviewCoverage } from './chapterReviewCoverage'
-import { legacyReviewFindingsFixture } from '@/test/legacyReviewFindingsFixture'
+import { createAiRun } from './reconstructionAiRun'
+import { confirmTestContractCards } from '@/test/contractCardsFixture'
 
 const require = createRequire(import.meta.url)
 const { createProjectKernel } = require('../../app-main/projectKernel.cjs')
@@ -76,6 +77,7 @@ describe.each(['sql', 'kernel'] as const)('atomic story decisions (%s)', backend
       source: 'user', versions: [], createdAt: now, updatedAt: now }]
     let draft = createEmptyCreationDraft({ id: 'creation', now })
     draft.contract.approval = 'approved'; draft.approval.contract = 'approved'; draft.approval.skeleton = 'approved'
+    draft.contract = confirmTestContractCards(draft.contract, now)
     draft.skeletons = [{ id: 'skeleton', title: '钥匙', premise: '雨城', logline: '追查真相', promise: '解开雨城谜团', ending: '找到真相',
       beats: [{ id: 'beat', title: '取得钥匙', description: '林澈得到关键线索。', kind: 'opening', relatedPlotlineIds: [], relatedCharacterIds: [] }], approval: 'approved', updatedAt: now }]
     draft.selectedSkeletonId = 'skeleton'
@@ -94,8 +96,8 @@ describe.each(['sql', 'kernel'] as const)('atomic story decisions (%s)', backend
     const review: ChapterReview = { id: 'review', chapterId: chapter.id, sourceVersionId: version, startedAt: now,
       deterministicChecksPassed: true, semanticChecksPassed: true, status: 'ready_to_finalize', findings: [], candidateChanges: [candidate] }
     const backup = copy(createTestProjectBackup([novel], [], [], [], [{ novelId: novel.id, creationDraft: draft, candidates: [candidate],
-      reviewFindings: [], chapterReviews: [review], canonMutations: [], aiRuns: [{ id: 'run', mode: 'autonomous', taskType: 'draft',
-        status: 'needs_author', createdAt: now, updatedAt: now }] }]))
+      reviewFindings: [], chapterReviews: [review], canonMutations: [], aiRuns: [{ ...createAiRun({ id: 'run', mode: 'autonomous', taskType: 'draft',
+        targetId: novel.id, chapterStart: 0, chapterEnd: 2, tokenBudget: 10000, now }), status: 'needs_author' }] }]))
     if (backend === 'kernel') {
       root = await mkdtemp(path.join(os.tmpdir(), 'mojian-story-transaction-'))
       kernel = await createProjectKernel({ root, validateBackup, fault: async (stage: string) => { if (stage === 'before-publish') await diskWrite() } })
@@ -264,13 +266,16 @@ describe.each(['sql', 'kernel'] as const)('atomic story decisions (%s)', backend
     expect(loaded.dataPanelChanges[0].newValue).toBe('2')
   })
 
-  it('keeps legacy data uncertainty through failed history cleanup, retry and storage reload', async () => {
+  it('keeps native unverified provenance through failed history cleanup, retry and storage reload', async () => {
     const panel = await seedPanel()
+    const { recordDataPanelReference } = await import('./dataPanelReference')
     await workspace.transactStory(novel.id, aggregate => {
       const item = aggregate.novel.dataPanels[0]
+      const previous = copy(item)
       item.fields[0].value = '7'; delete item.referenceHistory
-      aggregate.novel.dataPanelChanges = [{ id: 'legacy-data-change', itemId: panel.id, itemName: panel.name,
-        fieldId: 'stock', fieldName: '数量', oldValue: '0', newValue: '7', reason: '旧版接受记录',
+      recordDataPanelReference(item, previous, { kind: 'unverified' }, now, 'unverified-value')
+      aggregate.novel.dataPanelChanges = [{ id: 'unverified-data-change', itemId: panel.id, itemName: panel.name,
+        fieldId: 'stock', fieldName: '数量', oldValue: '0', newValue: '7', reason: '来源待核对',
         chapterIndex: 0, status: 'accepted', createdAt: now }]
     })
     const before = copy(await stored()), { projectDataPanelReferences } = await import('./dataPanelReference')
@@ -452,7 +457,7 @@ describe.each(['sql', 'kernel'] as const)('atomic story decisions (%s)', backend
     expect(await stored()).toEqual(before)
   })
 
-  it('persists legacy card confirmations without changing review signatures or approved plans', async () => {
+  it('reopens explicit native confirmations without changing review signatures or approved plans', async () => {
     const { materializeContractConfirmations } = await import('./storyContract')
     const { buildReviewContextVersion } = await import('./reconstructionReviewVersion')
     const before = copy(await stored()), draft = workspace.getCreationDraft(novel.id)!
@@ -471,6 +476,7 @@ describe.each(['sql', 'kernel'] as const)('atomic story decisions (%s)', backend
     const original = copy(await stored()), draft = workspace.getCreationDraft(novel.id)!
     const edit = { action: 'contract' as const, confirm: true, contract: { ...copy(draft.contract),
       title: '新作品名', genre: '悬疑', centralConflict: '查清证据', endingDirection: '澄清误会' } }
+    edit.contract = confirmTestContractCards(edit.contract, now)
     failWrite()
     await expect(commitCreation(edit)).rejects.toThrow('模拟磁盘事务失败')
     expect(await stored()).toEqual(original)
@@ -543,19 +549,6 @@ describe.each(['sql', 'kernel'] as const)('atomic story decisions (%s)', backend
     await expect(workspace.transactStory(novel.id, aggregate => applyChapterPlanEdit(aggregate, confirm, now, () => 'stale'))).rejects.toThrow('已经变化')
     expect(writeCount).toBe(writes); expect(await stored()).toEqual(before)
   })
-
-  async function seedLegacyFindings() {
-    const chapter = novel.chapters[0]
-    const legacy = legacyReviewFindingsFixture(chapter.id, chapter.content)
-    novels.updateChapter(novel.id, chapter.id, { contentReview: legacy.report })
-    workspace.replaceChapterFindings(novel.id, chapter.id, copy(legacy.old))
-    workspace.replaceChapterReview(novel.id, { id: 'legacy-review', chapterId: chapter.id, sourceVersionId: version,
-      startedAt: now, deterministicChecksPassed: true, semanticChecksPassed: false, status: 'needs_revision',
-      findings: copy(legacy.old), candidateChanges: [] })
-    await novels.saveNovelNow(novel.id)
-    await workspace.persistToDatabase(novel.id)
-    return legacy
-  }
 
   async function commitScenes(edit: import('./scenePlanningTransactions').ScenePlanningEdit, baseline?: string) {
     const { captureScenePlanningBaseline } = await import('./scenePlanningTransactions')
@@ -631,73 +624,6 @@ describe.each(['sql', 'kernel'] as const)('atomic story decisions (%s)', backend
     expect(saved.workspace.creationDraft!.scenePlans[0].approval).not.toBe('approved')
     expect(saved.workspace.impactReports![0].reviewChapterIds).toEqual([novel.chapters[0].id])
     expect(saved.novel!.chapters.slice(1)).toEqual(before.novel!.chapters.slice(1))
-  })
-
-  it('reconciles legacy findings atomically, reloads decisions/history and does not repeat writes', async () => {
-    const legacy = await seedLegacyFindings()
-    const before = copy(await stored())
-    failWrite()
-    await expect(workspace.reconcileChapterFindings(novel.id, novel.chapters[0].id)).rejects.toThrow('模拟磁盘')
-    expect(workspace.getReviewFindings(novel.id)).toEqual(legacy.old)
-    expect(await stored()).toEqual(before)
-    expect(await workspace.reconcileChapterFindings(novel.id, novel.chapters[0].id)).toBe('reconciled')
-    const saved = copy(await stored())
-    expect(saved.novel).toEqual(before.novel)
-    expect(saved.workspace.reviewFindings).toHaveLength(8)
-    expect(saved.workspace.reviewFindings[0]).toMatchObject({ status: 'deferred' })
-    expect(saved.workspace.reviewFindings[0].authorNote).toContain('父项待核对')
-    expect(saved.workspace.reviewFindings[0].authorNote).toContain('请复核')
-    const archive = saved.workspace.chapterReviews![0].findingReconciliations![0]
-    expect(archive).toMatchObject({ workspaceFindings: legacy.old, reviewFindings: legacy.old, report: legacy.report })
-    workspace.clearNovel(novel.id)
-    await workspace.hydrateFromPersistence(novel.id)
-    expect(workspace.getReviewFindings(novel.id)).toEqual(saved.workspace.reviewFindings)
-    expect(workspace.getChapterReviews(novel.id)).toEqual(saved.workspace.chapterReviews)
-    const writes = writeCount
-    expect(await workspace.reconcileChapterFindings(novel.id, novel.chapters[0].id)).toBe('unchanged')
-    expect(writeCount).toBe(writes)
-    // A subsequent review of the same source must retain the migration archive.
-    const replacement = { ...copy(saved.workspace.chapterReviews![0]), id: 'rereview' }
-    delete replacement.findingReconciliations
-    workspace.replaceChapterReview(novel.id, replacement)
-    await workspace.persistToDatabase(novel.id)
-    workspace.clearNovel(novel.id)
-    await workspace.hydrateFromPersistence(novel.id)
-    expect(workspace.getChapterReviews(novel.id)[0].findingReconciliations).toEqual([archive])
-  })
-
-  it('retains early migration archives with unknown historical status when saving an author decision', async () => {
-    await seedLegacyFindings()
-    await workspace.reconcileChapterFindings(novel.id, novel.chapters[0].id)
-    const review = workspace.getChapterReviews(novel.id)[0]
-    delete review.findingReconciliations![0].reviewStatus
-    await workspace.persistToDatabase(novel.id)
-    workspace.clearNovel(novel.id)
-    await workspace.hydrateFromPersistence(novel.id)
-    const { buildReviewContextVersion, buildChapterReviewSourceVersion } = await import('./reconstructionReviewVersion')
-    const source = buildChapterReviewSourceVersion(novel.chapters[0].content, buildReviewContextVersion(novel, novel.chapters[0], [],
-      workspace.getCreationDraft(novel.id), workspace.getCanonMutations(novel.id)))
-    const current = workspace.getChapterReviews(novel.id)[0]
-    current.sourceVersionId = source
-    const finding = workspace.getReviewFindings(novel.id)[0]
-    await workspace.resolveStoryReviewFinding(novel.id, finding.id, 'deferred', now)
-    const saved = await stored()
-    expect(saved.workspace.reviewFindings[0].status).toBe('deferred')
-    expect(saved.workspace.chapterReviews![0].findingReconciliations![0].reviewStatus).toBeUndefined()
-    expect(saved.workspace.chapterReviews![0].findingReconciliations![0].report).toBe(review.findingReconciliations![0].report)
-  })
-
-  it('rejects a reconciliation queued before the chapter report changes', async () => {
-    await seedLegacyFindings()
-    const holding = holdWrite()
-    const prior = workspace.transactStory(novel.id, aggregate => { aggregate.novel.title = '并发保存' })
-    await holding.started
-    const reconciliation = workspace.reconcileChapterFindings(novel.id, novel.chapters[0].id)
-    const rejected = expect(reconciliation).rejects.toThrow('正文或审核报告已变化')
-    novels.updateChapter(novel.id, novel.chapters[0].id, { contentReview: '## 必改问题\n1. 不同的新报告' })
-    holding.release(); await prior; await rejected
-    expect((await stored()).workspace.chapterReviews![0].findingReconciliations).toBeUndefined()
-    expect(workspace.getReviewFindings(novel.id)).toHaveLength(20)
   })
 
   it('publishes an impact report only with the durable definition edit and reloads it intact', async () => {

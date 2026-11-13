@@ -7,7 +7,7 @@ import { beginChapterReviewInvalidationScope, clearChapterReview, endChapterRevi
 
 interface ReviewIdentity { signature: string; sourceVersionId: string }
 
-/** During a story transaction, defer legacy invalidation requests until actual inputs are compared. */
+/** During a story transaction, defer chapter invalidation requests until actual inputs are compared. */
 export function invalidateChapterReviews(novel: Novel, chapterIds: string[]): string[] {
   return registerChapterReviewInvalidation(novel, chapterIds)
 }

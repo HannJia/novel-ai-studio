@@ -28,8 +28,8 @@ function assertAiRunRequests(run) {
     }
     const integer = (value, min = 0) => typeof value === 'number' && Number.isSafeInteger(value) && value >= min;
     const date = (value) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value) && Number.isFinite(Date.parse(value));
-    // Historical records may be read, but the executor requires a new request ledger.
-    if (run.requestLimit === undefined && run.requests === undefined)
+    // Author/collaborative tasks without automatic execution do not own this ledger.
+    if (run.mode !== 'autonomous' && run.requestLimit === undefined && run.requests === undefined)
         return;
     if (run.mode !== 'autonomous' || !integer(run.requestLimit, 1) || run.requestLimit > 2000)
         fail('requestLimit');

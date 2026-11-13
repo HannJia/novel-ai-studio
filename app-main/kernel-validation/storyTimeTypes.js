@@ -29,15 +29,15 @@ function storyTimeOriginWellFormed(value) {
         return false;
     const row = value;
     return nonempty(row.id) && finiteDay(row.day) && row.day >= 0 && typeof row.label === 'string'
-        && validDate(row.confirmedAt) && ['author', 'legacy'].includes(row.source);
+        && validDate(row.confirmedAt) && ['author', 'unverified'].includes(row.source);
 }
 function storyTimeRecordWellFormed(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value))
         return false;
     const row = value;
     if (!nonempty(row.id) || !['origin', 'absolute', 'relative'].includes(row.kind)
-        || !['current', 'superseded', 'invalid', 'legacy'].includes(row.status)
-        || !['origin', 'chapter'].includes(row.boundary) || !['author', 'canon', 'legacy'].includes(row.source)
+        || !['current', 'superseded', 'invalid', 'unverified'].includes(row.status)
+        || !['origin', 'chapter'].includes(row.boundary) || !['author', 'canon', 'unverified'].includes(row.source)
         || !finiteDay(row.startDay) || !finiteDay(row.endDay) || !finiteDay(row.elapsedDays)
         || row.startDay < 0 || row.endDay < row.startDay || row.elapsedDays < 0
         || Math.abs(roundDay(row.endDay - row.startDay) - row.elapsedDays) > 0.000001
@@ -94,7 +94,7 @@ function normalizeStoryClock(value, fallbackUpdatedAt) {
             startDay, endDay, elapsedDays: finiteDay(row.elapsedDays) && row.elapsedDays >= 0 ? row.elapsedDays : roundDay(endDay - startDay),
             confirmedAt: validDate(row.confirmedAt) ? row.confirmedAt : fallbackUpdatedAt,
             confirmationOrder: orderValid(row.confirmationOrder) ? row.confirmationOrder : maxStoredOrder + index + 1,
-            source: row.source && ['author', 'canon', 'legacy'].includes(row.source) ? row.source : 'legacy', invalidReason: '故事时间历史记录格式无效。' };
+            source: row.source && ['author', 'canon', 'unverified'].includes(row.source) ? row.source : 'unverified', invalidReason: '故事时间历史记录格式无效。' };
     };
     const history = Array.isArray(raw.history) ? raw.history.map(normalizeRecord) : undefined;
     // A corrupt append still shadows the old head; preserve both as history.
@@ -145,7 +145,7 @@ function recordValidator(novel) {
                 break;
             }
             path.push(row);
-            if (!storyTimeRecordWellFormed(row) || row.status !== 'current' || row.source === 'legacy'
+            if (!storyTimeRecordWellFormed(row) || row.status !== 'current' || row.source === 'unverified'
                 || seen.has(row.id) || counts.get(row.id) !== 1)
                 break;
             seen.add(row.id);

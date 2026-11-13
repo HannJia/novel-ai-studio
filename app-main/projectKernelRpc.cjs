@@ -2,7 +2,7 @@ const { validateProjectBackup } = require('./kernel-validation/projectBackupVali
 const { createProjectKernel } = require('./projectKernel.cjs')
 
 function validateBackup(value) {
-  if (!value || value.format !== 'ai-novel-writer-backup' || value.version !== 2) throw new Error('只接受完整的 V2 项目数据。')
+  if (!value || value.format !== 'ai-novel-writer-backup' || value.version !== 3) throw new Error('只接受完整的 V3 项目数据。')
   if (Buffer.byteLength(JSON.stringify(value), 'utf8') > 256 * 1024 * 1024) throw new Error('项目数据超过 256 MB 上限。')
   validateProjectBackup(value)
 }

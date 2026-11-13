@@ -6,7 +6,7 @@ import type { StoryAggregate } from './storyAggregate'
 import { bindDataPanelProposalSource } from './dataPanelProposalSource'
 import { captureDataPanelBaseline, decideDataPanelProposals, editDataPanel, queueDataPanelAutomation } from './dataPanelTransactions'
 import { buildSemanticRecords } from './semanticIndex'
-import { projectDataPanelReferences, preserveDataPanelReferenceHistory } from './dataPanelReference'
+import { projectDataPanelReferences } from './dataPanelReference'
 import { captureStoryImpact } from './storyImpactAnalysis'
 import { equipmentSnapshot } from './dataPanelEquipment'
 import { buildReviewContextVersion } from './reconstructionReviewVersion'
@@ -93,38 +93,11 @@ describe('accepted data in chapter references', () => {
     panel.fields[0].automationRules![0].lastEvaluatedChapterIndex = 9
     expect(captureStoryImpact(novel, aggregate.workspace).version).toBe(before)
   })
-  it('tracks legacy uncertainty and preserves its impact version across proposal cleanup', () => {
-    const { novel, aggregate } = setup()
-    delete novel.dataPanels[0].referenceHistory
-    const accepted = novel.dataPanelChanges
-    novel.dataPanelChanges = []
-    const withoutEvidence = captureStoryImpact(novel, aggregate.workspace).version
-    novel.dataPanelChanges = accepted
-    const unverified = captureStoryImpact(novel, aggregate.workspace).version
-    expect(unverified).not.toBe(withoutEvidence)
-    preserveDataPanelReferenceHistory(novel)
-    novel.dataPanelChanges = []
-    expect(captureStoryImpact(novel, aggregate.workspace).version).toBe(unverified)
-  })
   it('does not invalidate an earlier chapter for a later accepted value or its source rewrite', () => {
     const { novel, chapter } = setup()
     const earlier = novel.chapters[0], before = buildReviewContextVersion(novel, earlier)
     chapter.content = chapter.content.replace('七枚', '九枚')
     expect(buildReviewContextVersion(novel, earlier)).toBe(before)
-  })
-  it('keeps legacy accepted values for inspection and only trusts an explicit author reconfirmation', () => {
-    const { novel, aggregate, data } = setup()
-    const panel = novel.dataPanels[0]
-    delete panel.referenceHistory
-    expect(data()).not.toContain('铜钱:7枚')
-    expect(panel.fields[0].value).toBe('7')
-    expect(projectDataPanelReferences(novel).issues.some(issue => issue.includes('缺少可验证来源'))).toBe(true)
-    editDataPanel(aggregate, { action: 'update', itemId: panel.id, item: { fields: panel.fields } },
-      captureDataPanelBaseline(novel, panel.id), now, id)
-    const reloaded = parseProjectBackup(JSON.stringify(createTestProjectBackup([novel], []))).novels[0]
-    expect(projectDataPanelReferences(reloaded).issues).toEqual([])
-    expect(projectDataPanelReferences(reloaded).items[0].fields[0].value).toBe('7')
-    expect(reloaded.dataPanelChanges[0].status).toBe('accepted')
   })
   it('does not turn unknown equipment ownership into an asserted stored state', () => {
     const { novel, chapter, aggregate } = setup()

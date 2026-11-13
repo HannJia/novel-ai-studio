@@ -4,6 +4,29 @@ import { buildReviewContext } from './context'
 import type { ChapterEndingCheck } from './chapterEnding'
 import { createPinia, setActivePinia } from 'pinia'
 import { useNovelStore } from '@/stores/novel'
+import { createEmptyCreationDraft } from '@/types/reconstruction'
+
+it('uses an approved short-work contract in outline and volume planning without contradictory long-form defaults', () => {
+  setActivePinia(createPinia())
+  const store = useNovelStore()
+  const book = store.addNovel({ genre: '', subGenre: '', tags: [], targetWordCountMin: 80, targetWordCountMax: 120,
+    settings: store.defaultSettings(), writingStyle: store.defaultWritingStyle() })
+  const draft = createEmptyCreationDraft({ id: 'short', now: '2026-11-13T00:00:00Z' })
+  Object.assign(draft.contract, { approval: 'approved', targetWordCountMin: 900, targetWordCountMax: 1100,
+    genre: '古代日常', pointOfView: '第三人称限知', styleDirection: '朴素克制' })
+  draft.approval.contract = 'approved'
+  for (const build of [buildOutlinePrompt, buildVolumePlanningPrompt]) {
+    const prompt = build(book, draft).map(item => item.content).join('\n')
+    expect(prompt).toContain('900~1100 字')
+    expect(prompt).toContain('单章篇幅尚未由作者设置')
+    expect(prompt).not.toMatch(/百万字|800000|1200000|2200|禁止使用整数|数字避免整数/)
+  }
+  const unapproved = { ...draft, approval: { ...draft.approval, contract: 'draft' as const } }
+  expect(buildOutlinePrompt(book, unapproved)[1].content).toContain('800000~1200000 字')
+  book.chapterLengthPolicy = { minWords: 100, targetWords: 500, maxWords: 1000 }
+  expect(buildOutlinePrompt(book, draft)[1].content).toContain('100~1000')
+  expect(book.targetWordCountMin).toBe(80)
+})
 
 it('uses the same custom length policy in outline, volume, writing and beat planning', () => {
   setActivePinia(createPinia())

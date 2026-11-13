@@ -1,4 +1,4 @@
-import type { ChapterPlanV2, ScenePlan } from './reconstruction'
+import type { StructuredChapterPlan, ScenePlan } from './reconstruction'
 
 /** These records are editor recovery data, never approved planning or Canon. */
 export interface SceneEditorDraft {
@@ -6,7 +6,7 @@ export interface SceneEditorDraft {
   chapterPlanId: string
   baseline: string
   sequence: number
-  chapter: ChapterPlanV2
+  chapter: StructuredChapterPlan
   scenes: ScenePlan[]
   instructions: string
   title: string
@@ -33,7 +33,7 @@ export interface SceneOptionRevision {
   kind: 'author' | 'model' | 'restored'
   title: string
   baseline: string
-  chapter: ChapterPlanV2
+  chapter: StructuredChapterPlan
   instructions: string
   scenes: ScenePlan[]
   complete: boolean

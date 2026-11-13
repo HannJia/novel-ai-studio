@@ -23,6 +23,33 @@ afterEach(() => {
   }
 })
 describe('desktop file and instance safety', () => {
+  it.each(['packaged', 'development', 'smoke'] as const)('preserves the V3 profile before locking in %s mode', mode => {
+    const appData = temp()
+    const smokeData = path.join(os.tmpdir(), 'ai-novel-writer-smoke-brand-test')
+    let userData = path.join(appData, mode === 'packaged' ? 'mobish' : 'ai-novel-writer')
+    const setPath = vi.fn((name: string, value: string) => {
+      expect(name).toBe('userData')
+      userData = value
+    })
+    const lock = vi.fn(() => {
+      expect(userData).toBe(mode === 'smoke' ? smokeData
+        : path.join(appData, mode === 'packaged' ? 'AI Novel Writer' : 'ai-novel-writer'))
+      return true
+    })
+    const source = fs.readFileSync(mainPath, 'utf8')
+    vm.runInNewContext(source.slice(0, source.indexOf('// 判断是否为开发模式')), {
+      require: (name: string) => name === 'electron' ? {
+        app: { isPackaged: mode !== 'development', getPath: () => appData, setPath,
+          requestSingleInstanceLock: lock, commandLine: { appendSwitch: vi.fn() } },
+        nativeImage: { createFromDataURL: () => ({}) },
+      } : requireLocal(name),
+      process: { env: mode === 'smoke'
+        ? { AI_NOVEL_WRITER_SMOKE_TEST: '1', AI_NOVEL_WRITER_SMOKE_USER_DATA: smokeData } : {} },
+      Buffer,
+    })
+    expect(lock).toHaveBeenCalledOnce()
+    expect(setPath).toHaveBeenCalledTimes(mode === 'development' ? 0 : 1)
+  })
   it('retains original data if Windows rejects the final replacement', () => {
     const directory = temp()
     const target = path.join(directory, 'book.db')
@@ -80,7 +107,7 @@ describe('desktop file and instance safety', () => {
       }
       sender.mainFrame.url = 'https://untrusted.example/'
       expect(await projectRequest({ sender, senderFrame: sender.mainFrame }, { method: 'read' })).toMatchObject({ ok: false })
-      expect(fs.existsSync(path.join(userData, 'projects-v2'))).toBe(false)
+      expect(fs.existsSync(path.join(userData, 'projects-v3'))).toBe(false)
       sender.mainFrame.url = 'http://localhost:5173/'
       expect(await projectRequest({ sender, senderFrame: sender.mainFrame }, { method: 'read' })).toMatchObject({ ok: true, value: { backup: null } })
     } else expect(app.quit).toHaveBeenCalledOnce()

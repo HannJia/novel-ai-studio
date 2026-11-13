@@ -258,12 +258,12 @@ async function importText() {
 .import-fields { display: grid; grid-template-columns:minmax(0,1fr); gap: 8px; min-width: 0; }
 .import-fields > * { min-width:0; max-width:100%; }
 .import-fields :deep(.n-select),.import-fields :deep(.n-base-selection) { min-width:0; max-width:100%; }
-.import-fields label { font-size: 13px; color: var(--text-color-secondary); }
+.import-fields label { font-size: 13px; color: var(--ink-2); }
 .file-row, .import-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .import-actions { justify-content: flex-end; }
 .file-name, .import-progress, .import-notice, .import-error { font-size: 12px; overflow-wrap: anywhere; }
 .file-name { min-width: 0; flex: 1; }
 .file-row :deep(.n-input-number) { width:130px; }
-.import-notice { color: var(--text-color-secondary); margin: 4px 0; line-height: 1.6; }
-.import-error { color: var(--color-error); margin: 4px 0; }
+.import-notice { color: var(--ink-2); margin: 4px 0; line-height: 1.6; }
+.import-error { color: var(--zhu); margin: 4px 0; }
 </style>

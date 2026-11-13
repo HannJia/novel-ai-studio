@@ -43,7 +43,7 @@ async function mountDesk(query: Record<string, string> = {}) {
   await router.push({ path: `/write/${state.session.novel.value!.id}/${currentChapter.id}`, query })
   wrapper = mount(WriteView, { attachTo: document.body, global: { plugins: [pinia, router], stubs: {
     PlainTextEditor: EditorDouble, EditorRecoveryPicker: true, ChapterTimePanel: true, CharacterAvatar: true,
-    AiChatAssistant: true, WritingAdvisorSidebar: true, StoryCandidateEditor: true, EventCausalityPanel: true,
+    BookChat: true, WritingAdvisorSidebar: true, StoryCandidateEditor: true, EventCausalityPanel: true,
   } } })
   await flushPromises()
   return router
@@ -108,22 +108,22 @@ describe('V3 写作台原型交互', () => {
     ;(document.querySelector('[aria-label="切换目录"]') as HTMLButtonElement).click()
     await flushPromises()
     expect(wrapper.find('.tree-side').exists()).toBe(true)
-    expect(wrapper.find('.desk-side').exists()).toBe(false)
+    expect(wrapper.find('.desk-side').isVisible()).toBe(false)
     ;(document.querySelector('[aria-label="切换案头"]') as HTMLButtonElement).click()
     await flushPromises()
     expect(wrapper.find('.tree-side').exists()).toBe(false)
-    expect(wrapper.find('.desk-side').exists()).toBe(true)
+    expect(wrapper.find('.desk-side').isVisible()).toBe(true)
     expect(state.ai.acceptCandidate).not.toHaveBeenCalled()
   })
   it('从桌面缩到窄屏时保留案头并收起会覆盖它的目录', async () => {
     await mountDesk()
     expect(wrapper.find('.tree-side').exists()).toBe(true)
-    expect(wrapper.find('.desk-side').exists()).toBe(true)
+    expect(wrapper.find('.desk-side').isVisible()).toBe(true)
     vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(540)
     window.dispatchEvent(new Event('resize'))
     await flushPromises()
     expect(wrapper.find('.tree-side').exists()).toBe(false)
-    expect(wrapper.find('.desk-side').exists()).toBe(true)
+    expect(wrapper.find('.desk-side').isVisible()).toBe(true)
   })
   it('展示真实卷章、生命周期与文末检查，专注退出后恢复案头', async () => {
     await mountDesk()
@@ -136,10 +136,10 @@ describe('V3 写作台原型交互', () => {
     expect(wrapper.get('.gate-stats').text()).toContain('2/2')
     ;(document.querySelector('[aria-label="切换专注模式"]') as HTMLButtonElement).click()
     await flushPromises()
-    expect(wrapper.find('.desk-side').exists()).toBe(false)
+    expect(wrapper.find('.desk-side').isVisible()).toBe(false)
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     await flushPromises()
-    expect(wrapper.find('.desk-side').exists()).toBe(true)
+    expect(wrapper.find('.desk-side').isVisible()).toBe(true)
   })
   it('写作模式切换只保存偏好，不自动请求模型', async () => {
     await mountDesk()
@@ -175,7 +175,7 @@ describe('V3 写作台原型交互', () => {
     expect(wrapper.findAll('.margin-note')).toHaveLength(0)
     await wrapper.get('.finding').trigger('click')
     expect(revealRange).not.toHaveBeenCalled()
-    expect(wrapper.get('.finding').text()).toContain('旧版参考')
+    expect(wrapper.get('.finding').text()).toContain('此前正文参考')
   })
   it('外部证据定位等待正文和编辑器就绪，失败的早期尝试不消费定位请求', async () => {
     state.session.loading.value = true

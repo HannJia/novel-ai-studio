@@ -16,8 +16,7 @@ import { useInspirationSessionsStore } from './stores/inspirationSessions'
 import { initializeProjectKernel } from './services/projectKernelClient'
 
 // 全局样式
-import './styles/variables.css'
-import './styles/global.css'
+import './v3/styles/base.css'
 import '@fontsource-variable/noto-serif-sc/wght.css'
 import '@fontsource-variable/noto-sans-sc/wght.css'
 import '@fontsource-variable/jetbrains-mono/wght.css'

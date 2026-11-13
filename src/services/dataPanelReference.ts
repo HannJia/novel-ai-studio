@@ -1,4 +1,4 @@
-import type { DataPanelChange, DataPanelField, DataPanelItem, DataPanelReferenceHistory, DataPanelReferenceSource, DataPanelReferenceValue, DataPanelReferenceRevision, Novel } from '@/types/novel'
+import type { DataPanelChange, DataPanelField, DataPanelItem, DataPanelReferenceSource, DataPanelReferenceValue, DataPanelReferenceRevision, Novel } from '@/types/novel'
 import { buildAnalysisSourceVersionId } from './reconstructionCandidates'
 import { calculateDataPanelFields, STORY_CLOCK_SOURCE } from './dataPanel'
 import { captureStoryTimePoint, storyTimePointIsCurrent } from './storyTime'
@@ -42,34 +42,6 @@ export function dataPanelAcceptedSource(change: DataPanelChange): DataPanelRefer
   return source.kind === 'author' ? { kind: 'author' } : { ...clone(source), chapterIndex: change.chapterIndex }
 }
 
-function legacyDataPanelHistory(novel: Novel, item: DataPanelItem): DataPanelReferenceHistory | undefined {
-  const baseline = dataPanelReferenceState(item), keys = new Set<string>()
-  for (const change of novel.dataPanelChanges || []) {
-    if (change.itemId !== item.id || change.status !== 'accepted') continue
-    if (change.mutation?.kind === 'create') Object.keys(baseline).forEach(key => keys.add(key))
-    else if (change.mutation?.kind === 'equipment') { keys.add('ownerItemId'); keys.add('equipmentState') }
-    else {
-      const target = change.mutation?.kind === 'field' ? change.mutation.field.id : change.fieldId
-      const matching = item.fields.filter(field => field.id === target)
-      const fields = matching.length ? matching : item.fields.filter(field => field.name === change.fieldName)
-      fields.forEach(field => keys.add(fieldKey(field.id)))
-    }
-  }
-  const changes = [...keys].filter(key => baseline[key] !== undefined)
-    .map(key => ({ key, before: baseline[key], after: baseline[key] }))
-  if (!changes.length) return undefined
-  return { baseline, revisions: [{ id: 'legacy-data:' + buildAnalysisSourceVersionId(item.id), appliedAt: item.updatedAt,
-    source: { kind: 'unverified' }, changes }] }
-}
-
-/** Preserve uncertainty independently before the user prunes the proposal display history. */
-export function preserveDataPanelReferenceHistory(novel: Novel): void {
-  for (const item of novel.dataPanels) if (!item.referenceHistory) {
-    const history = legacyDataPanelHistory(novel, item)
-    if (history) item.referenceHistory = history
-  }
-}
-
 /** Inputs used by chapter projection, independent of proposal/UI history and run counters. */
 export function dataPanelProvenanceInput(novel: Novel) {
   const value = (key: string, entry: DataPanelReferenceValue | undefined) =>
@@ -77,7 +49,7 @@ export function dataPanelProvenanceInput(novel: Novel) {
       ? fieldReference(entry) : entry
   const state = (entries: State) => Object.keys(entries).sort().map(key => [key, value(key, entries[key])])
   return (novel.dataPanels || []).map(item => {
-    const history = item.referenceHistory || legacyDataPanelHistory(novel, item)
+    const history = item.referenceHistory
     return [item.id, history ? { baseline: state(history.baseline), revisions: history.revisions.map(revision => {
       const source = revision.source
       return { source: source.kind === 'author' || source.kind === 'unverified' ? { kind: source.kind } : {
@@ -90,7 +62,7 @@ export function dataPanelProvenanceInput(novel: Novel) {
   })
 }
 
-export function recordDataPanelReference(novel: Novel, item: DataPanelItem, before: DataPanelItem | undefined,
+export function recordDataPanelReference(item: DataPanelItem, before: DataPanelItem | undefined,
   source: DataPanelReferenceSource, now: string, id: string, dependencyFieldId?: string, confirmedKeys: string[] = []): void {
   const previous = dataPanelReferenceState(before), current = dataPanelReferenceState(item)
   const changes = [...new Set([...Object.keys(previous), ...Object.keys(current)])]
@@ -106,7 +78,7 @@ export function recordDataPanelReference(novel: Novel, item: DataPanelItem, befo
       dependencies[fieldKey(candidate.id)] = previous[fieldKey(candidate.id)]
     }
   }
-  item.referenceHistory ??= (before ? legacyDataPanelHistory(novel, before) : undefined) || { baseline: previous, revisions: [] }
+  item.referenceHistory ??= { baseline: previous, revisions: [] }
   item.referenceHistory.revisions.push(clone({ id, appliedAt: now, source, changes,
     ...(Object.keys(dependencies).length ? { dependencies } : {}) }))
 }
@@ -174,7 +146,7 @@ export function projectDataPanelReferences(novel: Novel, beforeChapterIndex?: nu
         issues.push(`${original.name}/${field.name}：时间规则结算来源待核对，请编辑并确认该字段后重新推算`)
       }
     }
-    const history = original.referenceHistory || legacyDataPanelHistory(novel, original)
+    const history = original.referenceHistory
     const state = history ? clone(history.baseline) : dataPanelReferenceState(original)
     const head = clone(state), problems = new Map<string, string>()
     for (const revision of history?.revisions || []) {

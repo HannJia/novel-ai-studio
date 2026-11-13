@@ -123,7 +123,7 @@ async function remoteEdit(key: string, title: string | null) {
 }
 
 describe('首次下载与本机内容确认', () => {
-  it('applies V2 planning to the live workspace only after durable cloud commit and retains it on failure', async () => {
+  it('applies V3 planning to the live workspace only after durable cloud commit and retains it on failure', async () => {
     const novel = addBook()
     const localState = plannedProjectWorkspace(novel)
     memory.workspaces.set(novel.id, localState)
@@ -156,7 +156,7 @@ describe('首次下载与本机内容确认', () => {
     const book = addBook()
     book.title = '云端作品'
     const key = 'novel:' + book.id
-    const payload = canonicalJson({ kind: 'novel', schemaVersion: 2, novel: book, chapterRevisions: [], reconstructionWorkspace: emptyProjectWorkspace(book.id) })
+    const payload = canonicalJson({ kind: 'novel', schemaVersion: 3, novel: book, chapterRevisions: [], reconstructionWorkspace: emptyProjectWorkspace(book.id) })
     memory.records.set(key, { key, payload, hash: await hashPayload(payload), version: 1, bytes: payload.length, updatedAt: Date.now() })
     useNovelStore().adoptImportedNovels([])
     return book.id
@@ -265,8 +265,8 @@ describe('首次下载与本机内容确认', () => {
 describe('云同步状态机', () => {
   it('keeps browser login in the current tab session and restores it after a reload', async () => {
     await sync.authenticate('login', 'owner', 'not-a-real-password')
-    expect(sessionStorage.getItem('novel-cloud-session')).toContain('test-token-not-a-secret')
-    expect(localStorage.getItem('novel-cloud-session')).toBeNull()
+    expect(sessionStorage.getItem('mojian-v3-cloud-session')).toContain('test-token-not-a-secret')
+    expect(localStorage.getItem('mojian-v3-cloud-session')).toBeNull()
 
     sync.dispose()
     setActivePinia(createPinia())
@@ -276,7 +276,7 @@ describe('云同步状态机', () => {
     expect(sync.session?.token).toBe('test-token-not-a-secret')
 
     await sync.logout()
-    expect(sessionStorage.getItem('novel-cloud-session')).toBeNull()
+    expect(sessionStorage.getItem('mojian-v3-cloud-session')).toBeNull()
   })
 
   it('serializes project operations against silent preference network synchronization', async () => {
@@ -501,7 +501,7 @@ describe('云同步状态机', () => {
     expect(sync.error).toContain('登录已过期')
     expect(sync.state.binding?.userId).toBe('owner')
     expect(useNovelStore().getNovel(novel.id)).toBeDefined()
-    expect(sessionStorage.getItem('novel-cloud-session')).toBeNull()
+    expect(sessionStorage.getItem('mojian-v3-cloud-session')).toBeNull()
   })
   it('restores the bound server without a token and rejects changed destinations before sending credentials', async () => {
     sync.dispose()

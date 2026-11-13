@@ -138,7 +138,7 @@ export function applyDataPanelProposal(
     initializeDataPanelTimeBaselines(novel, [created], proposalTime(novel, change))
     additions.push(created)
 
-    for (const addition of additions) recordDataPanelReference(novel, addition, undefined, dataPanelAcceptedSource(change), now, nextId())
+    for (const addition of additions) recordDataPanelReference(addition, undefined, dataPanelAcceptedSource(change), now, nextId())
 
     items.push(...additions)
     change.itemId = created.id
@@ -164,14 +164,14 @@ export function applyDataPanelProposal(
     const snapshot = dataPanelSnapshot(item)
     appendSnapshot(item, snapshot, '装备状态变更前', now, nextId)
     if (ownerItem) {
-      recordDataPanelReference(novel, ownerItem, undefined, dataPanelAcceptedSource(change), now, nextId())
+      recordDataPanelReference(ownerItem, undefined, dataPanelAcceptedSource(change), now, nextId())
       items.push(ownerItem)
     }
     item.ownerItemId = ownerItem?.id || owner.id
     item.equipmentState = mutation.state
     item.lastMentionChapterIndex = change.chapterIndex
     item.updatedAt = now
-    recordDataPanelReference(novel, item, beforeReference, dataPanelAcceptedSource(change), now, nextId())
+    recordDataPanelReference(item, beforeReference, dataPanelAcceptedSource(change), now, nextId())
     markResolved(change, 'accepted', now)
     novel.updatedAt = now
     return true
@@ -191,7 +191,7 @@ export function applyDataPanelProposal(
     calculateDataPanelFields(item)
     item.lastMentionChapterIndex = change.chapterIndex
     item.updatedAt = now
-    recordDataPanelReference(novel, item, beforeReference, dataPanelAcceptedSource(change), now, nextId())
+    recordDataPanelReference(item, beforeReference, dataPanelAcceptedSource(change), now, nextId())
     markResolved(change, 'accepted', now)
     novel.updatedAt = now
     return true
@@ -217,7 +217,7 @@ export function applyDataPanelProposal(
   }
   item.lastMentionChapterIndex = change.chapterIndex
   item.updatedAt = now
-  recordDataPanelReference(novel, item, beforeReference, dataPanelAcceptedSource(change), now, nextId(), field.id)
+  recordDataPanelReference(item, beforeReference, dataPanelAcceptedSource(change), now, nextId(), field.id)
   markResolved(change, 'accepted', now)
   novel.updatedAt = now
   return true

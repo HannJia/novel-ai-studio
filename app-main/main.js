@@ -9,7 +9,7 @@ const { writeAtomicFile, preserveRecoveryFiles } = require('./durableFiles.cjs')
 const { createUpdateController, LATEST_API } = require('./updater.cjs')
 const { createUpdateHandshake } = require('./updateHandshake.cjs')
 const { createCloudSessionStorage } = require('./cloudSession.cjs')
-const { createProjectKernelHandler } = require('./projectKernelRpc.cjs')
+const { createProjectKernelHandler, validateBackup } = require('./projectKernelRpc.cjs')
 const { createClipboardWriter } = require('./clipboard.cjs')
 
 const isSmokeTest = process.env.AI_NOVEL_WRITER_SMOKE_TEST === '1'
@@ -18,7 +18,7 @@ const VITE_DEV_SERVER_URL = isSmokeTest && process.env.AI_NOVEL_WRITER_SMOKE_VIT
   ? process.env.AI_NOVEL_WRITER_SMOKE_VITE_URL
   : 'http://localhost:5173'
 const isClipboardSmoke = isSmokeTest && process.env.AI_NOVEL_WRITER_SMOKE_CLIPBOARD === '1'
-const isVisualSmoke = isSmokeTest && process.env.AI_NOVEL_WRITER_SMOKE_WORKFLOW_KIND === 'visual'
+const isVisualSmoke = isSmokeTest && ['visual', 'ui'].includes(process.env.AI_NOVEL_WRITER_SMOKE_WORKFLOW_KIND)
 const isDeepVisualSmoke = isSmokeTest && process.env.AI_NOVEL_WRITER_SMOKE_WORKFLOW_KIND === 'deep'
 const isSelectionSmoke = isSmokeTest && process.env.AI_NOVEL_WRITER_SMOKE_WORKFLOW_KIND === 'selection'
 const clipboardSmokeScenario = process.env.AI_NOVEL_WRITER_SMOKE_CLIPBOARD_SCENARIO || 'normal'
@@ -41,6 +41,9 @@ if (isSmokeTest) {
     throw new Error('Smoke tests require a dedicated temporary userData directory')
   }
   app.setPath('userData', path.resolve(smokeData))
+} else if (app.isPackaged) {
+  // Keep the current V3 data root when the Windows product name changes.
+  app.setPath('userData', path.join(app.getPath('appData'), 'AI Novel Writer'))
 }
 const hasInstanceLock = app.requestSingleInstanceLock()
 if (!hasInstanceLock) app.quit()
@@ -372,7 +375,7 @@ function createWindow() {
     height: 800,
     minWidth: isVisualSmoke || isDeepVisualSmoke || isSelectionSmoke ? 480 : 1024,
     minHeight: 700,
-    title: '墨笺 · AI 小说写作',
+    title: '墨笔生花 · AI 小说写作',
     icon: appIcon,
     autoHideMenuBar: true,
     show: !isSmokeTest,
@@ -592,6 +595,30 @@ function createWindow() {
           result.workflow = state
           fs.writeFileSync(path.join(app.getPath('userData'), 'workflow-resume.png'), (await mainWindow.webContents.capturePage()).toPNG())
         }
+        if (workflow === 'ui' && process.env.AI_NOVEL_WRITER_SMOKE_WORKFLOW_KIND === 'ui') {
+          if (!isDev) throw new Error('UI workflow requires the development renderer')
+          mainWindow.showInactive()
+          const fixture = await mainWindow.webContents.executeJavaScript("import('/src/test/v3FinalUiWorkflow.ts').then(module => module.seedFinalUiState())")
+          const states = []
+          for (const theme of ['fanqie', 'eyecare', 'dark']) {
+            for (const width of [1440, 860, 540]) {
+              mainWindow.setContentSize(width, width === 1440 ? 900 : 1000)
+              for (const page of fixture.pages) {
+                const state = await mainWindow.webContents.executeJavaScript("import('/src/test/v3FinalUiWorkflow.ts').then(module => module.openFinalUiPage(" + JSON.stringify(fixture) + ',' + JSON.stringify(page) + ',' + JSON.stringify(theme) + '))')
+                const image = await mainWindow.webContents.capturePage()
+                const fileName = 'v3-ui-' + page + '-' + theme + '-' + width + '.png'
+                fs.writeFileSync(path.join(app.getPath('userData'), fileName), image.toPNG())
+                states.push({ ...state, fileName, screenshotWidth: image.getSize().width, screenshotHeight: image.getSize().height })
+                fs.writeFileSync(path.join(app.getPath('userData'), 'ui-progress.json'), JSON.stringify(states))
+                process.stdout.write('UI_CAPTURE ' + page + ' ' + theme + ' ' + width + '\n')
+              }
+            }
+          }
+          result.workflow = { phase: workflow, kind: 'ui', passed: true, fixture, states }
+          const snapshot = await mainWindow.webContents.executeJavaScript("window.electronAPI.projectRequest({method:'read'})")
+          if (!snapshot.ok) throw new Error('Cannot export synthetic UI fixture')
+          fs.writeFileSync(path.join(app.getPath('userData'), 'offline-writing-fixture.json'), JSON.stringify(snapshot.value.backup))
+        }
         if (workflow === 'visual' && process.env.AI_NOVEL_WRITER_SMOKE_WORKFLOW_KIND === 'visual') {
           if (!isDev) throw new Error('Dense visual smoke requires the development renderer')
           mainWindow.showInactive()
@@ -653,6 +680,7 @@ function createWindow() {
         }
         if (workflow === 'deep' && process.env.AI_NOVEL_WRITER_SMOKE_WORKFLOW_KIND === 'deep') {
           if (!isDev) throw new Error('Deep visual smoke requires the development renderer')
+          mainWindow.showInactive()
           const fixture = await mainWindow.webContents.executeJavaScript(
             "import('/src/test/v3DeepVisualWorkflow.ts').then(module => module.seedV3DeepVisualState())",
           )
@@ -766,7 +794,7 @@ function createWindow() {
           mainWindow.setContentSize(1280, 800)
           result.workflow = { phase: workflow, kind: 'deep', passed: true, fixture, states }
         }
-        if (workflow && !['visual', 'deep', 'shelf-resume'].includes(process.env.AI_NOVEL_WRITER_SMOKE_WORKFLOW_KIND)) {
+        if (workflow && !['visual', 'deep', 'ui', 'shelf-resume'].includes(process.env.AI_NOVEL_WRITER_SMOKE_WORKFLOW_KIND)) {
           const workflowKind = process.env.AI_NOVEL_WRITER_SMOKE_WORKFLOW_KIND || 'integrated'
           if (!isDev || (workflowKind === 'selection'
             ? workflow !== 'selection'
@@ -813,6 +841,9 @@ function createWindow() {
           })()`)
           fs.writeFileSync(path.join(app.getPath('userData'), `workflow-${workflow}.png`), (await mainWindow.webContents.capturePage()).toPNG())
         }
+        if (['1', 'verify'].includes(process.env.AI_NOVEL_WRITER_SMOKE_LOCAL_WRITING)) {
+          result.localWriting = await require('./offlineWritingSmoke.cjs').run(mainWindow, app.getPath('userData'), process.env.AI_NOVEL_WRITER_SMOKE_LOCAL_WRITING)
+        }
         const smokeLine = `ELECTRON_SMOKE_RESULT ${JSON.stringify(result)}`
         fs.writeFileSync(path.join(app.getPath('userData'), 'electron-smoke-result.json'), JSON.stringify(result))
         process.stdout.write(smokeLine + '\n')
@@ -854,11 +885,11 @@ function ensureUserDataDir() {
 
 // 数据库文件存储路径
 function getDbPath() {
-  return path.join(app.getPath('userData'), 'novel-writer.db')
+  return path.join(app.getPath('userData'), 'mojian-v3.db')
 }
 
 function getConfigPath() {
-  return path.join(app.getPath('userData'), 'novel-writer-config.json')
+  return path.join(app.getPath('userData'), 'mojian-v3-config.json')
 }
 
 function hasValidSqliteHeader(data) {
@@ -868,7 +899,7 @@ function hasValidSqliteHeader(data) {
 // Project storage owns its files and indexes. No SQL or arbitrary filesystem
 // operation is exposed to the renderer through this channel.
 ipcMain.handle('project:request', createProjectKernelHandler({
-  root: path.join(app.getPath('userData'), 'projects-v2'),
+  root: path.join(app.getPath('userData'), 'projects-v3'),
   authorize: event => {
     assertMainWindowSender(event)
     if (event.senderFrame !== mainWindow.webContents.mainFrame || !isTrustedRendererUrl(event.senderFrame.url)) {
@@ -904,9 +935,9 @@ ipcMain.handle('db:retainProjectBackup', async (event, serialized) => {
   assertMainWindowSender(event)
   if (typeof serialized !== 'string' || Buffer.byteLength(serialized, 'utf8') > 256 * 1024 * 1024) throw new Error('恢复点超过 256 MB 上限')
   const parsed = JSON.parse(serialized)
-  if (parsed?.format !== 'ai-novel-writer-backup' || !Array.isArray(parsed.novels) || !Array.isArray(parsed.knowledgeBases)) throw new Error('恢复点格式无效')
+  validateBackup(parsed)
   ensureUserDataDir()
-  writeAtomicFile(path.join(app.getPath('userData'), 'novel-writer-before-import.json'), serialized)
+  writeAtomicFile(path.join(app.getPath('userData'), 'mojian-v3-before-import.json'), serialized)
 })
 
 // IPC: 写入数据库文件
@@ -1030,7 +1061,8 @@ ipcMain.handle('config:encrypt', async (event, value) => {
 ipcMain.handle('config:decrypt', async (event, value) => {
   assertMainWindowSender(event)
   if (typeof value !== 'string') throw new TypeError('config:decrypt expects a string')
-  if (!value || !value.startsWith('enc:')) return value
+  if (!value) return value
+  if (!value.startsWith('enc:')) throw new Error('只接受 V3 加密配置。')
   if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用，无法解密 API Key')
   return safeStorage.decryptString(Buffer.from(value.slice(4), 'base64'))
 })
@@ -1044,7 +1076,7 @@ for (const method of ['read', 'write']) {
   ipcMain.handle(`cloud-session:${method}`, (event, value) => {
     assertUpdateSender(event)
     ensureUserDataDir()
-    const storage = createCloudSessionStorage(path.join(app.getPath('userData'), 'novel-writer-cloud-session'), safeStorage)
+    const storage = createCloudSessionStorage(path.join(app.getPath('userData'), 'mojian-v3-cloud-session'), safeStorage)
     return method === 'read' ? storage.read() : storage.write(value)
   })
 }

@@ -44,7 +44,7 @@ function invalidateVolumePlanning(aggregate: StoryAggregate, volumeIds: string[]
   if (aggregate.workspace.creationDraft) {
     const previous = aggregate.workspace.creationDraft
     const next = syncCreationDraftPlanning(previous, aggregate.novel, now)
-    const affectedVolumes = new Set(volumeIds.map(id => 'volume-v2:' + id))
+    const affectedVolumes = new Set(volumeIds.map(id => 'volume:' + id))
     const affectedPlans = new Set([...previous.chapterPlans, ...next.chapterPlans]
       .filter(plan => plan.volumeId && affectedVolumes.has(plan.volumeId)).map(plan => plan.id))
     aggregate.workspace.creationDraft = { ...next,

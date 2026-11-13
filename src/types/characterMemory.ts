@@ -7,7 +7,7 @@ export interface StoryProposition {
   subjectId?: string
   objectId?: string
   scope: string
-  identityStatus: 'explicit' | 'unresolved' | 'legacy'
+  identityStatus: 'explicit' | 'unresolved'
 }
 /** Separate UI/transaction argument. Never deserialize this authorization from proposedValue. */
 export interface CharacterMemoryAuthorDecision {

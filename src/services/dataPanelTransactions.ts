@@ -50,7 +50,7 @@ export function editDataPanel(aggregate: StoryAggregate, edit: DataPanelEdit, ba
       const beforeOwner = captureDataPanelReferenceItem(item)
       item.versions = [...(item.versions || []), { id: nextId(), label: '持有人删除前', savedAt: now, snapshot: snapshot(item) }].slice(-20)
       delete item.ownerItemId; item.equipmentState = 'stored'; item.updatedAt = now
-      recordDataPanelReference(novel, item, beforeOwner, { kind: 'author' }, now, nextId())
+      recordDataPanelReference(item, beforeOwner, { kind: 'author' }, now, nextId())
     }
     // Preserve proposal decisions and evidence as history even when their target disappears.
   } else {
@@ -87,7 +87,7 @@ export function editDataPanel(aggregate: StoryAggregate, edit: DataPanelEdit, ba
     if (current) item.versions = [...(item.versions || []), { id: nextId(), label: edit.action === 'restore' ? '恢复前版本' : '编辑前版本', savedAt: now, snapshot: previous }].slice(-20)
     else novel.dataPanels.push(item)
     item.updatedAt = now
-    recordDataPanelReference(novel, item, beforeReference, { kind: 'author' }, now, nextId(), undefined, confirmedKeys)
+    recordDataPanelReference(item, beforeReference, { kind: 'author' }, now, nextId(), undefined, confirmedKeys)
   }
   novel.updatedAt = now
   recordDataPanelImpact(aggregate, before, ['dataPanels'], now, nextId)

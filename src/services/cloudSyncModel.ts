@@ -23,9 +23,9 @@ export interface SyncConflict {
   remoteVersion: number; remoteHash: string | null; createdAt: string; resolution?: 'local' | 'remote' | 'superseded'
 }
 export type SyncDocument =
-  | { kind: 'novel'; schemaVersion: 2; novel: Novel; chapterRevisions: ChapterRevision[]; reconstructionWorkspace: ProjectWorkspaceSnapshot }
-  | { kind: 'knowledge'; knowledge: KnowledgeBase }
-  | { kind: 'inspiration'; inspiration: InspirationSession }
+  | { kind: 'novel'; schemaVersion: 3; novel: Novel; chapterRevisions: ChapterRevision[]; reconstructionWorkspace: ProjectWorkspaceSnapshot }
+  | { kind: 'knowledge'; schemaVersion: 3; knowledge: KnowledgeBase }
+  | { kind: 'inspiration'; schemaVersion: 3; inspiration: InspirationSession }
 export const emptySyncState = (): SyncState => ({ 
   binding: null, 
   enabled: false, 
@@ -63,13 +63,13 @@ export async function hashPayload(payload: string | null): Promise<string | null
 }
 
 export function projectDocuments(project: ProjectBackup): Map<string, string> {
-  // Fail closed if an internal caller tries to sync an incomplete V2 snapshot.
+  // Fail closed if an internal caller tries to sync an incomplete V3 snapshot.
   parseProjectBackup(JSON.stringify(project))
   const result = new Map<string, string>()
   const knownLibraries = new Set(project.knowledgeBases.map(kb => kb.id))
   for (const novel of project.novels) {
     result.set(`novel:${novel.id}`, canonicalJson({
-      kind: 'novel', schemaVersion: 2, novel: {
+      kind: 'novel', schemaVersion: 3, novel: {
         ...novel,
         knowledgeBaseIds: novel.knowledgeBaseIds.filter(id => knownLibraries.has(id)),
         // SQLite materializes omitted optional flags as false when reopening.
@@ -80,24 +80,25 @@ export function projectDocuments(project: ProjectBackup): Map<string, string> {
       reconstructionWorkspace: project.reconstructionWorkspaces.find(workspace => workspace.novelId === novel.id),
     }))
   }
-  for (const knowledge of project.knowledgeBases) result.set(`knowledge:${knowledge.id}`, canonicalJson({ kind: 'knowledge', knowledge }))
-  for (const inspiration of project.inspirationSessions || []) result.set(`inspiration:${inspiration.id}`, canonicalJson({ kind: 'inspiration', inspiration }))
+  for (const knowledge of project.knowledgeBases) result.set(`knowledge:${knowledge.id}`, canonicalJson({ kind: 'knowledge', schemaVersion: 3, knowledge }))
+  for (const inspiration of project.inspirationSessions || []) result.set(`inspiration:${inspiration.id}`, canonicalJson({ kind: 'inspiration', schemaVersion: 3, inspiration }))
   return result
 }
 
 export function parseCloudDocument(key: string, payload: string): SyncDocument {
   if (new TextEncoder().encode(payload).byteLength > MAX_SYNC_DOCUMENT_BYTES) throw new Error('云端文档超过同步上限。')
   const value = JSON.parse(payload) as SyncDocument
+  if (value?.schemaVersion !== 3) throw new Error('云端数据不是 V3 格式，已停止合并。')
   const now = new Date().toISOString()
   if (value?.kind === 'inspiration' && key === `inspiration:${value.inspiration?.id}`) {
-    return { kind: 'inspiration', inspiration: parseInspirationSession(value.inspiration) }
+    return { kind: 'inspiration', schemaVersion: 3, inspiration: parseInspirationSession(value.inspiration) }
   }
   if (value?.kind === 'knowledge' && key === `knowledge:${value.knowledge?.id}`) {
     parseProjectBackup(JSON.stringify(createProjectBackup({ novels: [], knowledgeBases: [value.knowledge], chapterRevisions: [], inspirationSessions: [], reconstructionWorkspaces: [] })))
     return value
   }
   if (value?.kind === 'novel' && key === `novel:${value.novel?.id}` && Array.isArray(value.chapterRevisions)) {
-    if (value.schemaVersion !== 2 || !value.reconstructionWorkspace) throw new Error('云端小说缺少完整的 V2 创作工作区，已停止合并以保护本机规划和审核记录。')
+    if (value.schemaVersion !== 3 || !value.reconstructionWorkspace) throw new Error('云端小说缺少完整的 V3 创作工作区，已停止合并以保护本机规划和审核记录。')
     // References are checked against the complete project again before application.
     const placeholders = (value.novel.knowledgeBaseIds || []).map(id => ({
       id, name: '', description: '', entries: [], createdAt: now,

@@ -43,7 +43,10 @@ function makeSnapshot() {
     }],
     aiRuns: [{
       id: 'run-1', mode: 'autonomous' as const, taskType: 'draft' as const, targetId: 'chapter-1',
-      chapterStart: 0, chapterEnd: 2, tokenBudget: 1000, usedTokens: 120, status: 'paused' as const,
+      chapterStart: 0, chapterEnd: 2, tokenBudget: 1000, usedTokens: 120, requestLimit: 200, requests: [{
+        id: 'request-1', chapterIndex: 0, phase: 'writing' as const, modelId: 'synthetic-model', status: 'completed' as const,
+        reservedTokens: 200, inputTokens: 20, outputTokens: 100, usageSource: 'reported' as const, startedAt: now, completedAt: now,
+      }], status: 'paused' as const,
       checkpoint: 'chapter-1', createdAt: now, updatedAt: now,
     }],
     canonMutations: [{

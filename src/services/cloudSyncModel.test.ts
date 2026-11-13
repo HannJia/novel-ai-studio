@@ -33,7 +33,7 @@ describe('云同步文档与冲突判断', () => {
     expect(novel.chapterPlanConfirmed).toBeUndefined()
     expect(novel.chatWebSearchEnabled).toBeUndefined()
   })
-  it('round trips complete V2 planning and run checkpoints, preserves other workspaces and deletes them with their novel', () => {
+  it('round trips complete V3 planning and run checkpoints, preserves other workspaces and deletes them with their novel', () => {
     const a = book(), b = book()
     const workspaces = [plannedProjectWorkspace(a), plannedProjectWorkspace(b)]
     const project = createProjectBackup([a, b], [], [], [], workspaces)
@@ -47,11 +47,12 @@ describe('云同步文档与冲突判断', () => {
     expect(project.reconstructionWorkspaces[0].creationDraft?.contract.title).toBe('作者确认的作品契约')
   })
 
-  it('rejects lossy V1 cloud documents and workspace ownership mismatches', () => {
+  it('rejects retired cloud formats and V3 workspace ownership mismatches', () => {
     const a = book(), b = book()
     const legacy = { kind: 'novel', novel: a, chapterRevisions: [] }
-    expect(() => parseCloudDocument('novel:' + a.id, canonicalJson(legacy))).toThrow('V2 创作工作区')
-    const mismatched = { ...legacy, schemaVersion: 2, reconstructionWorkspace: plannedProjectWorkspace(b) }
+    expect(() => parseCloudDocument('novel:' + a.id, canonicalJson(legacy))).toThrow('不是 V3 格式')
+    expect(() => parseCloudDocument('novel:' + a.id, canonicalJson({ ...legacy, schemaVersion: 2, reconstructionWorkspace: plannedProjectWorkspace(a) }))).toThrow('不是 V3 格式')
+    const mismatched = { ...legacy, schemaVersion: 3, reconstructionWorkspace: plannedProjectWorkspace(b) }
     expect(() => parseCloudDocument('novel:' + a.id, canonicalJson(mismatched))).toThrow()
     const project = createProjectBackup([a], [])
     delete (project as Partial<typeof project>).reconstructionWorkspaces
@@ -63,12 +64,12 @@ describe('云同步文档与冲突判断', () => {
       updatedAt: `2026-09-1${index + 1}T00:00:00Z`, messages: [], draft: 'draft' }))
     const project = createProjectBackup([], [], [], sessions)
     const incoming = parseInspirationSession({ id: 'newest', title: '新会话', updatedAt: '2026-09-18T00:00:00Z', messages: [], draft: '继续聊' })
-    const merged = mergeCloudDocuments(project, new Map([['inspiration:newest', canonicalJson({ kind: 'inspiration', inspiration: incoming })]]))
+    const merged = mergeCloudDocuments(project, new Map([['inspiration:newest', canonicalJson({ kind: 'inspiration', schemaVersion: 3, inspiration: incoming })]]))
     expect(merged.inspirationSessions).toHaveLength(5)
     expect(merged.inspirationSessions![0].id).toBe('newest')
     expect(merged.inspirationSessions!.some(item => item.id === 'idea-0')).toBe(false)
     expect(project.inspirationSessions).toHaveLength(5)
-    expect(() => parseCloudDocument('inspiration:newest', canonicalJson({ kind: 'inspiration', inspiration: { ...incoming, messages: 'invalid' } }))).toThrow()
+    expect(() => parseCloudDocument('inspiration:newest', canonicalJson({ kind: 'inspiration', schemaVersion: 3, inspiration: { ...incoming, messages: 'invalid' } }))).toThrow()
   })
   it('requires HTTPS and an origin without embedded credentials', () => {
     expect(normalizeSyncEndpoint('https://154.94.227.164/')).toBe('https://154.94.227.164')

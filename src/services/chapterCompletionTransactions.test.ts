@@ -1,3 +1,4 @@
+import { createAiRun } from './reconstructionAiRun'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRequire } from 'node:module'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -98,8 +99,7 @@ describe.each(['sql', 'kernel'] as const)('chapter completion transactions (%s)'
     const review: ChapterReview = { id: 'review', chapterId: chapter.id, sourceVersionId: version, startedAt: now,
       completedAt: now, deterministicChecksPassed: true, semanticChecksPassed: true, status: 'ready_to_finalize', findings: [], candidateChanges: [candidate] }
     const backup = copy(createTestProjectBackup([novel], [], [], [], [{ novelId: novel.id, creationDraft: draft, candidates: [candidate],
-      reviewFindings: [], chapterReviews: [review], canonMutations: [], aiRuns: [{ id: 'run', mode: 'autonomous', taskType: 'draft',
-        status: 'needs_author', createdAt: now, updatedAt: now }] }]))
+      reviewFindings: [], chapterReviews: [review], canonMutations: [], aiRuns: [{ ...createAiRun({ id: 'run', mode: 'autonomous', taskType: 'draft', targetId: novel.id, chapterStart: 0, chapterEnd: 2, tokenBudget: 10000, now }), status: 'needs_author' }] }]))
     if (backend === 'kernel') {
       root = await mkdtemp(path.join(os.tmpdir(), 'mojian-story-transaction-'))
       kernel = await createProjectKernel({ root, validateBackup, fault: async (stage: string) => { if (stage === 'before-publish') await diskWrite() } })

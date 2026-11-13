@@ -177,7 +177,7 @@ describe('写作上下文', () => {
     expect(ctx.outlineContext).toContain('当前卷规划（预期走向，不能作为已发生事实）')
     expect(ctx.outlineContext).toContain('失落传承')
     expect(ctx.structuredState).toContain('硬规则')
-    expect(ctx.outlineContext).toContain('V2 结构化故事状态')
+    expect(ctx.outlineContext).toContain('V3 结构化故事状态')
   })
 
   it('写作上下文注入活跃弧线和临近时间线', () => {

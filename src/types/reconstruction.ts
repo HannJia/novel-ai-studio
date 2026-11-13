@@ -138,7 +138,7 @@ export interface SkeletonSourceSelection {
 export interface SkeletonRevision {
   id: ReconstructionId
   skeletonId: ReconstructionId
-  kind: 'legacy' | 'model' | 'author' | 'mixed' | 'restored' | 'confirmed' | 'import'
+  kind: 'initial' | 'model' | 'author' | 'mixed' | 'restored' | 'confirmed' | 'import'
   snapshot: PlotSkeleton
   parentRevisionId?: ReconstructionId
   attemptId?: ReconstructionId
@@ -288,7 +288,7 @@ export interface VolumeOutline {
   approval: ApprovalState
 }
 
-export interface ChapterPlanV2 {
+export interface StructuredChapterPlan {
   id: ReconstructionId
   sourceVersion?: string
   volumeId?: ReconstructionId
@@ -391,20 +391,7 @@ export interface ChapterReview {
   semanticChecksPassed?: boolean
   findings: ReviewFinding[]
   candidateChanges: CandidateChange[]
-  /** Immutable preimages of parser repairs; never used as active findings. */
-  findingReconciliations?: ReviewFindingsReconciliation[]
   status: 'running' | 'needs_revision' | 'ready_to_finalize' | 'approved' | 'failed'
-}
-
-export interface ReviewFindingsReconciliation {
-  id: ReconstructionId
-  parserVersion: 'grouped-details-v1'
-  reconciledAt: IsoDateTime
-  report: string
-  /** Early grouped-detail archives did not retain this field; absent means unknown. */
-  reviewStatus?: ChapterReview['status']
-  workspaceFindings: ReviewFinding[]
-  reviewFindings: ReviewFinding[]
 }
 
 export interface ContextPack {
@@ -508,7 +495,7 @@ export interface CreationDraft {
   }
   acceptedOutline?: { contentSignature: string; directionSignature: string; confirmedAt: IsoDateTime }
   volumes: VolumeOutline[]
-  chapterPlans: ChapterPlanV2[]
+  chapterPlans: StructuredChapterPlan[]
   scenePlans: ScenePlan[]
   approval: Partial<Record<CreationStage, ApprovalState>>
   updatedAt: IsoDateTime
@@ -606,6 +593,7 @@ export function createEmptyCreationDraft(input: {
       worldRules: [],
       forbiddenTopics: [],
       authorPreferences: [],
+      cardConfirmations: [],
       approval: 'draft',
       updatedAt: input.now,
     },

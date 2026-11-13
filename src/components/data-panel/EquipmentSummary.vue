@@ -21,9 +21,9 @@ const totals = computed(() => getEquipmentAttributeTotals(props.items, props.ite
 </script>
 
 <style scoped>
-.equipment-summary { min-width: 0; font-size: 12px; color: var(--text-color-secondary); overflow-wrap: anywhere; }
+.equipment-summary { min-width: 0; font-size: 12px; color: var(--ink-2); overflow-wrap: anywhere; }
 .equipment-summary p { margin: 6px 0; }
-.effective-attribute { padding: 8px 0; border-top: 1px solid var(--border-color-light); }
+.effective-attribute { padding: 8px 0; border-top: 1px solid var(--line); }
 .effective-attribute > div { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .effective-attribute small { display: block; margin-top: 3px; }
 </style>

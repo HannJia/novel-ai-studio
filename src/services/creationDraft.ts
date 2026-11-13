@@ -15,20 +15,20 @@ export function skeletonCompletionIssues(value: PlotSkeleton): string[] {
   if (value.complete === false) issues.push('这是未完整生成的候选，请核对补齐并明确保存作者版本')
   return issues
 }
-/** The initial snapshots preserve legacy candidates before the first new edit. */
-export function ensureSkeletonHistory(draft: CreationDraft, now: string, id: () => string): CreationDraft {
+/** Capture a native candidate baseline before its first author edit. */
+export function captureSkeletonBaselines(draft: CreationDraft, now: string, id: () => string): CreationDraft {
   const next = copy(draft)
   next.skeletonHistory ||= []
   for (const skeleton of next.skeletons) {
     if (skeleton.revisionId) continue
     skeleton.revisionId = id()
-    next.skeletonHistory.push({ id: skeleton.revisionId, skeletonId: skeleton.id, kind: 'legacy', snapshot: copy(skeleton), sources: [], createdAt: now })
+    next.skeletonHistory.push({ id: skeleton.revisionId, skeletonId: skeleton.id, kind: 'initial', snapshot: copy(skeleton), sources: [], createdAt: now })
   }
   return next
 }
 export function saveSkeletonRevision(draft: CreationDraft, skeleton: PlotSkeleton, kind: SkeletonRevision['kind'], now: string, id: () => string,
   source: { parentRevisionId?: string; attemptId?: string; sources?: SkeletonSourceSelection[] } = {}): CreationDraft {
-  const next = ensureSkeletonHistory(draft, now, id)
+  const next = captureSkeletonBaselines(draft, now, id)
   const old = next.skeletons.find(item => item.id === skeleton.id)
   const saved = copy({ ...skeleton, revisionId: id(), updatedAt: now })
   next.skeletonHistory!.push({ id: saved.revisionId!, skeletonId: saved.id, kind, snapshot: copy(saved),

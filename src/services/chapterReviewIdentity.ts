@@ -9,10 +9,9 @@ export function buildChapterReviewSourceVersion(content: string, contextVersion:
   return buildAnalysisSourceVersionId(content) + '|context:' + buildChapterReviewSignature(content, contextVersion)
 }
 
-/** Storage preserves recognized historical identities; execution still requires the current builder above. */
+/** Persisted reports use the same identity protocol as current execution. */
 export function isStoredChapterReviewSignature(signature: string, content: string, contextVersion: string): boolean {
-  const suffix = buildAnalysisSourceVersionId(content) + ':' + contextVersion
-  return [4, 5, 6, 7, 8].some(version => signature === 'review-v' + version + ':' + suffix)
+  return signature === buildChapterReviewSignature(content, contextVersion)
 }
 
 export function isStoredChapterReviewSourceVersion(version: string, content: string, contextVersion: string): boolean {

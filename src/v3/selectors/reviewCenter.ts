@@ -96,11 +96,14 @@ function invalidationReason(row: { chapter: Chapter; workflow: ChapterWorkflow; 
 
 export function deriveReviewCenter(input: ReviewCenterInput): ReviewCenterSnapshot {
   const rows = input.novel.chapters.slice().sort((left, right) => left.chapterIndex - right.chapterIndex).map(chapter => {
-    const contextVersion = input.contextVersion(chapter)
+    const latest = latestReview(input.reviews, chapter.id)
+    // A chapter with no review or checkpoint has no context identity to compare.
+    // Keep the expensive prompt projection for stored reports and partial coverage.
+    const hasReviewIdentity = Boolean(latest || chapter.contentReviewSignature || chapter.contentReviewCoverage)
+    const contextVersion = hasReviewIdentity ? input.contextVersion(chapter) : ''
     const expectedVersion = buildChapterReviewSourceVersion(chapter.content, contextVersion)
     const chapterFindings = input.findings.filter(finding => finding.chapterId === chapter.id)
     const chapterCandidates = input.candidates.filter(candidate => candidate.chapterId === chapter.id)
-    const latest = latestReview(input.reviews, chapter.id)
     const workflow = deriveChapterWorkflow({
       chapter,
       content: chapter.content,

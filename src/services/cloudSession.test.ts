@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 const require = createRequire(import.meta.url)
 const { createCloudSessionStorage } = require('../../app-main/cloudSession.cjs')
 let directory: string
-beforeEach(() => { directory = mkdtempSync(join(tmpdir(), 'novel-cloud-session-')) })
+beforeEach(() => { directory = mkdtempSync(join(tmpdir(), 'mojian-v3-cloud-session-')) })
 afterEach(() => rmSync(directory, { recursive: true, force: true }))
 const valid = { endpoint: 'https://example.org', token: 'a'.repeat(40), expiresAt: Date.now() + 10000, user: { id: 'user', username: 'author' } }
 const encryption = { isEncryptionAvailable: () => true, encryptString: (text: string) => Buffer.from([...text].reverse().join('')),

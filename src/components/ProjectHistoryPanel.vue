@@ -253,17 +253,17 @@ onMounted(refresh)
     <style scoped>
 .history-panel { padding: 24px; margin-top: 20px; }
 .history-actions { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
-.history-retention { border-top: 1px solid var(--border-color); margin-top: 16px; padding-top: 12px; }
+.history-retention { border-top: 1px solid var(--line-2); margin-top: 16px; padding-top: 12px; }
 .retention-pin { display: flex; align-items: center; gap: 8px; }
-.retention-preview { border-left: 3px solid var(--border-color); padding-left: 12px; }
+.retention-preview { border-left: 3px solid var(--line-2); padding-left: 12px; }
 label { display: block; margin: 12px 0; }
-select, textarea, input:not([type=checkbox]) { display: block; width: 100%; padding: 8px; color: var(--text-color-primary); background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 6px; }
+select, textarea, input:not([type=checkbox]) { display: block; width: 100%; padding: 8px; color: var(--ink); background: var(--desk); border: 1px solid var(--line-2); border-radius: 6px; }
 button { padding: 8px 12px; margin: 4px; cursor: pointer; }
 button:disabled { cursor: default; opacity: .5; }
 textarea { box-sizing: border-box; resize: vertical; }
 details { margin: 12px 0; }
 summary { cursor: pointer; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 60vh; overflow: auto; }
-.history-confirm { margin-top: 24px; border-top: 1px solid var(--border-color); }
-[role=alert] { color: var(--error-color, #b43b35); }
+.history-confirm { margin-top: 24px; border-top: 1px solid var(--line-2); }
+[role=alert] { color: var(--zhu); }
 </style>

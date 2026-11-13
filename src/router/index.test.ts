@@ -1,45 +1,29 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import router from './index'
 
-describe('creation route shell switching', () => {
-  beforeEach(async () => {
-    localStorage.removeItem('mojian-ui-shell')
-    await router.replace('/')
-  })
-
-  afterEach(() => localStorage.removeItem('mojian-ui-shell'))
-
-  it('keeps the V3 creation flow reversible and routes legacy creation pages back to V3', async () => {
-    localStorage.setItem('mojian-ui-shell', 'legacy')
-    await router.push('/generate/book-1')
-    expect(router.currentRoute.value.path).toBe('/legacy-generate/book-1')
-
-    await router.push('/legacy-generate/book-1?ui=v3')
-    expect(router.currentRoute.value.path).toBe('/generate/book-1')
-    expect(localStorage.getItem('mojian-ui-shell')).toBe('v3')
-
-    await router.push('/create?ui=legacy')
-    expect(router.currentRoute.value.path).toBe('/legacy-create')
-
-    await router.push('/legacy-create?ui=v3')
-    expect(router.currentRoute.value.path).toBe('/create')
+describe('native V3 routes', () => {
+  it.each([
+    ['', 'NovelList'], ['/create', 'CreateWizard'], ['/settings?section=cloud', 'Settings'],
+    ['/write/book/chapter?evidenceVersion=v1&evidenceStart=12&evidenceEnd=30#quote', 'V3Write'],
+    ['/plan/book?view=workbench&plannerTab=timeline&plannerSelection=event', 'V3Plan'],
+    ['/characters/book?character=person', 'V3Characters'], ['/data/book?chapterId=chapter', 'V3Data'],
+    ['/inspiration/book', 'V3Inspiration'], ['/chapters/book', 'V3Chapters'], ['/outline/book', 'V3Outline'],
+    ['/knowledge/book', 'KnowledgeLibrary'], ['/generate/book?edit=direction', 'V3CreateFlow'],
+  ])('opens %s as a native V3 page', async (path, name) => {
+    await router.push(path || '/')
+    expect(router.currentRoute.value.meta.shell).toBe('v3')
+    expect(router.currentRoute.value.name).toBe(name)
+    expect(router.currentRoute.value.fullPath).toBe(path || '/')
   }, 15000)
 
-  it('opens global and novel knowledge management inside the V3 shell', async () => {
-    await router.push('/knowledge')
-    expect(router.currentRoute.value.meta).toMatchObject({ shell: 'v3', area: 'knowledge' })
-
-    await router.push('/workspace/book-1/knowledge')
-    expect(router.currentRoute.value.path).toBe('/knowledge/book-1')
-    expect(router.currentRoute.value.meta).toMatchObject({ shell: 'v3', area: 'knowledge' })
-    expect(router.currentRoute.value.params.novelId).toBe('book-1')
+  it.each(['/legacy', '/legacy-create', '/legacy-generate/book', '/workspace/book', '/workspace/book/editor/chapter', '/workspace/book/planning?tab=timeline'])('does not adapt retired addresses: %s', path => {
+    expect(router.resolve(path).name).toBe('V3NotFound')
   })
 
-  it('opens cloud sync directly from the settings route', async () => {
-    await router.push({ path: '/settings', query: { section: 'cloud' } })
-
-    expect(router.currentRoute.value.name).toBe('Settings')
-    expect(router.currentRoute.value.query.section).toBe('cloud')
+  it('contains no retired route records or nested workspace shell', () => {
+    const routes = router.getRoutes()
+    expect(routes.every(route => !route.path.startsWith('/workspace') && !route.path.startsWith('/legacy'))).toBe(true)
+    expect(routes.every(route => route.meta.shell === 'v3')).toBe(true)
   })
 })

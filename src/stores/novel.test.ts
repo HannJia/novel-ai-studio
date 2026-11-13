@@ -172,11 +172,11 @@ describe('novel store data panel integration', () => {
   vi.spyOn(storyAggregate, 'saveStoryAggregate').mockResolvedValue()
 
     const target = await store.addCharacter(book.id, { name: '乙' })!
-    const relation = { targetId: target.id, targetName: target.name, relation: '同事' }
+    const relation = { targetId: target.id, targetName: target.name, relation: '同事', dimension: 'allegiance' }
     const source = await store.addCharacter(book.id, { name: '甲', relationships: [relation] })!
     await expect(store.addCharacter(book.id, { name: '甲', relationships: [relation, { ...relation, relation: '合伙人' }] })).rejects.toThrow()
     expect(source.relationships).toEqual([relation])
-    await store.updateCharacter(book.id, source.id, { relationships: [relation, { ...relation, relation: '合伙人' }] })
+    await store.updateCharacter(book.id, source.id, { relationships: [relation, { ...relation, relation: '合伙人', dimension: 'hierarchy' }] })
     expect(source.relationships.map(item => item.relation)).toEqual(['同事', '合伙人'])
     expect(book.characters).toHaveLength(2)
   })

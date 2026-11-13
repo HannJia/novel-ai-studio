@@ -22,7 +22,7 @@ export function assertRepeatedCharacterMemoryDecision(record: CanonMutationRecor
 export const relationshipDimensionOptions = [
   { value: 'kinship', label: '亲属' }, { value: 'trust', label: '信任' },
   { value: 'intimacy', label: '亲密' }, { value: 'allegiance', label: '阵营' },
-  { value: 'hierarchy', label: '上下级' }, { value: 'unclassified', label: '未分类历史' },
+  { value: 'hierarchy', label: '上下级' }, { value: 'unclassified', label: '待分类' },
 ]
 export function relationshipDimension(value: unknown): string {
   return typeof value === 'string' && value.trim() ? value.trim() : 'unclassified'
@@ -34,7 +34,7 @@ export function relationshipDimensionLabel(value: unknown): string {
 export function assertRelationshipDimension(value: unknown): string {
   if (typeof value !== 'string' || !value.trim() || value.length > 160
     || (!relationshipDimensionOptions.some(option => option.value === value) && !/^custom:[^\s].{0,120}$/u.test(value))) {
-    throw new Error('请选择关系维度；选择自定义时请填写名称。旧关系保留为未分类，不从描述猜测。')
+    throw new Error('请选择关系维度；选择自定义时请填写名称。')
   }
   return value.trim()
 }
@@ -42,7 +42,8 @@ export function relationshipIdentity(source: string, target: string, dimension?:
   return JSON.stringify([source, target, relationshipDimension(dimension)])
 }
 export function propositionOf(edge: MemoryKnowledgeEdge): StoryProposition {
-  return edge.proposition || { version: 1, id: edge.factId, text: edge.fact, scope: '旧命题范围未确认', identityStatus: 'legacy' }
+  if (!edge.proposition) throw new Error('人物记忆缺少 V3 命题身份，已停止投影。')
+  return edge.proposition
 }
 export function propositionSignature(entry: Omit<PropositionCatalogEntry, 'signature'>): string {
   const p = entry.proposition

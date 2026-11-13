@@ -31,21 +31,6 @@ function timestamp(input: AutonomousRunExecutorInput): string {
   return input.now ? input.now() : new Date().toISOString()
 }
 
-function restoreLegacyIncompleteDraft(run: AiRun): AiRun {
-  const finishReason = run.error?.match(/^生成输出未正常完成（([^）]+)）/)?.[1]
-  const chapterIndex = run.checkpoint?.match(/^chapter-(\d+):needs-author$/)?.[1]
-  if (!finishReason || chapterIndex === undefined) return run
-  const target = run.chapterDrafts?.find(draft => draft.chapterIndex === Number(chapterIndex)
-    && draft.status === 'pending' && draft.stage === 'generated' && !draft.generationFinishReason)
-  if (!target) return run
-  return {
-    ...run,
-    chapterDrafts: run.chapterDrafts!.map(draft => draft.id === target.id
-      ? { ...draft, generationFinishReason: finishReason }
-      : draft),
-  }
-}
-
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError'
     || error instanceof Error && error.name === 'AbortError'
@@ -89,7 +74,7 @@ async function executeRun(input: AutonomousRunExecutorInput): Promise<AiRun> {
     throw new Error('自动运行必须指定章节范围')
   }
   const wasPaused = ['paused', 'needs_author', 'failed'].includes(input.run.status)
-  let run = startAiRun(restoreLegacyIncompleteDraft(input.run), timestamp(input))
+  let run = startAiRun(input.run, timestamp(input))
   await input.persist(run)
   let budgetStop: string | undefined
   let ledgerTail: Promise<unknown> = Promise.resolve()

@@ -13,7 +13,7 @@ beforeEach(() => {
     removeItem: (key: string) => memory.delete(key),
   })
 })
-const key = 'novel-writer-sqlite-db'
+const key = 'mojian-v3-sqlite-db'
 
 describe('database recovery without destructive fallback', () => {
   it('recovers an IndexedDB database from its backup without falling back to stale localStorage', async () => {

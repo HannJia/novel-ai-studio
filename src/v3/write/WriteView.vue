@@ -132,7 +132,7 @@
       </section>
     </main>
 
-    <aside v-if="deskOpen && !focused" class="write-side desk-side" aria-label="案头">
+    <aside v-show="deskOpen && !focused" class="write-side desk-side" aria-label="案头">
       <div class="desk-tabs" role="tablist" aria-label="案头">
         <button v-for="tab in tabs" :key="tab.id" type="button" :class="{ on: activeTab === tab.id }" @click="activeTab = tab.id">{{ tab.label }}<b v-if="tab.count">{{ tab.count }}</b></button>
       </div>
@@ -162,7 +162,7 @@
         <article v-for="finding in visibleFindings" :key="finding.id" class="finding" :class="[finding.status, finding.severity, { on: selectedFindingId === finding.id, foreshadowing: finding.type === 'foreshadowing' }]" @click="onMarkClick('f:' + finding.id)">
           <div class="finding-head"><span class="m-tag" :class="findingTagClass(finding.severity)">{{ severityLabel[finding.severity] }}</span><span class="finding-type">{{ findingTypeLabel[finding.type] }}</span><span class="finding-loc m-num">{{ findingAnchor(finding) ? `字 ${findingAnchor(finding)!.start}` : '本章' }}</span></div>
           <strong class="finding-title">{{ finding.title }}</strong>
-          <small v-if="!isCurrentFinding(finding)" class="m-muted">旧版参考 · 需要重新审校</small>
+          <small v-if="!isCurrentFinding(finding)" class="m-muted">此前正文参考 · 需要重新审校</small>
           <p v-if="findingEvidence(finding)" class="finding-quote">“{{ findingEvidence(finding) }}”</p>
           <div v-if="selectedFindingId === finding.id" class="finding-detail">
             <p>{{ finding.explanation }}</p>
@@ -220,16 +220,13 @@
         <div class="context-isolation"><V3Icon name="lock" size="s" /><span>未来信息隔离：这里不投影后续章节认知。计划中的揭示不等于人物已经知道。</span></div>
       </section>
 
-      <section v-else-if="activeTab === 'chat'" class="desk-panel">
+      <section v-if="chatMounted" v-show="activeTab === 'chat'" class="desk-panel">
         <div class="panel-title"><strong>问 AI</strong></div>
-        <div ref="chatHost" class="chat-host"><AiChatAssistant v-if="session.novel.value" :novel-id="session.novel.value.id" :chapter-id="session.chapter.value?.id" :host="chatHost" :prefill="chatPrefill" :prefill-version="chatPrefillVersion" /></div>
+        <div class="chat-host"><BookChat v-if="session.novel.value" :novel-id="session.novel.value.id" :chapter-id="session.chapter.value?.id" :prefill="chatPrefill" :prefill-version="chatPrefillVersion" /></div>
       </section>
 
-      <section v-else class="desk-panel">
+      <section v-if="activeTab === 'advisor'" class="desk-panel">
         <WritingAdvisorSidebar
-          :open="advisor.open.value"
-          persistent
-          embedded
           :analyzing="advisor.analyzing.value"
           :error="advisorError"
           :stale="advisor.stale.value"
@@ -277,15 +274,15 @@ import { useRoute, useRouter } from 'vue-router'
 import V3Icon from '../components/V3Icon.vue'
 import PlainTextEditor, { type SelectionInfo } from '../editor/PlainTextEditor.vue'
 import CharacterAvatar from '@/components/CharacterAvatar.vue'
-import AiChatAssistant from '@/components/AiChatAssistant.vue'
+import BookChat from '@/v3/write/BookChat.vue'
 import EditorRecoveryPicker from '@/components/EditorRecoveryPicker.vue'
-import WritingAdvisorSidebar from '@/components/chapter-editor/WritingAdvisorSidebar.vue'
+import WritingAdvisorSidebar from '@/v3/write/WritingAdvisorPanel.vue'
 import { useChapterSession } from './useChapterSession'
 import { chapterHeading, chapterTitleForDisplay } from './chapterNumber'
 import ChapterTimePanel from './ChapterTimePanel.vue'
 import { deriveDeskReview } from '../selectors/reviewDesk'
 import { candidatePreview } from '../selectors/candidatePreview'
-import StoryCandidateEditor from '@/components/chapter-editor/StoryCandidateEditor.vue'
+import StoryCandidateEditor from '@/v3/write/StoryCandidateEditor.vue'
 import EventCausalityPanel from '@/components/EventCausalityPanel.vue'
 import type { CharacterMemoryAuthorDecision } from '@/types/characterMemory'
 import { useChapterAi } from './useChapterAi'
@@ -338,11 +335,12 @@ const sealVisible = ref(false)
 let completionTrigger: HTMLElement | null = null
 let sealTimer: ReturnType<typeof setTimeout> | undefined
 const activeTab = ref<'review' | 'candidate' | 'memory' | 'chat' | 'advisor'>('review')
+watch(activeTab, tab => { if (tab === 'chat') chatMounted.value = true })
 const decisionBusy = ref(false)
 const editingCandidate = ref<CandidateChange>()
 const editingDecisionVersion = ref('')
 const causalityCandidateId = ref('')
-const chatHost = ref<HTMLElement | null>(null)
+const chatMounted = ref(false)
 const selection = ref({ start: 0, end: 0, text: '' })
 const chatPrefill = ref('')
 const chatPrefillVersion = ref(0)
@@ -755,7 +753,10 @@ async function acceptRevision() {
   if (!revision.value?.current || locked.value) return
   await runDecision(async () => {
     if (!session.saved.value && !await session.saveNow()) return
-    if (await session.acceptRevision()) { selection.value = { start: 0, end: 0, text: '' }; selectionRect.value = null }
+    if (await session.acceptRevision()) {
+      selection.value = { start: 0, end: 0, text: '' }; selectionRect.value = null
+      ai.statusText.value = '修订已采纳，请重新审校。'
+    }
   })
 }
 async function rejectRevision() { await runDecision(() => session.rejectRevision()) }
@@ -885,7 +886,7 @@ onBeforeUnmount(() => {
 .background-task { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; padding: 5px 0; border-top: 1px solid var(--line); }
 .background-task small { grid-column: 1 / -1; color: var(--zhu); line-height: 1.5; }
 .banned-report pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 11px; line-height: 1.6; }
-.gate-list { padding: 8px 16px; }.gate-row { display: grid; grid-template-columns: 9px 1fr auto; gap: 7px; align-items: baseline; padding: 9px 0; border-bottom: 1px dashed var(--line); font-size: 12px; }.gate-row i { width: 8px; height: 8px; border-radius: 50%; background: var(--line-2); }.gate-row i.ok { background: var(--qing); }.gate-row i.block { background: var(--zhu); }.gate-row i.todo { background: var(--gold); }.gate-row small { color: var(--ink-4); text-align: right; }.time-box { margin: 10px 16px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; }.time-box p { margin: 7px 0; color: var(--ink-3); line-height: 1.6; }.time-form { display: flex; gap: 7px; }.time-form input { width: 90px; border: 1px solid var(--line-2); border-radius: 5px; padding: 5px 7px; background: var(--paper); color: var(--ink); }.revision-note { margin: 10px 16px; padding: 10px; background: var(--zhu-soft); color: var(--ink-2); font-size: 12px; line-height: 1.6; }
+.gate-list { padding: 8px 16px; }.gate-row { display: grid; grid-template-columns: 9px 1fr auto; gap: 7px; align-items: baseline; padding: 9px 0; border-bottom: 1px dashed var(--line); font-size: 12px; }.gate-row i { width: 8px; height: 8px; border-radius: 50%; background: var(--line-2); }.gate-row i.ok { background: var(--qing); }.gate-row i.block { background: var(--zhu); }.gate-row i.todo { background: var(--jin); }.gate-row small { color: var(--ink-4); text-align: right; }.time-box { margin: 10px 16px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; }.time-box p { margin: 7px 0; color: var(--ink-3); line-height: 1.6; }.time-form { display: flex; gap: 7px; }.time-form input { width: 90px; border: 1px solid var(--line-2); border-radius: 5px; padding: 5px 7px; background: var(--paper); color: var(--ink); }.revision-note { margin: 10px 16px; padding: 10px; background: var(--zhu-soft); color: var(--ink-2); font-size: 12px; line-height: 1.6; }
 .desk-tabs { gap: 2px; padding: 10px 12px 0; background: var(--panel); }
 .desk-tabs button { height: 34px; padding: 0 10px; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-bottom-width: 2px; margin-bottom: -1px; }
 .desk-tabs button.on { font-weight: 600; }

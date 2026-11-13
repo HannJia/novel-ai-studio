@@ -1,5 +1,5 @@
 import { execute, initDb, queryAll, runTransaction } from '../database'
-import { LEGACY_INSPIRATION_KEY, latestInspirationSessions, parseInspirationSession, type InspirationSession } from '../inspirationSessions'
+import { latestInspirationSessions, parseInspirationSession, type InspirationSession } from '../inspirationSessions'
 import { usesProjectKernel, readKernelBackup, mutateProjectLibrary } from '../projectKernelClient'
 
 export function writeInspirationSessions(sessions: InspirationSession[]) {
@@ -10,18 +10,6 @@ export function writeInspirationSessions(sessions: InspirationSession[]) {
 export async function loadInspirationSessions(): Promise<InspirationSession[]> {
   if (usesProjectKernel()) return (await readKernelBackup()).inspirationSessions
   await initDb()
-  if (!queryAll("SELECT id FROM local_migrations WHERE id='inspiration-sessions'").length) {
-    const raw = localStorage.getItem(LEGACY_INSPIRATION_KEY)
-    const parsed: unknown = JSON.parse(raw || '[]')
-    if (!Array.isArray(parsed)) throw new Error('旧灵感会话无法读取，原记录已保留。')
-    const existing = queryAll<{ value: string }>('SELECT value FROM inspiration_sessions').map(row => parseInspirationSession(JSON.parse(row.value)))
-    const sessions = new Map(parsed.map(value => { const item = parseInspirationSession(value); return [item.id, item] }))
-    for (const item of existing) sessions.set(item.id, item)
-    await runTransaction(() => {
-      writeInspirationSessions(latestInspirationSessions([...sessions.values()]))
-      execute("INSERT INTO local_migrations(id) VALUES('inspiration-sessions')")
-    }, { restoreOnWriteFailure: true })
-  }
   return latestInspirationSessions(queryAll<{ value: string }>('SELECT value FROM inspiration_sessions').map(row => parseInspirationSession(JSON.parse(row.value))))
 }
 export async function saveInspirationSessions(sessions: InspirationSession[]) {
