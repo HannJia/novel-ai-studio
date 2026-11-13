@@ -1,4 +1,7 @@
 <template>
+  <Teleport v-if="route.meta?.shell === 'v3'" defer to="#v3-crumb">
+    <router-link class="crumb-link" to="/">书架</router-link><span class="crumb-sep">/</span><span class="crumb-b">{{ selectedKB?.name || '资料库' }}</span>
+  </Teleport>
   <div class="kb-page page-container fade-in" id="knowledge-base">
     <div class="kb-header">
       <div>
@@ -42,6 +45,7 @@
           <h3>{{ kb.name }}</h3>
           <p>{{ kb.description || '暂无描述' }}</p>
           <p v-if="kb.summary" class="kb-summary-preview">摘要：{{ kb.summary.slice(0, 180) }}{{ kb.summary.length > 180 ? '...' : '' }}</p>
+          <span v-if="kb.summary" class="summary-status kb-summary-status" :class="`summary-status-${getBaseSummaryStatus(kb)}`">摘要：{{ summaryStatusLabel(getBaseSummaryStatus(kb)) }}</span>
           <span class="kb-card-meta">{{ kb.entries.length }} 条目 · {{ kbActivityTime(kb) ? formatDate(new Date(kbActivityTime(kb)).toISOString()) : '暂无编辑记录' }}{{ hasNovelContext && isBound(kb.id) ? ' · 本书已挂载' : '' }}</span>
         </div>
         <div class="kb-card-actions">
@@ -70,7 +74,7 @@
         <n-button size="small" text @click="selectedKBId = ''">←  返回列表</n-button>
         <div class="detail-actions">
           <n-button size="small" tertiary @click="showImportModal = true">导入</n-button>
-          <n-button size="small" tertiary :loading="summarizingKB" @click="summarizeSelectedKB">整理摘要</n-button>
+          <n-button size="small" tertiary :loading="summarizingKB" :disabled="baseSummaryBusy" @click="summarizeSelectedKB">整理摘要</n-button>
           <n-button size="small" type="primary" @click="openAddEntry">
             <template #icon><span style="font-size:16px">+</span></template>
             添加条目
@@ -79,16 +83,59 @@
       </div>
 
       <section class="kb-summary-panel paper-panel">
+        <div class="summary-budget">
+          <label>本次请求上限<n-input-number v-model:value="summaryBudget.requests" :min="1" :max="4096" :precision="0" :disabled="anySummaryRunning" aria-label="摘要请求上限" /></label>
+          <label>本次 token 额度<n-input-number v-model:value="summaryBudget.tokens" :min="1" :max="50000000" :precision="0" :disabled="anySummaryRunning" aria-label="摘要 token 额度" /></label>
+          <span>生成前检查完整处理额度；接口未报告用量时保守计入。导入批次共享此额度。</span>
+          <n-button v-if="importSummaryRunning" size="small" @click="cancelSummary('import')">取消导入摘要</n-button>
+        </div>
         <div class="kb-summary-toolbar">
           <div>
             <h4>知识库摘要</h4>
             <p>摘要在书架层面维护，挂载到小说后 AI 优先读取摘要，再按问题读取相关条目。</p>
           </div>
-          <n-select v-model:value="summaryLevel" :options="summaryLevelOptions" size="small" style="width:120px;" />
+          <n-select v-model:value="summaryLevel" :options="summaryLevelOptions" size="small" style="width:120px;" :disabled="baseSummaryBusy" />
         </div>
-        <p v-if="selectedKB?.summary" class="kb-summary-content">{{ selectedKB.summary }}</p>
-        <p v-else class="empty-hint">还没有摘要，点击“整理摘要”生成。</p>
+        <div class="summary-status-row">
+          <span class="summary-status" :class="`summary-status-${selectedKB ? getBaseSummaryStatus(selectedKB) : 'empty'}`">
+            摘要状态：{{ selectedKB ? summaryStatusLabel(getBaseSummaryStatus(selectedKB)) : '空' }}
+          </span>
+          <span class="summary-status-hint">{{ selectedKB ? summaryStatusHint(getBaseSummaryStatus(selectedKB)) : '' }}</span>
+        </div>
+        <n-input
+          v-model:value="baseSummaryDraft"
+          type="textarea"
+          :rows="5"
+          aria-label="知识库摘要"
+          placeholder="可手工填写摘要；保存后会以作者核对结果沿用。"
+          :disabled="baseSummaryBusy"
+          @focus="beginBaseSummaryEdit"
+          @update:value="markBaseSummaryDirty"
+        />
+        <p class="summary-scope-hint">{{ basePlanHint }}</p>
+        <p v-if="selectedKB?.summarySource?.coverage" class="summary-coverage">{{ coverageText(selectedKB.summarySource) }}</p>
+        <div v-if="summaryProgress[baseJobKey]" class="summary-run-status" role="status">
+          {{ progressText(summaryProgress[baseJobKey]) }}
+          <n-button v-if="summarizingKB && ['extract', 'merge'].includes(summaryProgress[baseJobKey].phase)" size="small" @click="cancelSummary(baseJobKey)">取消整库整理</n-button>
+        </div>
+        <p v-if="baseSummaryError" class="summary-error" role="alert">
+          {{ baseSummaryError }}
+          <button type="button" @click="reloadBaseSummaryDraft">重新载入当前来源</button>
+          <button v-if="baseSummaryErrorKind === 'ai'" type="button" @click="summarizeSelectedKB">重新整理</button>
+        </p>
+        <div class="summary-actions">
+          <n-button size="small" :disabled="baseSummaryBusy || !baseSummaryDraft.trim()" @click="saveBaseSummaryDraft">
+            {{ selectedKB?.summary ? '作者核对并沿用' : '保存并核对' }}
+          </n-button>
+        </div>
         <span v-if="selectedKB?.summaryUpdatedAt" class="kb-summary-time">上次整理：{{ formatDateTime(selectedKB.summaryUpdatedAt) }}</span>
+        <div v-if="selectedKB?.summaryHistory?.length" class="summary-history">
+          <strong>摘要历史（最近 {{ selectedKB.summaryHistory.length }} 条）</strong>
+          <article v-for="history in selectedKB.summaryHistory" :key="history.id" class="summary-history-item">
+            <div>{{ formatDateTime(history.savedAt) }} · {{ history.summarySource?.origin === 'ai' ? 'AI' : history.summarySource?.origin === 'author' ? '作者' : '未记录来源' }}{{ history.summaryLevel ? ` · ${summaryLevelLabel(history.summaryLevel)}` : '' }}</div>
+            <p>{{ history.summary }}</p>
+          </article>
+        </div>
       </section>
 
       <div class="kb-browser">
@@ -135,6 +182,7 @@
               <div class="entry-header">
                 <h4>{{ entry.title }}</h4>
                 <span class="entry-cat">{{ categoryLabel(entry.category) }}</span>
+                <span class="summary-status entry-summary-status" :class="`summary-status-${getEntrySummaryStatus(selectedKBId, entry)}`">摘要：{{ summaryStatusLabel(getEntrySummaryStatus(selectedKBId, entry)) }}</span>
               </div>
               <p class="entry-preview">{{ entry.content.substring(0, 120) }}{{ entry.content.length > 120 ? '...' : '' }}</p>
               <div class="entry-footer">
@@ -160,6 +208,49 @@
             </div>
           </div>
           <div class="entry-detail-content" v-html="renderMd(selectedEntry.content)"></div>
+          <section class="entry-summary-editor">
+            <div class="entry-summary-heading">
+              <h4>条目摘要</h4>
+              <span class="summary-status" :class="`summary-status-${getEntrySummaryStatus(selectedKBId, selectedEntry)}`">
+                {{ summaryStatusLabel(getEntrySummaryStatus(selectedKBId, selectedEntry)) }}
+              </span>
+            </div>
+            <p class="summary-status-hint">{{ summaryStatusHint(getEntrySummaryStatus(selectedKBId, selectedEntry)) }} 原文始终保留。</p>
+            <n-input
+              v-model:value="entrySummaryDraft"
+              type="textarea"
+              :rows="5"
+              aria-label="条目摘要"
+              placeholder="可手工填写摘要；保存后会以作者核对结果沿用。"
+              :disabled="entrySummaryBusy(selectedEntry.id)"
+              @focus="beginEntrySummaryEdit(selectedEntry.id)"
+              @update:value="markEntrySummaryDirty"
+            />
+            <p class="summary-scope-hint">{{ entryPlanHint }}</p>
+            <p v-if="selectedEntry.summarySource?.coverage" class="summary-coverage">{{ coverageText(selectedEntry.summarySource) }}</p>
+            <div v-if="summaryProgress[entryJobKey]" class="summary-run-status" role="status">
+              {{ progressText(summaryProgress[entryJobKey]) }}
+              <n-button v-if="summarizingEntryIds.has(selectedEntry.id) && ['extract', 'merge'].includes(summaryProgress[entryJobKey].phase)" size="small" @click="cancelSummary(entryJobKey)">取消条目整理</n-button>
+            </div>
+            <p v-if="entrySummaryErrors[entrySummaryErrorKey(selectedKBId, selectedEntry.id)]" class="summary-error" role="alert">
+              {{ entrySummaryErrors[entrySummaryErrorKey(selectedKBId, selectedEntry.id)] }}
+              <button type="button" @click="reloadEntrySummaryDraft(selectedEntry.id)">重新载入当前来源</button>
+              <button v-if="entrySummaryErrorKinds[entrySummaryErrorKey(selectedKBId, selectedEntry.id)] === 'ai'" type="button" @click="retryEntrySummary(selectedEntry.id)">重新整理</button>
+            </p>
+            <div class="summary-actions">
+              <n-button size="small" :disabled="entrySummaryBusy(selectedEntry.id) || !entrySummaryDraft.trim()" @click="saveEntrySummaryDraft(selectedEntry.id)">
+                {{ selectedEntry.summary ? '作者核对并沿用' : '保存并核对' }}
+              </n-button>
+              <n-button size="small" tertiary :loading="entrySummaryBusy(selectedEntry.id)" :disabled="entrySummaryBusy(selectedEntry.id)" @click="retryEntrySummary(selectedEntry.id)">重新整理摘要</n-button>
+            </div>
+            <div v-if="selectedEntry.summaryHistory?.length" class="summary-history">
+              <strong>摘要历史（最近 {{ selectedEntry.summaryHistory.length }} 条）</strong>
+              <article v-for="history in selectedEntry.summaryHistory" :key="history.id" class="summary-history-item">
+                <div>{{ formatDateTime(history.savedAt) }} · {{ history.summarySource?.origin === 'ai' ? 'AI' : history.summarySource?.origin === 'author' ? '作者' : '未记录来源' }}{{ history.summaryLevel ? ` · ${summaryLevelLabel(history.summaryLevel)}` : '' }}</div>
+                <p>{{ history.summary }}</p>
+              </article>
+            </div>
+          </section>
           <div class="entry-detail-meta">
             <div v-if="selectedEntry.tags.length" class="entry-detail-tags">
               <span v-for="t in selectedEntry.tags" :key="t" class="tag-chip">{{ t }}</span>
@@ -188,20 +279,29 @@
     </n-modal>
 
     <!-- 添加/编辑条目弹窗 -->
-    <n-modal v-model:show="showEntryModal" preset="card" :title="editingEntryId ? '编辑条目' : '添加条目'" style="max-width:550px;">
+    <n-modal
+      :show="showEntryModal"
+      preset="card"
+      :title="editingEntryId ? '编辑条目' : '添加条目'"
+      :closable="!entryFormBusy"
+      :mask-closable="!entryFormBusy"
+      :close-on-esc="!entryFormBusy"
+      style="max-width:550px;"
+      @update:show="setEntryModalShow"
+    >
       <div class="form-group">
         <label>标题</label>
-        <n-input v-model:value="entryForm.title" size="small" placeholder="条目标题" />
+        <n-input v-model:value="entryForm.title" size="small" placeholder="条目标题" :disabled="entryFormBusy" />
         <label>分类</label>
-        <n-select v-model:value="entryForm.category" :options="categoryOptions" size="small" />
+        <n-select v-model:value="entryForm.category" :options="categoryOptions" size="small" :disabled="entryFormBusy" />
         <label>内容</label>
-        <n-input v-model:value="entryForm.content" type="textarea" :rows="8" size="small" placeholder="条目内容（支持 Markdown）" />
+        <n-input v-model:value="entryForm.content" type="textarea" :rows="8" size="small" placeholder="条目内容（支持 Markdown）" :disabled="entryFormBusy" />
         <label>标签（逗号分隔）</label>
-        <n-input v-model:value="entryForm.tagsText" size="small" placeholder="如：剑法,武技" />
+        <n-input v-model:value="entryForm.tagsText" size="small" placeholder="如：剑法,武技" :disabled="entryFormBusy" />
       </div>
       <template #action>
-        <n-button @click="showEntryModal = false">取消</n-button>
-        <n-button type="primary" :disabled="!entryForm.title.trim()" @click="saveEntry">保存</n-button>
+        <n-button :disabled="entryFormBusy" @click="setEntryModalShow(false)">取消</n-button>
+        <n-button type="primary" :loading="entryFormBusy" :disabled="entryFormBusy || !entryForm.title.trim()" @click="saveEntry">保存</n-button>
       </template>
     </n-modal>
 
@@ -210,16 +310,23 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NInput, NSelect, NModal, NPopconfirm, useMessage } from 'naive-ui'
-import { useKnowledgeStore, kbCategories, type KBEntry, type KnowledgeBase } from '@/stores/knowledge'
+import { NButton, NInput, NInputNumber, NSelect, NModal, NPopconfirm, useMessage } from 'naive-ui'
+import { useKnowledgeStore, kbCategories, knowledgeSummaryEditVersion, type KBEntry, type KnowledgeBase } from '@/stores/knowledge'
 import { useNovelStore } from '@/stores/novel'
 import { useConfigStore } from '@/stores/config'
-import { callAI } from '@/services/ai'
+import { createKnowledgeSummaryBudget, planKnowledgeSummary, generateKnowledgeSummary, estimateKnowledgeSummaryTokens, DEFAULT_SUMMARY_REQUESTS, DEFAULT_SUMMARY_TOKENS, type KnowledgeSummaryBudget, type KnowledgeSummaryProgress } from '@/services/knowledgeSummary'
+import type { KnowledgeSummarySource } from '@/types/knowledge'
 import KnowledgeImportDialog from '@/components/KnowledgeImportDialog.vue'
-import { parseAiJsonObject } from '@/utils/aiJson'
 import { renderMd } from '@/utils/markdown'
+import {
+  baseSourceVersion,
+  entrySourceVersion,
+  getBaseSummaryStatus,
+  getEntrySummaryStatus,
+  type KnowledgeSummaryStatus,
+} from '@/services/knowledgeSources'
 
 const route = useRoute()
 const router = useRouter()
@@ -281,13 +388,85 @@ const createForm = ref({ name: '', description: '' })
 const entryForm = ref({ title: '', category: '其他', content: '', tagsText: '' })
 const summarizingEntryIds = ref(new Set<string>())
 const summarizingKB = ref(false)
+const entrySummarySavingIds = ref(new Set<string>())
+const baseSummarySaving = ref(false)
+const entryFormBusy = ref(false)
+const baseSummaryDraft = ref('')
+const entrySummaryDraft = ref('')
+const entrySummaryErrors = ref<Record<string, string>>({})
+const entrySummaryErrorKinds = ref<Record<string, 'save' | 'ai'>>({})
+const baseSummaryError = ref('')
+const baseSummaryErrorKind = ref<'save' | 'ai' | ''>('')
+type SummaryEditBaseline = { targetId: string; sourceVersion: string; summaryVersion: string }
+const entrySummaryBaseline = ref<SummaryEditBaseline | null>(null)
+const baseSummaryBaseline = ref<SummaryEditBaseline | null>(null)
+const entrySummaryDraftDirty = ref(false)
+const baseSummaryDraftDirty = ref(false)
+const entryEditorSession = ref(0)
+const baseEditorSession = ref(0)
 const summaryLevel = ref<NonNullable<KnowledgeBase['summaryLevel']>>('standard')
 const summaryLevelOptions = [
   { label: '简略', value: 'brief' },
   { label: '标准', value: 'standard' },
   { label: '详细', value: 'detailed' },
 ]
-const validCategories = new Set(kbCategories.map(item => item.value))
+const baseSummaryBusy = computed(() => summarizingKB.value || baseSummarySaving.value)
+const summaryBudget = ref({ requests: DEFAULT_SUMMARY_REQUESTS, tokens: DEFAULT_SUMMARY_TOKENS })
+const summaryProgress = ref<Record<string, KnowledgeSummaryProgress>>({})
+const summaryControllers = new Map<string, AbortController>()
+const importSummaryRunning = ref(false)
+const anySummaryRunning = computed(() => summarizingKB.value || summarizingEntryIds.value.size > 0 || importSummaryRunning.value)
+const entryJobKey = computed(() => 'entry:' + entrySummaryErrorKey(selectedKBId.value, selectedEntryId.value))
+const baseJobKey = computed(() => 'base:' + selectedKBId.value)
+function cancelSummary(key: string) { summaryControllers.get(key)?.abort(new Error('作者已取消摘要整理')) }
+onBeforeUnmount(() => { for (const controller of summaryControllers.values()) controller.abort(new Error('已离开资料页，摘要整理停止')) })
+
+function planHint(entryId?: string) {
+  const kb = selectedKB.value
+  if (!kb) return ''
+  try {
+    const plan = planKnowledgeSummary(kb, entryId, entryId ? 'standard' : summaryLevel.value)
+    const chars = plan.chunks.reduce((sum, chunk) => sum + chunk.end - chunk.start, 0)
+    const model = configStore.getModelForTask('review')
+    const tokens = model ? estimateKnowledgeSummaryTokens(plan, model, configStore.getSkillPrompt('analysis')) : undefined
+    return '全文分批读取：' + chars + ' 字，' + plan.chunks.length + ' 段，预计 ' + plan.plannedRequests + ' 次请求'
+      + (tokens === undefined ? '；配置模型后可估算 token 额度。' : '，保守额度 ' + tokens.toLocaleString() + ' token。')
+      + ' 摘要仍可能遗漏细节，原文保留供检索核对。'
+  } catch (error) { return error instanceof Error ? error.message : '资料暂不能整理' }
+}
+const basePlanHint = computed(() => planHint())
+const entryPlanHint = computed(() => selectedEntry.value ? planHint(selectedEntry.value.id) : '')
+function progressText(progress: KnowledgeSummaryProgress) {
+  const phase = { extract: '分段提取', merge: '逐层合并', complete: '处理完成', failed: '已停止', cancelled: '已取消' }[progress.phase]
+  return phase + ' · 已读 ' + progress.completedChunks + '/' + progress.totalChunks + ' 段 · 请求 ' + progress.completedRequests + '/' + progress.plannedRequests
+    + ' · ' + (progress.usageEstimated ? '保守计入 ' : '接口报告 ') + (progress.inputTokens + progress.outputTokens).toLocaleString() + ' token'
+}
+function coverageText(source?: KnowledgeSummarySource) {
+  const coverage = source?.coverage
+  return coverage ? '上次生成完整读取 ' + coverage.sources.length + ' 个条目、' + coverage.leafCount + ' 段原文，使用 ' + coverage.requestCount + ' 次请求；'
+    + (coverage.usageEstimated ? '保守计入 ' : '接口报告 ') + (coverage.inputTokens + coverage.outputTokens).toLocaleString() + ' token。' : ''
+}
+
+function summaryStatusLabel(status: KnowledgeSummaryStatus) {
+  return ({ empty: '未填写', current: '当前', unverified: '待核对', stale: '来源已失效' } satisfies Record<KnowledgeSummaryStatus, string>)[status]
+}
+
+function entrySummaryErrorKey(kbId: string, entryId: string) {
+  return `${kbId}:${entryId}`
+}
+
+function summaryStatusHint(status: KnowledgeSummaryStatus) {
+  return ({
+    empty: '还没有摘要，可以手工填写或整理。',
+    current: '摘要对应当前资料，可继续沿用。',
+    unverified: '摘要存在，但还没有可验证的来源记录；作者核对后才会用于写作。',
+    stale: '资料已经修改，旧摘要保留供参考；作者核对或重新整理后才会重新用于写作。',
+  } satisfies Record<KnowledgeSummaryStatus, string>)[status]
+}
+
+function summaryLevelLabel(level: NonNullable<KnowledgeBase['summaryLevel']>) {
+  return summaryLevelOptions.find(option => option.value === level)?.label || level
+}
 
 const filteredEntries = computed(() => {
   if (!selectedKB.value) return []
@@ -309,6 +488,30 @@ function selectEntry(id: string) {
   selectedEntryId.value = id
 }
 
+watch(() => [selectedKBId.value, selectedEntry.value?.id], () => {
+  entryEditorSession.value++
+  const entry = selectedEntry.value
+  entrySummaryDraft.value = entry?.summary || ''
+  entrySummaryDraftDirty.value = false
+  entrySummaryBaseline.value = entry ? {
+    targetId: entry.id,
+    sourceVersion: entrySourceVersion(selectedKBId.value, entry),
+    summaryVersion: knowledgeSummaryEditVersion(entry),
+  } : null
+}, { immediate: true })
+
+watch(() => selectedKBId.value, () => {
+  baseEditorSession.value++
+  const kb = selectedKB.value
+  baseSummaryDraft.value = kb?.summary || ''
+  baseSummaryDraftDirty.value = false
+  baseSummaryBaseline.value = kb ? {
+    targetId: kb.id,
+    sourceVersion: baseSourceVersion(kb),
+    summaryVersion: knowledgeSummaryEditVersion(kb),
+  } : null
+}, { immediate: true })
+
 // Auto-select first visible entry when filters or KB change
 watch([filteredEntries, selectedKBId], ([entries, kbId]) => {
   if (!kbId) {
@@ -326,7 +529,47 @@ watch([filteredEntries, selectedKBId], ([entries, kbId]) => {
 
 function selectKB(id: string) {
   selectedKBId.value = id
-  summaryLevel.value = kbStore.getKB(id)?.summaryLevel || 'standard'
+  const kb = kbStore.getKB(id)
+  summaryLevel.value = kb?.summaryLevel || 'standard'
+  baseSummaryDraft.value = kb?.summary || ''
+  baseSummaryError.value = ''
+  baseSummaryErrorKind.value = ''
+}
+
+function beginEntrySummaryEdit(entryId: string) {
+  const entry = kbStore.getKB(selectedKBId.value)?.entries.find(item => item.id === entryId)
+  if (!entry) return
+  const draftShowsCurrentSummary = !entrySummaryDraftDirty.value
+    && entrySummaryDraft.value.trim() === (entry.summary || '').trim()
+  if (draftShowsCurrentSummary || !entrySummaryBaseline.value || entrySummaryBaseline.value.targetId !== entry.id) {
+    entrySummaryBaseline.value = {
+      targetId: entry.id,
+      sourceVersion: entrySourceVersion(selectedKBId.value, entry),
+      summaryVersion: knowledgeSummaryEditVersion(entry),
+    }
+  }
+}
+
+function markEntrySummaryDirty() {
+  entrySummaryDraftDirty.value = true
+}
+
+function beginBaseSummaryEdit() {
+  const kb = selectedKB.value
+  if (!kb) return
+  const draftShowsCurrentSummary = !baseSummaryDraftDirty.value
+    && baseSummaryDraft.value.trim() === (kb.summary || '').trim()
+  if (draftShowsCurrentSummary || !baseSummaryBaseline.value || baseSummaryBaseline.value.targetId !== kb.id) {
+    baseSummaryBaseline.value = {
+      targetId: kb.id,
+      sourceVersion: baseSourceVersion(kb),
+      summaryVersion: knowledgeSummaryEditVersion(kb),
+    }
+  }
+}
+
+function markBaseSummaryDirty() {
+  baseSummaryDraftDirty.value = true
 }
 
 // 分类栏计数，仅用于展示
@@ -377,27 +620,38 @@ function editEntry(entry: KBEntry) {
   showEntryModal.value = true
 }
 
-function saveEntry() {
+async function saveEntry() {
+  if (entryFormBusy.value) return
+  const kbId = selectedKBId.value
   const data = {
     title: entryForm.value.title.trim(),
     category: entryForm.value.category,
     content: entryForm.value.content,
-    summary: '',
     tags: entryForm.value.tagsText.split(/[,，、]/).map(s => s.trim()).filter(Boolean),
   }
-  if (editingEntryId.value) {
-    kbStore.updateEntry(selectedKBId.value, editingEntryId.value, data)
-    msg.success('条目已更新')
-    // 重新生成总结
-    autoSummarizeEntry(selectedKBId.value, editingEntryId.value, data.content)
-  } else {
-    const newEntry = kbStore.addEntry(selectedKBId.value, data)
-    msg.success('条目已添加')
-    if (newEntry) {
-      autoSummarizeEntry(selectedKBId.value, newEntry.id, data.content)
+  entryFormBusy.value = true
+  let saved = false
+  try {
+    let entryId = editingEntryId.value
+    if (entryId) {
+      kbStore.updateEntry(kbId, entryId, data)
+    } else {
+      const newEntry = kbStore.addEntry(kbId, { ...data, summary: '' })
+      entryId = newEntry?.id || ''
+      editingEntryId.value = entryId
     }
+    if (!entryId) throw new Error('资料已不存在')
+    await kbStore.flushPendingSaves()
+    msg.success('资料已保存；摘要可由作者核对或点击重新整理')
+    saved = Boolean(entryId)
+  } catch (error) {
+    msg.error((error instanceof Error ? error.message : '资料保存失败') + '，表单已保留')
+  } finally {
+    entryFormBusy.value = false
   }
-  showEntryModal.value = false
+  if (saved) {
+    setEntryModalShow(false)
+  }
 }
 
 function removeEntry(id: string) {
@@ -411,78 +665,99 @@ function removeEntry(id: string) {
 }
 
 async function afterImport(result: { kbId: string; entryIds: string[]; summarize: boolean }) {
-  msg.success(`已导入 ${result.entryIds.length} 个条目`)
+  msg.success('已导入 ' + result.entryIds.length + ' 个条目')
   if (!result.summarize) return
-  const pending = [...result.entryIds]
-  // Limit requests when a scanned document imports hundreds of pages.
-  await Promise.all([0, 1].map(async () => {
-    while (pending.length) {
-      const id = pending.shift()!
+  if (importSummaryRunning.value) { msg.warning('已有导入摘要任务，请稍后手动整理新资料'); return }
+  const controller = new AbortController()
+  summaryControllers.set('import', controller)
+  importSummaryRunning.value = true
+  let completed = 0
+  try {
+    const budget = createKnowledgeSummaryBudget(summaryBudget.value.requests, summaryBudget.value.tokens)
+    for (const id of result.entryIds) {
+      controller.signal.throwIfAborted()
       const entry = kbStore.getKB(result.kbId)?.entries.find(item => item.id === id)
-      if (entry && !entry.summary) await autoSummarizeEntry(result.kbId, id, entry.content)
+      if (!entry || !entry.content.trim()) continue
+      if (!await autoSummarizeEntry(result.kbId, id, true, { budget, controller })) {
+        msg.warning('本批摘要未全部完成，已保存 ' + completed + ' 个条目；剩余资料可稍后继续整理')
+        return
+      }
+      completed++
     }
-  }))
+    msg.success('本批摘要已保存 ' + completed + ' 个条目')
+  } catch (error) {
+    msg.warning((error instanceof Error ? error.message : '批次已停止') + '；已保存 ' + completed + ' 个条目')
+  } finally {
+    importSummaryRunning.value = false
+    summaryControllers.delete('import')
+  }
 }
 
 // AI 自动总结知识库条目
-async function autoSummarizeEntry(kbId: string, entryId: string, content: string) {
+async function autoSummarizeEntry(kbId: string, entryId: string, notifyUnavailable = false, batch?: { budget: KnowledgeSummaryBudget; controller: AbortController }): Promise<boolean> {
   const model = configStore.getModelForTask('review')
-  if (!model || content.length < 20) return
-  if (summarizingEntryIds.value.has(entryId)) return
+  const sourceKB = kbStore.getKB(kbId)
+  const sourceEntry = sourceKB?.entries.find(entry => entry.id === entryId)
+  if (!sourceEntry || !model || !sourceEntry.content.trim()) {
+    if (notifyUnavailable && !model) {
+      const message = '未配置可用模型，可以手工填写并核对摘要。'
+      const errorKey = entrySummaryErrorKey(kbId, entryId)
+      entrySummaryErrors.value = { ...entrySummaryErrors.value, [errorKey]: message }
+      entrySummaryErrorKinds.value = { ...entrySummaryErrorKinds.value, [errorKey]: 'ai' }
+      msg.warning(message)
+    }
+    return false
+  }
+  if (summarizingEntryIds.value.has(entryId)) return false
+  // Capture every request input before the first await. Later edits must make
+  // the versioned save reject this result instead of being overwritten.
+  const sourceSnapshot = JSON.parse(JSON.stringify(sourceEntry)) as KBEntry
+  const jobKey = 'entry:' + entrySummaryErrorKey(kbId, entryId)
+  const controller = batch?.controller || new AbortController()
+  summaryControllers.set(jobKey, controller)
+  const expectedSourceVersion = entrySourceVersion(kbId, sourceSnapshot)
+  const expectedSummaryVersion = knowledgeSummaryEditVersion(sourceSnapshot)
+  const editorSession = selectedKBId.value === kbId && selectedEntryId.value === entryId ? entryEditorSession.value : -1
   summarizingEntryIds.value = new Set(summarizingEntryIds.value).add(entryId)
+  const errorKey = entrySummaryErrorKey(kbId, entryId)
+  entrySummaryErrors.value = { ...entrySummaryErrors.value, [errorKey]: '' }
   try {
-    const parts: string[] = []
-    for (let start = 0; start < content.length; start += 6000) {
-      let part = ''
-      await callAI({
-        model,
-        skillTask: 'analysis',
-        messages: [
-          { role: 'system', content: '你是知识库整理专家。提取资料中的事实、时间、人物、地点、因果关系、规则和关键数字，去掉重复内容，不得编造。' },
-          { role: 'user', content: `这是长资料第 ${Math.floor(start / 6000) + 1} 段，请整理成可复用摘要：\n\n${content.slice(start, start + 6000)}` },
-        ],
-        stream: true,
-        onChunk: chunk => { part += chunk },
-      })
-      if (part.trim()) parts.push(part.trim())
+    const plan = planKnowledgeSummary(sourceKB!, entryId)
+    const result = await generateKnowledgeSummary(plan, {
+      model, budget: batch?.budget || createKnowledgeSummaryBudget(summaryBudget.value.requests, summaryBudget.value.tokens),
+      instructions: configStore.getSkillPrompt('analysis'), signal: controller.signal,
+      isCurrent: () => {
+        const current = kbStore.getKB(kbId)?.entries.find(item => item.id === entryId)
+        return Boolean(current && entrySourceVersion(kbId, current) === expectedSourceVersion && knowledgeSummaryEditVersion(current) === expectedSummaryVersion)
+      },
+      onProgress: progress => { summaryProgress.value = { ...summaryProgress.value, [jobKey]: progress } },
+    })
+    controller.signal.throwIfAborted()
+    await kbStore.saveEntrySummary(kbId, entryId, expectedSourceVersion, expectedSummaryVersion, result.summary, 'ai', result.coverage)
+    const committed = kbStore.getKB(kbId)?.entries.find(item => item.id === entryId)
+    if (editorSession >= 0 && selectedKBId.value === kbId && selectedEntryId.value === entryId
+      && entryEditorSession.value === editorSession && !entrySummaryDraftDirty.value && committed) {
+      entrySummaryDraft.value = committed.summary
+      entrySummaryBaseline.value = {
+        targetId: committed.id,
+        sourceVersion: entrySourceVersion(kbId, committed),
+        summaryVersion: knowledgeSummaryEditVersion(committed),
+      }
     }
-    if (!parts.length) return
-    let summary = parts.join('\n')
-    if (parts.length > 1) {
-      let consolidated = ''
-      await callAI({
-        model,
-        skillTask: 'analysis',
-        messages: [
-          { role: 'system', content: '你是知识库总编。合并分段摘要，去重并按主题整理，只保留资料中明确出现的事实。' },
-          { role: 'user', content: `请将以下分段摘要合并为一份统一摘要，控制在 6000 字以内：\n\n${summary.slice(0, 18000)}` },
-        ],
-        stream: true,
-        onChunk: chunk => { consolidated += chunk },
-      })
-      if (consolidated.trim()) summary = consolidated.trim()
-    }
-    let category = ''
-    try {
-      const result = await callAI({
-        model,
-        skillTask: 'analysis',
-        maxTokens: 120,
-        messages: [
-          { role: 'system', content: `你是知识库分类器。只输出 JSON：{"category":"分类"}。分类只能是：${kbCategories.map(item => item.value).join('、')}。` },
-          { role: 'user', content: `请根据标题和资料摘要选择最合适的一个分类：\n${summary.slice(0, 3500)}` },
-        ],
-      })
-      const parsed = parseAiJsonObject<{ category?: string }>(result.content)
-      if (parsed?.category && validCategories.has(parsed.category)) category = parsed.category
-    } catch {
-      // 分类失败不影响摘要保存
-    }
-    const current = kbStore.getKB(kbId)?.entries.find(entry => entry.id === entryId)
-    if (current?.content === content) kbStore.updateEntry(kbId, entryId, { summary: summary.slice(0, 12000), ...(category ? { category } : {}) })
-  } catch {
-    // 总结失败时静默处理，用户可手动重新触发
+    msg.success('条目摘要已更新')
+    return true
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '摘要整理失败'
+    const visibleMessage = /发生变化|重新核对|过期/.test(message)
+      ? '资料或摘要已在整理期间变化，迟到的 AI 结果已拒绝，请重新核对。'
+      : `${message}，可点击“重新整理摘要”重试。`
+    entrySummaryErrors.value = { ...entrySummaryErrors.value, [errorKey]: visibleMessage }
+    entrySummaryErrorKinds.value = { ...entrySummaryErrorKinds.value, [errorKey]: 'ai' }
+    if (summaryProgress.value[jobKey]) summaryProgress.value[jobKey].phase = controller.signal.aborted ? 'cancelled' : 'failed'
+    msg.error(visibleMessage)
+    return false
   } finally {
+    summaryControllers.delete(jobKey)
     const next = new Set(summarizingEntryIds.value)
     next.delete(entryId)
     summarizingEntryIds.value = next
@@ -492,40 +767,220 @@ async function autoSummarizeEntry(kbId: string, entryId: string, content: string
 async function summarizeSelectedKB() {
   const kb = selectedKB.value
   const model = configStore.getModelForTask('review')
-  if (!kb || !model || summarizingKB.value) return
+  if (!kb || summarizingKB.value) return
+  if (!model) {
+    baseSummaryError.value = '未配置可用模型，可以手工填写并核对摘要。'
+    baseSummaryErrorKind.value = 'ai'
+    msg.warning(baseSummaryError.value)
+    return
+  }
   if (!kb.entries.length) {
     msg.warning('请先添加或导入资料')
     return
   }
   summarizingKB.value = true
+  baseSummaryError.value = ''
+  // Keep an independent request snapshot. The selected KB, level, source
+  // text, and version guards must not be reconstructed after AI awaits.
+  const sourceSnapshot = JSON.parse(JSON.stringify(kb)) as KnowledgeBase
+  const requestKbId = sourceSnapshot.id
+  const requestLevel = summaryLevel.value
+  const expectedSourceVersion = baseSourceVersion(sourceSnapshot)
+  const expectedSummaryVersion = knowledgeSummaryEditVersion(sourceSnapshot)
+  const editorSession = baseEditorSession.value
+  const jobKey = 'base:' + requestKbId
+  const controller = new AbortController()
+  summaryControllers.set(jobKey, controller)
   try {
-    const source = kb.entries.map(entry =>
-      `【${entry.category}】${entry.title}\n${(entry.summary || entry.content).slice(0, 3000)}`,
-    ).join('\n\n').slice(0, 30000)
-    const detail = summaryLevel.value === 'brief'
-      ? '控制在 800 字以内，只保留最重要的主题、时间、人物、地点、规则和关键数字。'
-      : summaryLevel.value === 'detailed'
-        ? '控制在 6000 字以内，按主题整理，并完整保留重要时间线、人物关系、地点、制度、事件和数字。'
-        : '控制在 2500 字以内，按主题整理，保留重要时间线、人物关系、地点、制度、事件和数字。'
-    let summary = ''
-    await callAI({
-      model,
-      skillTask: 'analysis',
-      messages: [
-        { role: 'system', content: '你是知识库总编。只根据提供的资料整理摘要，不得补充资料外的事实。' },
-        { role: 'user', content: `请整理知识库“${kb.name}”的统一摘要。\n${detail}\n使用清晰的小标题和列表，方便后续 AI 写作快速理解。\n\n${source}` },
-      ],
-      stream: true,
-      onChunk: chunk => { summary += chunk },
+    const plan = planKnowledgeSummary(sourceSnapshot, undefined, requestLevel)
+    const result = await generateKnowledgeSummary(plan, {
+      model, budget: createKnowledgeSummaryBudget(summaryBudget.value.requests, summaryBudget.value.tokens),
+      instructions: configStore.getSkillPrompt('analysis'), signal: controller.signal,
+      isCurrent: () => {
+        const current = kbStore.getKB(requestKbId)
+        return Boolean(current && baseSourceVersion(current) === expectedSourceVersion && knowledgeSummaryEditVersion(current) === expectedSummaryVersion)
+      },
+      onProgress: progress => { summaryProgress.value = { ...summaryProgress.value, [jobKey]: progress } },
     })
-    if (!summary.trim()) throw new Error('AI 没有返回摘要')
-    kbStore.updateSummary(kb.id, summary.trim(), summaryLevel.value)
+    controller.signal.throwIfAborted()
+    await kbStore.saveBaseSummary(requestKbId, expectedSourceVersion, expectedSummaryVersion, result.summary, requestLevel, 'ai', result.coverage)
+    const committed = kbStore.getKB(requestKbId)
+    if (selectedKBId.value === requestKbId && baseEditorSession.value === editorSession
+      && !baseSummaryDraftDirty.value && committed) {
+      baseSummaryDraft.value = committed.summary || result.summary
+      baseSummaryBaseline.value = {
+        targetId: committed.id,
+        sourceVersion: baseSourceVersion(committed),
+        summaryVersion: knowledgeSummaryEditVersion(committed),
+      }
+    }
     msg.success('知识库摘要已更新')
   } catch (error) {
-    msg.error(error instanceof Error ? error.message : '摘要整理失败')
+    const message = error instanceof Error ? error.message : '摘要整理失败'
+    const visibleMessage = /发生变化|重新核对|过期/.test(message)
+      ? '知识库资料或摘要已在整理期间变化，迟到的 AI 结果已拒绝，请重新核对。'
+      : `${message}，可点击“重新整理”重试。`
+    if (summaryProgress.value[jobKey]) summaryProgress.value[jobKey].phase = controller.signal.aborted ? 'cancelled' : 'failed'
+    if (selectedKBId.value === requestKbId && baseEditorSession.value === editorSession) {
+      baseSummaryError.value = visibleMessage
+      baseSummaryErrorKind.value = 'ai'
+    }
+    msg.error(visibleMessage)
   } finally {
+    summaryControllers.delete(jobKey)
     summarizingKB.value = false
   }
+}
+
+function entrySummaryBusy(entryId: string) {
+  return summarizingEntryIds.value.has(entryId) || entrySummarySavingIds.value.has(entryId)
+}
+
+async function saveEntrySummaryDraft(entryId: string) {
+  const kbId = selectedKBId.value
+  const session = entryEditorSession.value
+  const entry = kbStore.getKB(kbId)?.entries.find(item => item.id === entryId)
+  if (!entry) return
+  const summary = entrySummaryDraft.value.trim()
+  if (!summary) {
+    msg.warning('摘要不能为空')
+    return
+  }
+  const draftShowsCurrentSummary = !entrySummaryDraftDirty.value
+    && entrySummaryDraft.value.trim() === (entry.summary || '').trim()
+  const baseline = draftShowsCurrentSummary || entrySummaryBaseline.value?.targetId !== entry.id
+    ? {
+        targetId: entry.id,
+        sourceVersion: entrySourceVersion(kbId, entry),
+        summaryVersion: knowledgeSummaryEditVersion(entry),
+      }
+    : entrySummaryBaseline.value
+  entrySummaryBaseline.value = baseline
+  entrySummarySavingIds.value = new Set(entrySummarySavingIds.value).add(entryId)
+  const errorKey = entrySummaryErrorKey(kbId, entryId)
+  try {
+    await kbStore.saveEntrySummary(kbId, entryId, baseline.sourceVersion, baseline.summaryVersion, summary, 'author')
+    const committed = kbStore.getKB(kbId)?.entries.find(item => item.id === entryId)
+    if (selectedKBId.value === kbId && selectedEntryId.value === entryId && entryEditorSession.value === session) {
+      entrySummaryDraft.value = committed?.summary || summary
+      entrySummaryDraftDirty.value = false
+      if (committed) {
+        entrySummaryBaseline.value = {
+          targetId: committed.id,
+          sourceVersion: entrySourceVersion(kbId, committed),
+          summaryVersion: knowledgeSummaryEditVersion(committed),
+        }
+      }
+    }
+    entrySummaryErrors.value = { ...entrySummaryErrors.value, [errorKey]: '' }
+    entrySummaryErrorKinds.value = { ...entrySummaryErrorKinds.value, [errorKey]: 'save' }
+    msg.success('条目摘要已保存并核对')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '摘要保存失败'
+    const visibleMessage = /发生变化|重新核对|过期/.test(message)
+      ? '资料或摘要已发生变化，摘要未保存，请重新核对。'
+      : `${message}，表单内容已保留。`
+    entrySummaryErrors.value = { ...entrySummaryErrors.value, [errorKey]: visibleMessage }
+    entrySummaryErrorKinds.value = { ...entrySummaryErrorKinds.value, [errorKey]: 'save' }
+    msg.error(visibleMessage)
+  } finally {
+    const next = new Set(entrySummarySavingIds.value)
+    next.delete(entryId)
+    entrySummarySavingIds.value = next
+  }
+}
+
+async function saveBaseSummaryDraft() {
+  const kb = selectedKB.value
+  const kbId = kb?.id || ''
+  const session = baseEditorSession.value
+  const summary = baseSummaryDraft.value.trim()
+  if (!kb || !summary) {
+    msg.warning('摘要不能为空')
+    return
+  }
+  const draftShowsCurrentSummary = !baseSummaryDraftDirty.value
+    && baseSummaryDraft.value.trim() === (kb.summary || '').trim()
+  const baseline = draftShowsCurrentSummary || baseSummaryBaseline.value?.targetId !== kb.id
+    ? {
+        targetId: kb.id,
+        sourceVersion: baseSourceVersion(kb),
+        summaryVersion: knowledgeSummaryEditVersion(kb),
+      }
+    : baseSummaryBaseline.value
+  baseSummaryBaseline.value = baseline
+  const level = summaryLevel.value
+  baseSummarySaving.value = true
+  try {
+    await kbStore.saveBaseSummary(kbId, baseline.sourceVersion, baseline.summaryVersion, summary, level, 'author')
+    const committed = kbStore.getKB(kbId)
+    if (selectedKBId.value === kbId && baseEditorSession.value === session) {
+      baseSummaryDraft.value = committed?.summary || summary
+      baseSummaryDraftDirty.value = false
+      if (committed) {
+        baseSummaryBaseline.value = {
+          targetId: committed.id,
+          sourceVersion: baseSourceVersion(committed),
+          summaryVersion: knowledgeSummaryEditVersion(committed),
+        }
+      }
+    }
+    if (selectedKBId.value === kbId && baseEditorSession.value === session) {
+      baseSummaryError.value = ''
+      baseSummaryErrorKind.value = 'save'
+    }
+    msg.success('知识库摘要已保存并核对')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '摘要保存失败'
+    const visibleMessage = /发生变化|重新核对|过期/.test(message)
+      ? '知识库资料或摘要已发生变化，摘要未保存，请重新核对。'
+      : `${message}，表单内容已保留。`
+    if (selectedKBId.value === kbId && baseEditorSession.value === session) {
+      baseSummaryError.value = visibleMessage
+      baseSummaryErrorKind.value = 'save'
+    }
+    msg.error(visibleMessage)
+  } finally {
+    baseSummarySaving.value = false
+  }
+}
+
+function reloadEntrySummaryDraft(entryId: string) {
+  const entry = kbStore.getKB(selectedKBId.value)?.entries.find(item => item.id === entryId)
+  if (!entry) return
+  entrySummaryDraft.value = entry.summary || ''
+  entrySummaryDraftDirty.value = false
+  entrySummaryBaseline.value = {
+    targetId: entry.id,
+    sourceVersion: entrySourceVersion(selectedKBId.value, entry),
+    summaryVersion: knowledgeSummaryEditVersion(entry),
+  }
+  const errorKey = entrySummaryErrorKey(selectedKBId.value, entryId)
+  entrySummaryErrors.value = { ...entrySummaryErrors.value, [errorKey]: '' }
+  entrySummaryErrorKinds.value = { ...entrySummaryErrorKinds.value, [errorKey]: 'save' }
+}
+
+function reloadBaseSummaryDraft() {
+  const kb = selectedKB.value
+  if (!kb) return
+  baseSummaryDraft.value = kb.summary || ''
+  baseSummaryDraftDirty.value = false
+  baseSummaryBaseline.value = {
+    targetId: kb.id,
+    sourceVersion: baseSourceVersion(kb),
+    summaryVersion: knowledgeSummaryEditVersion(kb),
+  }
+  baseSummaryError.value = ''
+  baseSummaryErrorKind.value = ''
+}
+
+function retryEntrySummary(entryId: string) {
+  void autoSummarizeEntry(selectedKBId.value, entryId, true)
+}
+
+function setEntryModalShow(show: boolean) {
+  if (!show && entryFormBusy.value) return
+  showEntryModal.value = show
 }
 
 // 知识库绑定
@@ -546,6 +1001,11 @@ function toggleBind(kbId: string) {
 </script>
 
 <style scoped>
+.summary-budget { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 20px; }
+.summary-budget label { display: grid; gap: 6px; width: 180px; font-size: 12px; }
+.summary-budget > span { flex-basis: 100%; color: var(--text-color-tertiary); font-size: 12px; }
+.summary-run-status, .summary-coverage { margin: 10px 0; font-size: 12px; line-height: 1.8; color: var(--text-color-secondary); }
+.summary-run-status { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .kb-header {
   display: flex;
   align-items: flex-start;
@@ -616,6 +1076,7 @@ function toggleBind(kbId: string) {
   margin-top: 6px !important;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
+.kb-summary-status { margin-top: 6px; }
 .kb-card-meta {
   display: inline-block; margin-top: 8px;
   font-size: 12px; color: var(--text-color-tertiary);
@@ -701,6 +1162,7 @@ function toggleBind(kbId: string) {
   font-size: 11px; padding: 1px 8px; border-radius: var(--radius-sm);
   background: var(--color-accent-light); color: var(--color-accent);
 }
+.entry-summary-status { margin-left: auto; }
 .entry-header h4 {
   font-family: var(--font-family-serif); font-size: 17px; font-weight: 700;
   color: var(--text-color-primary); margin: 0; letter-spacing: 0.01em;
@@ -833,6 +1295,77 @@ function toggleBind(kbId: string) {
   padding-top: 16px;
   border-top: 1px solid var(--border-color);
 }
+
+.summary-status-row,
+.entry-summary-heading,
+.summary-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.summary-status-row { margin: 12px 0 8px; }
+.summary-status {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.summary-status-empty { color: var(--text-color-tertiary); background: var(--bg-color-hover); }
+.summary-status-current { color: var(--color-success); background: color-mix(in srgb, var(--color-success) 12%, transparent); }
+.summary-status-unverified { color: var(--color-warning); background: color-mix(in srgb, var(--color-warning) 12%, transparent); }
+.summary-status-stale { color: var(--color-error); background: color-mix(in srgb, var(--color-error) 12%, transparent); }
+.summary-status-hint,
+.summary-scope-hint {
+  margin: 6px 0;
+  color: var(--text-color-tertiary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.summary-scope-hint { font-size: 11px; }
+.summary-error {
+  margin: 8px 0;
+  color: var(--color-error);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.summary-error button {
+  margin-left: 6px;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.summary-actions { margin-top: 8px; }
+.summary-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-color-secondary);
+  font-size: 12px;
+}
+.summary-history-item {
+  padding: 8px 10px;
+  background: var(--bg-color-hover);
+  border-radius: var(--radius-sm);
+}
+.summary-history-item > div { color: var(--text-color-tertiary); font-size: 11px; }
+.summary-history-item p { margin: 4px 0 0; white-space: pre-wrap; line-height: 1.6; }
+.entry-summary-editor {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+}
+.entry-summary-heading h4 { margin: 0; font-family: var(--font-family-serif); color: var(--text-color-primary); }
+.entry-summary-editor :deep(.n-input) { margin-top: 8px; }
 
 .entry-detail-tags {
   display: flex;

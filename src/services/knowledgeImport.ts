@@ -91,6 +91,25 @@ function archivePath(base: string, rawHref: string): string {
   }
   return parts.join('/')
 }
+function docxPartPath(base: string, target: string): string {
+  return target.startsWith('/') ? archivePath('', target.slice(1)) : archivePath(base, target)
+}
+function relationshipsPath(partPath: string): string {
+  const parts = partPath.split('/'), fileName = parts.pop() || ''
+  return [...parts, '_rels', fileName + '.rels'].filter(Boolean).join('/')
+}
+function sanitizeDocxStyles(data: Uint8Array): Uint8Array {
+  const document = xml(new TextDecoder('utf-8', { fatal: true }).decode(data))
+  const wordNamespace = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+  const allowedTypes = new Set(['paragraph', 'character', 'table', 'numbering'])
+  for (const style of elements(document, 'style')) {
+    const type = style.getAttributeNS(wordNamespace, 'type') || style.getAttribute('w:type')
+    // Mammoth 1.12.0 indexes ordinary objects by this untrusted attribute.
+    // Drop invalid types before passing DOCX styles into its parser.
+    if (type === null || !allowedTypes.has(type)) style.parentNode?.removeChild(style)
+  }
+  return new TextEncoder().encode(new XMLSerializer().serializeToString(document))
+}
 function htmlText(html: string): string {
   return html.replace(/<(script|style|title)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
     .replace(/<br\s*\/?>/gi, '\n').replace(/<\/(?:p|div|h[1-6])>/gi, '\n\n')
@@ -121,9 +140,29 @@ async function readArchive(buffer: ArrayBuffer, extension: string): Promise<stri
   if (extension === 'docx') {
     // Normalize through bounded streaming first. A forged ZIP size cannot make
     // Mammoth's downstream reader expand arbitrarily large content.
+    const packageRelationships = zip.file('_rels/.rels')
+      ? elements(xml(await readText('_rels/.rels')), 'relationship') : []
+    const documentPath = packageRelationships
+      .filter(row => row.getAttribute('Type')?.endsWith('/officeDocument') && row.getAttribute('TargetMode') !== 'External')
+      .map(row => row.getAttribute('Target'))
+      .filter((target): target is string => Boolean(target))
+      .map(target => docxPartPath('', target))
+      .find(path => zip.file(path)) || 'word/document.xml'
+    const documentRelationshipsPath = relationshipsPath(documentPath)
+    const documentRelationships = zip.file(documentRelationshipsPath)
+      ? elements(xml(await readText(documentRelationshipsPath)), 'relationship') : []
+    const stylesPath = documentRelationships
+      .filter(row => row.getAttribute('Type')?.endsWith('/styles') && row.getAttribute('TargetMode') !== 'External')
+      .map(row => row.getAttribute('Target'))
+      .filter((target): target is string => Boolean(target))
+      .map(target => docxPartPath(documentPath, target))
+      .find(path => zip.file(path)) || 'word/styles.xml'
     const normalized = new Zip()
     for (const entry of Object.values(zip.files)) {
-      if (!entry.dir) normalized.file(entry.name, await read(entry.name), { compression: 'STORE' })
+      if (!entry.dir) {
+        const content = await read(entry.name)
+        normalized.file(entry.name, entry.name === stylesPath ? sanitizeDocxStyles(content) : content, { compression: 'STORE' })
+      }
     }
     const mammoth = (await import('mammoth')).default
     return (await mammoth.extractRawText({ arrayBuffer: await normalized.generateAsync({ type: 'arraybuffer', compression: 'STORE' }) })).value

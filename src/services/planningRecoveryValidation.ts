@@ -1,0 +1,132 @@
+import type { ScenePlanningRecovery } from '@/types/planningRecovery'
+
+const fail = (path: string): never => { throw new Error('场景恢复记录无效：' + path) }
+const object = (value: unknown, path: string): Record<string, unknown> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) fail(path)
+  return value as Record<string, unknown>
+}
+const text = (value: unknown, path: string) => { if (typeof value !== 'string' || value.length > 5_000_000) fail(path) }
+const id = (value: unknown, path: string) => { text(value, path); if (!(value as string).trim() || ['__proto__', 'prototype', 'constructor'].includes(value as string)) fail(path) }
+const integer = (value: unknown, path: string) => { if (!Number.isSafeInteger(value) || (value as number) < 0) fail(path) }
+const bool = (value: unknown, path: string) => { if (typeof value !== 'boolean') fail(path) }
+const oneOf = (value: unknown, values: string[], path: string) => { if (!values.includes(value as string)) fail(path) }
+const date = (value: unknown, path: string) => { text(value, path); if (!/^\d{4}-\d\d-\d\dT/.test(value as string) || !Number.isFinite(Date.parse(value as string))) fail(path) }
+const list = (value: unknown, path: string, check: (value: unknown, path: string) => void, max = 100_000): unknown[] => {
+  if (!Array.isArray(value) || value.length > max) fail(path)
+  ;(value as unknown[]).forEach((row, index) => check(row, path + '[' + index + ']'))
+  return value as unknown[]
+}
+const optional = (row: Record<string, unknown>, key: string, path: string, check = id) => { if (row[key] !== undefined) check(row[key], path + '.' + key) }
+const unique = (rows: Array<{ id: string }>, path: string) => { if (new Set(rows.map(row => row.id)).size !== rows.length) fail(path + '（重复标识）') }
+const approval = ['draft', 'awaiting_approval', 'approved', 'rejected']
+function chapter(value: unknown, path: string) {
+  const row = object(value, path)
+  id(row.id, path + '.id'); integer(row.number, path + '.number')
+  optional(row, 'endNumber', path, integer); optional(row, 'volumeId', path); optional(row, 'sourceVersion', path, text)
+  for (const key of ['title', 'objective', 'conflict', 'openingState', 'endingState']) text(row[key], path + '.' + key)
+  for (const key of ['requiredEvents', 'prohibitedReveals', 'characterChangeNotes']) list(row[key], path + '.' + key, text, 1000)
+  for (const key of ['foreshadowingIds', 'scenePlanIds']) list(row[key], path + '.' + key, id, 10_000)
+  oneOf(row.status, ['planned', 'active', 'awaiting_review', 'completed', 'archived'], path + '.status')
+  oneOf(row.approval, approval, path + '.approval')
+}
+function scene(value: unknown, path: string) {
+  const row = object(value, path)
+  id(row.id, path + '.id'); id(row.chapterPlanId, path + '.chapterPlanId'); integer(row.order, path + '.order')
+  for (const key of ['title', 'purpose', 'outputState']) text(row[key], path + '.' + key)
+  for (const key of ['viewpointCharacterId', 'locationId', 'conflict']) optional(row, key, path, text)
+  for (const key of ['requiredActions', 'informationChanges']) list(row[key], path + '.' + key, text, 1000)
+  oneOf(row.status, ['planned', 'drafted', 'completed'], path + '.status'); oneOf(row.approval, approval, path + '.approval')
+}
+function editor(value: unknown, path: string) {
+  const row = object(value, path)
+  for (const key of ['id', 'chapterPlanId', 'baseline']) id(row[key], path + '.' + key)
+  integer(row.sequence, path + '.sequence'); chapter(row.chapter, path + '.chapter')
+  list(row.scenes, path + '.scenes', scene, 12); text(row.instructions, path + '.instructions'); text(row.title, path + '.title')
+  optional(row, 'optionId', path); optional(row, 'revisionId', path); bool(row.incomplete, path + '.incomplete'); date(row.updatedAt, path + '.updatedAt')
+  optional(row, 'incompleteSignature', path, text)
+  if ((row.chapter as { id: string }).id !== row.chapterPlanId) fail(path + '.chapter.id')
+}
+
+/** Unfinished text is valid recovery data; complete versions additionally require usable scene content. */
+export function assertScenePlanningRecovery(value: unknown, path = 'sceneRecovery'): asserts value is ScenePlanningRecovery {
+  const row = object(value, path)
+  list(row.editors, path + '.editors', editor, 10_000)
+  list(row.options, path + '.options', (value, path) => {
+    const option = object(value, path)
+    for (const key of ['id', 'chapterPlanId', 'revisionId']) id(option[key], path + '.' + key)
+    date(option.createdAt, path + '.createdAt')
+  }, 10_000)
+  list(row.revisions, path + '.revisions', (value, path) => {
+    const version = object(value, path)
+    for (const key of ['id', 'chapterPlanId', 'optionId', 'baseline']) id(version[key], path + '.' + key)
+    for (const key of ['parentRevisionId', 'attemptId']) optional(version, key, path)
+    oneOf(version.kind, ['author', 'model', 'restored'], path + '.kind')
+    text(version.title, path + '.title'); text(version.instructions, path + '.instructions'); chapter(version.chapter, path + '.chapter')
+    list(version.scenes, path + '.scenes', scene, 12); bool(version.complete, path + '.complete'); date(version.createdAt, path + '.createdAt')
+  })
+  list(row.attempts, path + '.attempts', (value, path) => {
+    const attempt = object(value, path)
+    for (const key of ['id', 'chapterPlanId', 'baseline', 'modelId']) id(attempt[key], path + '.' + key)
+    const settings = object(attempt.modelSettings, path + '.modelSettings')
+    text(settings.modelName, path + '.modelSettings.modelName')
+    for (const key of ['maxTokens', 'temperature', 'topP']) if (typeof settings[key] !== 'number' || !Number.isFinite(settings[key])) fail(path + '.modelSettings.' + key)
+    optional(attempt, 'parentAttemptId', path); integer(attempt.sequence, path + '.sequence')
+    oneOf(attempt.mode, ['generate', 'retry', 'continue'], path + '.mode')
+    oneOf(attempt.status, ['queued', 'running', 'completed', 'partial', 'failed', 'cancelled', 'interrupted', 'conflict'], path + '.status')
+    list(attempt.messages, path + '.messages', (value, path) => {
+      const message = object(value, path); oneOf(message.role, ['system', 'user', 'assistant'], path + '.role'); text(message.content, path + '.content')
+    }, 100)
+    editor(attempt.input, path + '.input'); text(attempt.output, path + '.output')
+    optional(attempt, 'finishReason', path, text); optional(attempt, 'error', path, text)
+    date(attempt.createdAt, path + '.createdAt'); date(attempt.updatedAt, path + '.updatedAt')
+  }, 10_000)
+  list(row.selections, path + '.selections', (value, path) => {
+    const selection = object(value, path)
+    for (const key of ['chapterPlanId', 'optionId', 'revisionId']) id(selection[key], path + '.' + key)
+    date(selection.updatedAt, path + '.updatedAt')
+  }, 30_000)
+  const state = value as ScenePlanningRecovery
+  for (const key of ['editors', 'options', 'revisions', 'attempts'] as const) unique(state[key], path + '.' + key)
+  const revisions = new Map(state.revisions.map(item => [item.id, item])), options = new Map(state.options.map(item => [item.id, item]))
+  const attempts = new Map(state.attempts.map(item => [item.id, item])), seen = new Set<string>()
+  for (const attempt of state.attempts) {
+    if (!attempt.messages.length || attempt.input.chapterPlanId !== attempt.chapterPlanId || attempt.input.baseline !== attempt.baseline) fail(path + '.attempts.input')
+    if (attempt.parentAttemptId && (!seen.has(attempt.parentAttemptId) || attempts.get(attempt.parentAttemptId)?.chapterPlanId !== attempt.chapterPlanId)
+      || attempt.mode !== 'generate' && !attempt.parentAttemptId) fail(path + '.attempts.parentAttemptId')
+    seen.add(attempt.id)
+  }
+  seen.clear()
+  const snapshots = [...state.editors, ...state.attempts.map(attempt => attempt.input), ...state.revisions]
+  for (const snapshot of snapshots) {
+    if (snapshot.chapter.id !== snapshot.chapterPlanId || snapshot.scenes.some(scene => scene.chapterPlanId !== snapshot.chapterPlanId)) fail(path + '.chapterPlanId')
+    unique(snapshot.scenes, path + '.scenes')
+    if ('revisionId' in snapshot && snapshot.revisionId) {
+      const revision = revisions.get(snapshot.revisionId)
+      if (!revision || revision.chapterPlanId !== snapshot.chapterPlanId || revision.optionId !== snapshot.optionId) fail(path + '.revisionId')
+    }
+  }
+  for (const revision of state.revisions) {
+    if (options.get(revision.optionId)?.chapterPlanId !== revision.chapterPlanId) fail(path + '.revisions.optionId')
+    if (revision.parentRevisionId && (!seen.has(revision.parentRevisionId) || revisions.get(revision.parentRevisionId)?.chapterPlanId !== revision.chapterPlanId)) fail(path + '.revisions.parentRevisionId')
+    if (revision.attemptId && attempts.get(revision.attemptId)?.chapterPlanId !== revision.chapterPlanId) fail(path + '.revisions.attemptId')
+    if (revision.kind === 'model' && !revision.attemptId) fail(path + '.revisions.attemptId')
+    if (revision.complete && (!revision.scenes.length || revision.scenes.some(scene => !scene.title.trim() || !scene.purpose.trim() || !scene.outputState.trim()))) fail(path + '.revisions.complete')
+    if (revision.kind === 'model') {
+      const attempt = attempts.get(revision.attemptId!)
+      if (!attempt || attempt.baseline !== revision.baseline) { fail(path + '.revisions.baseline'); continue }
+      if (revision.complete && (attempt.status !== 'completed' || attempt.finishReason && attempt.finishReason !== 'stop')) fail(path + '.revisions（中断输出不能直接确认）')
+    }
+    if (revision.kind === 'restored') {
+      const parent = revisions.get(revision.parentRevisionId || '')
+      if (!parent || parent.complete !== revision.complete || parent.baseline !== revision.baseline
+        || JSON.stringify(parent.scenes) !== JSON.stringify(revision.scenes)) fail(path + '.revisions（恢复版本必须保留原内容和完整性）')
+    }
+    seen.add(revision.id)
+  }
+  for (const option of state.options) if (revisions.get(option.revisionId)?.optionId !== option.id) fail(path + '.options.revisionId')
+  if (new Set(state.selections.map(item => item.chapterPlanId)).size !== state.selections.length) fail(path + '.selections')
+  for (const selection of state.selections) {
+    const revision = revisions.get(selection.revisionId)
+    if (!revision || revision.optionId !== selection.optionId || revision.chapterPlanId !== selection.chapterPlanId) fail(path + '.selections.revisionId')
+  }
+}

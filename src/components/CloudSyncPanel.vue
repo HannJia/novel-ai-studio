@@ -77,9 +77,10 @@
         </div>
         <div v-if="createdInvite" class="cloud-secret">
           <code>{{ createdInvite }}</code>
-          <n-button quaternary circle title="复制邀请码" aria-label="复制邀请码" @click="copy(createdInvite)"><template #icon><n-icon><copy-outline /></n-icon></template></n-button>
+          <n-button quaternary circle title="复制邀请码" aria-label="复制邀请码" @click="copy(createdInvite, 'invite')"><template #icon><n-icon><copy-outline /></n-icon></template></n-button>
           <span>7 天内有效</span>
         </div>
+        <p v-if="inviteFeedback" role="status" class="cloud-copy-feedback">{{ inviteFeedback }}</p>
       </div>
     </template>
     <div v-if="sync.pendingConflicts.length" class="cloud-conflicts">
@@ -99,7 +100,7 @@
     </div>
     <details v-if="archives.length" class="cloud-archives"><summary>历史版本备份（{{ archives.length }}）</summary>
       <div v-for="conflict in archives" :key="conflict.id" class="cloud-archive">
-        <span>{{ conflict.title }} · {{ new Date(conflict.createdAt).toLocaleString('zh-CN') }}</span>
+        <span>{{ conflict.title }} · {{ conflict.resolution === 'superseded' ? '冲突已刷新' : conflict.resolution === 'local' ? '已保留本机版本' : '已采用云端版本' }} · {{ new Date(conflict.createdAt).toLocaleString('zh-CN') }}</span>
         <n-button size="tiny" @click="perform(() => sync.exportConflict(conflict.id, 'local'))">导出本机版本</n-button>
         <n-button size="tiny" @click="perform(() => sync.exportConflict(conflict.id, 'remote'))">导出云端版本</n-button>
       </div>
@@ -117,7 +118,9 @@
     </n-modal>
     <n-modal :show="!!recoveryCode" :mask-closable="false" :close-on-esc="false" preset="card" title="账号恢复码" class="cloud-recovery-modal">
       <p>恢复码只显示这一次。忘记密码时可凭它恢复账号，请单独妥善保存，不要发送给他人。</p>
-      <div class="cloud-secret"><code>{{ recoveryCode }}</code><n-button quaternary circle title="复制恢复码" aria-label="复制恢复码" @click="copy(recoveryCode)"><template #icon><n-icon><copy-outline /></n-icon></template></n-button></div>
+      <div class="cloud-secret"><code>{{ recoveryCode }}</code><n-button quaternary circle title="复制恢复码" aria-label="复制恢复码" @click="copy(recoveryCode, 'recovery')"><template #icon><n-icon><copy-outline /></n-icon></template></n-button></div>
+      <p v-if="recoveryFeedback" role="status" class="cloud-copy-feedback">{{ recoveryFeedback }}</p>
+      <a v-if="recoveryDownloadUrl" class="cloud-download-fallback" :href="recoveryDownloadUrl" download="云同步账号恢复码.txt" @click="recoveryFeedback = '已开始下载，请查看浏览器下载列表或默认下载目录。'">如果没有自动下载，点此保存</a>
       <template #footer><div class="cloud-controls"><n-button @click="downloadRecovery">下载恢复码</n-button><n-button type="primary" @click="recoveryCode = ''">已妥善保存</n-button></div></template>
     </n-modal>
   </section>
@@ -129,6 +132,7 @@ import { NButton, NCheckbox, NIcon, NInput, NInputNumber, NModal, NRadioButton, 
 import { CopyOutline, SyncOutline } from '@vicons/ionicons5'
 import { useCloudSyncStore } from '@/stores/cloudSync'
 import CloudPreferencesPanel from './CloudPreferencesPanel.vue'
+import { copyText } from '@/utils/clipboard'
 
 const sync = useCloudSyncStore()
 const dialog = useDialog()
@@ -146,6 +150,16 @@ watch(passwordDialog, () => { currentPassword.value = ''; newPassword.value = ''
 const invite = ref('')
 const recoveryInput = ref('')
 const recoveryCode = ref('')
+const recoveryFeedback = ref('')
+const recoveryDownloadUrl = ref('')
+const inviteFeedback = ref('')
+watch(recoveryCode, value => {
+  recoveryFeedback.value = ''
+  if (!value && recoveryDownloadUrl.value) {
+    URL.revokeObjectURL(recoveryDownloadUrl.value)
+    recoveryDownloadUrl.value = ''
+  }
+})
 const working = ref(false)
 const selectedUploads = ref<string[]>([])
 const kindLabel = (kind: string) => kind === 'novel' ? '小说' : kind === 'knowledge' ? '知识库' : '灵感会话'
@@ -212,18 +226,31 @@ async function submitPasswordChange() {
 async function makeInvite() {
   await perform(async () => { createdInvite.value = (await sync.createInvite(inviteUses.value || 1)).code })
 }
-async function copy(value: string) {
-  try { await navigator.clipboard.writeText(value) }
-  catch { feedback.value = '无法访问剪贴板，请选中文字手动复制。' }
+async function copy(value: string, kind: 'recovery' | 'invite') {
+  const result = kind === 'recovery' ? recoveryFeedback : inviteFeedback
+  result.value = ''
+  try {
+    const channel = await copyText(value)
+    result.value = channel === 'system' ? '已复制到系统剪贴板。' : '已请求浏览器复制，请粘贴确认。若没有内容，请选中文字后按 Ctrl+C，或下载保存。'
+  } catch { result.value = '复制失败，请选中文字后按 Ctrl+C，或下载保存。' }
 }
 function downloadRecovery() {
   const blob = new Blob([`墨笺云同步账号：${username.value.trim()}\n恢复码：${recoveryCode.value}\n请勿向他人提供恢复码。\n`], { type: 'text/plain;charset=utf-8' })
+  if (recoveryDownloadUrl.value) URL.revokeObjectURL(recoveryDownloadUrl.value)
   const url = URL.createObjectURL(blob)
+  recoveryDownloadUrl.value = url
   const link = document.createElement('a')
   link.href = url
   link.download = '云同步账号恢复码.txt'
+  document.body.appendChild(link)
   link.click()
-  URL.revokeObjectURL(url)
+  link.remove()
+  recoveryFeedback.value = '已发起下载，请查看浏览器下载列表或默认下载目录。'
+  setTimeout(() => {
+    if (recoveryDownloadUrl.value !== url) return
+    URL.revokeObjectURL(url)
+    recoveryDownloadUrl.value = ''
+  }, 60000)
 }
 function resolve(id: string, side: 'local' | 'remote') {
   dialog.warning({ title: side === 'local' ? '保留本机版本？' : '采用云端版本？',
@@ -260,6 +287,8 @@ h4 { font-size:14px; margin:0 0 12px; }
 .cloud-secret { margin-top:12px; padding:10px 0; overflow-wrap:anywhere; }
 .cloud-secret code { min-width:0; flex:1; word-break:break-all; user-select:all; }
 .cloud-secret span { font-size:12px; color:var(--text-color-secondary); }
+.cloud-copy-feedback { font-size:12px; line-height:1.6; margin:8px 0 0; overflow-wrap:anywhere; }
+.cloud-download-fallback { display:inline-block; margin-top:8px; color:var(--color-primary); font-size:12px; text-decoration:underline; }
 .cloud-conflict { padding:14px 0; border-bottom:1px solid var(--border-color-light); }
 .cloud-conflict > strong { display:block; overflow-wrap:anywhere; }
 .cloud-versions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin:12px 0; }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildSemanticRecords, retrieveSemanticEvidence, splitMemoryText } from './semanticIndex'
-import type { Novel } from '@/types/novel'
+import { createChapterSourceBinding } from './derivedSources'
+import type { Chapter, Novel } from '@/types/novel'
 
 function memoryNovel(): Novel {
   return {
@@ -74,16 +75,45 @@ describe('项目语义记忆', () => {
   it('在 300 章长书稿下保持可检索并完成稳定分块', () => {
     const novel = memoryNovel()
     const paragraph = '沈砚沿着王府密库留下的剑痕追查赤月剑，每一步都核对时间、地点和证词。'.repeat(30)
-    novel.chapters = Array.from({ length: 300 }, (_, index) => ({
-      id: `chapter-${index}`, volumeIndex: Math.floor(index / 30), chapterIndex: index, title: `第 ${index + 1} 章`,
-      content: `${paragraph}\n第 ${index + 1} 章线索编号 ${index}。`, summary: `追查赤月剑的第 ${index + 1} 阶段`,
-      wordCount: paragraph.length, status: 'finalized' as const, createdAt: '2026-01-01', updatedAt: '2026-01-01',
-    }))
+    novel.chapters = Array.from({ length: 300 }, (_, index) => {
+      const content = `${paragraph}\n第 ${index + 1} 章线索编号 ${index}。`
+      const summary = `追查赤月剑的第 ${index + 1} 阶段`
+      const chapter = {
+        id: `chapter-${index}`, volumeIndex: Math.floor(index / 30), chapterIndex: index, title: `第 ${index + 1} 章`,
+        content, summary, wordCount: paragraph.length, status: 'finalized' as const, createdAt: '2026-01-01', updatedAt: '2026-01-01',
+      }
+      return { ...chapter, summarySource: createChapterSourceBinding(chapter, summary, 'ai', '2026-01-01') }
+    })
     const started = Date.now()
     const records = buildSemanticRecords(novel)
     const results = retrieveSemanticEvidence('赤月剑 王府密库', records, 8, 0)
     expect(records.length).toBeGreaterThan(600)
     expect(results).toHaveLength(8)
     expect(Date.now() - started).toBeLessThan(1500)
+  })
+
+  it('召回排除过期和未确认摘要，重新确认后恢复', () => {
+    const novel = memoryNovel()
+    const staleSummary = '过期摘要中的独有线索：黑曜密钥藏在旧塔。'
+    const unverifiedSummary = '未确认摘要中的独有线索：白鹭印记位于南门。'
+    const stale = {
+      id: 'stale-summary', volumeIndex: 0, chapterIndex: 0, title: '过期摘要', content: '沈砚检查药铺的账册。', summary: staleSummary,
+      wordCount: 12, status: 'finalized' as const, createdAt: '2026-01-01', updatedAt: '2026-01-01',
+      summarySource: createChapterSourceBinding({ id: 'stale-summary', content: '沈砚检查旧塔的账册。' }, staleSummary, 'ai', '2026-01-01'),
+    }
+    const unverified: Chapter = {
+      id: 'unverified-summary', volumeIndex: 0, chapterIndex: 1, title: '未确认摘要', content: '沈砚检查南门的账册。', summary: unverifiedSummary,
+      wordCount: 12, status: 'finalized' as const, createdAt: '2026-01-01', updatedAt: '2026-01-01',
+    }
+    novel.chapters = [stale, unverified]
+
+    const rejected = buildSemanticRecords(novel)
+    expect(rejected.some(record => record.content.includes(staleSummary))).toBe(false)
+    expect(rejected.some(record => record.content.includes(unverifiedSummary))).toBe(false)
+
+    stale.summarySource = createChapterSourceBinding(stale, stale.summary, 'author', '2026-01-01')
+    unverified.summarySource = createChapterSourceBinding(unverified, unverified.summary, 'author', '2026-01-01')
+    const confirmed = buildSemanticRecords(novel)
+    expect(confirmed.filter(record => record.content.includes(staleSummary) || record.content.includes(unverifiedSummary))).toHaveLength(2)
   })
 })

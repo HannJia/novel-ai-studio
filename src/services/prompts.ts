@@ -270,7 +270,7 @@ export function buildChapterEndingCheckPrompt(
   return [
     {
       role: 'system',
-      content: '你是严谨的小说章节结尾审查编辑。你只判断当前章节是否形成完整的单章结束，不做文风润色。必须输出严格 JSON。',
+      content: '你是严谨的小说章节结尾审查编辑。你只判断当前动作、对话和场景是否形成阶段性结束。设定一致性、人物知情和物品归属交给后续全文审核，不作为本次结尾是否截断的判据。必须输出严格 JSON。',
     },
     {
       role: 'user',
@@ -291,8 +291,10 @@ ${chapterContent}
 3. 合格悬念：本章核心行动已经完成或得到结果，在结果之上引出新的威胁、问题或选择。
 4. 强行截断：人物正要执行关键动作、问题尚未回答、决定尚未作出、当前冲突没有任何阶段性结果，或明显只因字数到了而停笔。
 5. isComplete 只有在本章可以作为独立章节自然结束时才为 true；有效悬念也必须同时满足 isComplete=true。
+6. 达成约定、取得许可、拒绝请求或离开当前场景，都可以是已经发生的阶段性结果。若本章目标本就是到访交涉并约定后续查证，交涉已结束时，不能仅因明日调查尚未发生而判定截断；但不能用约定替代本章明确要求完成、且仍悬置的核心行动。
+7. 正文存在设定冲突、提前知情或物品归属错误，应由后续全文审核列出必改问题。不要把这些一致性问题填成 openAction，也不要要求本次结尾检查先修正它们才允许进入全文审核。
 
-【输出格式】只输出 JSON 对象，不要代码块或解释：
+【输出格式】只输出 JSON 对象，不要代码块或对象以外的解释。reason、openAction、continuationInstruction 各用不超过 80 字概括；完整时后两项为空字符串：
 {
   "isComplete": false,
   "isValidCliffhanger": false,
@@ -436,6 +438,9 @@ ${chapterWordLimitRule(novel)}
 ## 第X卷《卷名》
 **主题**：一句话主题描述
 **剧情概要**：200-300字的剧情概要
+目标：本卷主角要达成的具体目标
+冲突：阻碍目标的主要力量与代价
+收束：本卷结束时应形成的结果及未决事项
 **关键转折点**：
 - 转折点1
 - 转折点2
@@ -461,6 +466,9 @@ export function buildChapterAnalysisPrompt(
   chapterContent: string,
   dataPanelText: string,
   globalPlanText: string,
+  characterReferences = '',
+  characterState = '',
+  eventReferences = '',
 ): ChatMessage[] {
   return [
     {
@@ -480,18 +488,36 @@ ${globalPlanText || '无'}
 【当前数据面板】
 ${dataPanelText || '无'}
 
+【可引用角色 ID】
+${characterReferences || '尚未登记；填写正文角色名，作者需先确认角色才能确认其知情或关系变化。'}
+
+【按章节还原的已确认知情与关系】
+${characterState || '暂无记录；不代表角色明确不知情。'}
+
+【可引用的有效事件 ID（只到本章边界）】
+${eventReferences || '暂无可引用事件ID；eventCausalityChanges填[]，先提取events候选。'}
+
 【输出格式】只输出 JSON 对象，不要解释，不要代码块：
 {
   "events": [
     {"title":"事件标题","description":"简要描述","characters":["角色名"],"type":"主线|支线|伏笔|转折|战斗|其他","status":"planted|resolved","scope":"chapter|volume|global","evidence":"正文连续原句"}
   ],
   "characters": [
-    {"name":"角色名","identity":"身份","personality":"性格","powerLevel":"实力","faction":"阵营","description":"简介"}
+    {"name":"角色名","identity":"身份","personality":"性格","powerLevel":"实力","faction":"阵营","description":"简介","evidence":"正文连续原句"}
   ],
   "globalPlans": [
     {"id":"全书规划ID","status":"developing或resolved","hintCount":1,"note":"说明变化原因","evidence":"正文连续原句"}
   ],
+  "eventCausalityChanges": [
+    {"fromEventId":"以上有效事件ID","toEventId":"另一个有效事件ID","relation":"causes|enables|blocks|motivates","explanation":"有证据支持的单向因果说明","evidence":"本章唯一的连续正文原句"}
+  ],
   "timeAdvanceDays": 0,
+  "knowledgeChanges": [
+    {"characterId":"已登记角色ID，无则省略","characterName":"角色名","fact":"所讨论的同一命题","state":"knows|suspects|does_not_know|false_belief","belief":"错误信念时填写实际误信的内容","learnedFrom":"正文交代的获知途径","evidence":"正文连续原句"}
+  ],
+  "relationshipChanges": [
+    {"characterId":"关系发出方ID，无则省略","characterName":"发出方角色名","targetCharacterId":"关系对象ID，无则省略","targetCharacterName":"对象角色名","relation":"信任/敌对/师徒等具体关系","description":"变化说明","evidence":"正文连续原句"}
+  ],
   "newItems": [],
   "equipmentChanges": [],
   "dataChanges": []
@@ -505,7 +531,10 @@ ${DATA_MEMORY_OUTPUT}
 2. characters 只输出本章明确出场或首次出现的角色，没有则输出 []。
 3. globalPlans 只提议已记录全书规划中本章有明确推进或回收证据的条目，没有则输出 []。evidence 必须为正文连续原句，不能概括。
 4. timeAdvanceDays 只填写正文明确表达的故事内时间推进天数；例如“过去三天”填 3，“一个月后”填 30，“转眼十日”填 10。没有明确时间推进填 0，不要根据章节序号、写作时间或常识猜测。
-5. 数据记忆提取要求：
+5. knowledgeChanges 和 relationshipChanges 必须输出数组，无变化填 []。只提取本章有连续原文支持的变化。命题文字与人物态度分离；knowledgeChanges 可提供明确的 subjectId、objectId、scope，缺少指代时留空，不按文字相似归并，不输出作者归并决定或确认标记。factId 仅为建议，不能授权身份复用。不把误信当作客观事实；false_belief 必填 belief。未记录不等于 does_not_know，明确不知情也要证据。获知途径不能猜测；同章多次变化按正文顺序分别提取。relationshipChanges 必须区分 dimension（kinship亲属、trust信任、intimacy亲密、allegiance阵营、hierarchy上下级）；不明确可省略，等待作者选择，不从旧关系描述猜测维度。同方向不同维度独立并存。
+6. 关系是有方向的，A 信任 B 不表示 B 信任 A；双向变化需有各自证据。不得编造角色 ID，不得用大纲或后章内容补足本章证据。引用必须是正文连续原句，不能压缩或改写。
+7. eventCausalityChanges 为可选数组，无可验证因果填[]。每项必须包含不同的非空fromEventId和toEventId、明确relation及非空explanation；evidence若提供必须为文字。方向固定为fromEventId→toEventId：causes=导致结果、enables=提供必要条件、blocks=阻碍目标、motivates=促使行动。只能引用上方已经有效且已出现的事件ID，不得用事件名、events数组序号或新编ID代替。计划依赖、先后顺序或共现不能当事实因果。证据须为本章唯一连续原句；缺少证据的提议仅是未验证候选，不能采用。不得输出作者确认、授权、撤销或已入库标记；模型字段不能授权写入Canon。禁止自环及导致/使能因果环。
+8. 数据记忆提取要求：
 ${DATA_MEMORY_RULES}`,
     },
   ]
@@ -582,6 +611,11 @@ ${reviewContext.outline}
 ======== 本章章节计划 ========
 ${reviewContext.chapterGuidance}
 
+======== 当前生效的单章篇幅政策 ========
+${reviewContext.lengthPolicy ? chapterLengthPrompt(reviewContext.lengthPolicy) : '未提供单章篇幅政策，不得自行推导字数门槛。'}
+${reviewContext.chapterWordCount !== undefined ? `完整正文的确定性统计：${reviewContext.chapterWordCount} 字；分段审核时该数字仍指整章，不是当前片段。` : ''}
+上述单章政策优先于全书总字数、预计章节数和大纲中的篇幅估算。不得用总字数除以章节数另设门槛，也不得自行估算正文长度推翻确定性统计。目标是参考值，接受范围内不得仅因低于目标而要求扩写；叙事节奏问题必须另给正文证据。
+
 ======== 近期事件记录 ========
 ${reviewContext.recentEvents}
 
@@ -591,6 +625,9 @@ ${reviewContext.previousSummary}
 ======== 可引用证据来源（语义召回） ========
 ${reviewContext.semanticEvidence}
 
+======== V2 结构化故事状态 ========
+${reviewContext.structuredState || '暂无结构化状态包；涉及未确认事实时必须明确标为候选。'}
+
 ======== 待审查正文（第 ${chapterIndex + 1} 章） ========
 ${reviewContext.chapterContent}
 
@@ -598,6 +635,7 @@ ${reviewContext.chapterContent}
 
 【分级原则】
 - ❌ 严重问题：设定冲突、时间线冲突、角色状态/等级/资源错误、能力边界前后矛盾、关键情节点缺失、明显违背前文事实。此类必须修改。
+- 如果已确认 Canon/结构状态明确记载物品遗失、由特定角色持有或已移交，正文却出现相反的持有/位置状态，且没有有效证据说明找回或转交，属于资源/设定冲突，必须列为严重问题；若前文没有建立明确状态，不得仅因正文未交代物品来历就升级为硬伤。
 - ⚠️ 轻微问题：措辞可能误导、信息交代略少、过渡略跳、节奏略不稳，虽不属于硬伤，但可能影响正文合格度。此类列入建议修改；是否需要重写以“总体判断”为准。
 - 📝 编辑建议：纯润色、氛围补充、表达优化、后续写作提醒，不影响本章成立。此类不要标成“有问题”。
 
@@ -609,6 +647,8 @@ ${reviewContext.chapterContent}
 
 ## 1. 角色一致性
 - 角色言行是否符合已有的性格设定？
+- 依照章初知情状态及本章获知证据检查角色是否提前知情；本章的变化仅从对应引文处生效。怀疑、错误信念不等于客观事实，没有记载的状态应视为未知，不能据此判定矛盾。
+- 关系变化是否有正文支持，是否把单向信任误写成双向？若来源证据失效，说明需要重新核对，不可当成已证实的设定冲突。
 - 角色能力表现是否与设定等级匹配？
 - 角色称呼、外貌描写是否与前文一致？
 
@@ -641,6 +681,11 @@ ${reviewContext.chapterContent}
 
 【输出格式】
 请严格按以下结构输出：
+
+【输出长度与过程】
+- 只输出最终审查报告，不要输出思考过程、推理草稿、分析草稿或重复上下文。
+- 整份报告尽量控制在 1600 个中文字符以内。每条必改问题、建议修改和编辑建议只保留最必要的证据与结论，六维度简评每项一句话。
+- 不要复述小说设定、角色表、事件记录或完整正文；只引用判断所需的短句。
 
 # 第 ${chapterIndex + 1} 章全维度审查报告
 

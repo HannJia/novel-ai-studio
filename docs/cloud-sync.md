@@ -72,7 +72,7 @@
 
 代码在 `server/`，使用 Python 3.10+、FastAPI、Uvicorn、Argon2 和 SQLite。不是 AI 推理服务，不需要显卡。当前是单实例部署，不能把 SQLite 数据目录直接挂到不可靠的共享网络盘。
 
-部署文件针对 Ubuntu、Nginx、systemd 和挂载到 `/srv/novel-data` 的数据盘。必须为自己的地址申请证书；不要直接对其他已有业务服务器运行安装脚本。
+部署文件针对 Ubuntu、Nginx、systemd 和挂载到 `/srv/novel-data` 的数据盘。必须为自己的地址申请证书。现有安装脚本仅适用于隔离主机，不可直接用于同时承载 Maibot 或其他业务的服务器。
 
 ### 准备步骤
 
@@ -80,10 +80,10 @@
 2. 将数据盘持久挂载到 `/srv/novel-data`，核对磁盘 UUID，禁止格式化已有数据盘。服务要求挂载点存在，不会在挂载失败时误写系统盘。
 3. 将 `server/` 复制到 `/opt/novel-sync/app/server/`，安装 `python3-venv`、Nginx 和 fail2ban。
 4. 为自己的域名或公网 IP 配置可信 HTTPS。当前部署使用支持 IP 地址及短期证书的 Certbot，证书名 `novel-sync`，HTTP 验证目录 `/var/www/html`；服务不使用自签名证书或跳过证书校验。
-5. 确保 `/opt/novel-certbot/bin/certbot`、`/etc/letsencrypt/live/novel-sync/` 存在，核对 `server/deploy/nginx.conf` 的端口和证书配置后运行 `sh server/deploy/install.sh`。
+5. 确保 `/opt/novel-certbot/bin/certbot`、`/etc/letsencrypt/live/novel-sync/` 存在，核对 `server/deploy/nginx.conf` 的端口和证书配置。仅在隔离主机上运行 `sh server/deploy/install.sh`。
 6. 初次安装自动启用服务；更新服务端代码后额外执行 `systemctl restart novel-sync`。确认 `https://你的地址/v1/health` 返回协议 1。
 
-安装脚本默认仅移除 Nginx 的默认站点启用链接，不删除原配置。部署前仍应备份已有 Nginx 配置，并检查端口和其他业务。
+`server/deploy/install.sh` 会解除 `/etc/nginx/sites-enabled/default` 链接，启用自身的 `default_server`，然后重载 Nginx；它还会写入独立 systemd 单元并重启 Fail2ban。虽然不删除默认站点的原配置文件，这些操作仍可能中断同机其他业务。共用主机部署前必须先做只读盘点，并使用经过单独审查、不会禁用或覆盖其他站点/服务的部署步骤。
 
 `server/deploy/ssh-key-only.conf` 是可选的 SSH 加固示例，安装脚本不会自动启用它。先用另一个终端确认密钥登录成功、服务商控制台可用于恢复，再安装到 `/etc/ssh/sshd_config.d/00-novel-sync-key-only.conf`，运行 `sshd -t` 检查并重新加载 SSH。不要在未验证密钥时关闭密码登录。
 

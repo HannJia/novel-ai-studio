@@ -7,6 +7,8 @@ import { useNovelStore } from '@/stores/novel'
 import { useConfigStore } from '@/stores/config'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import { chatWithOptionalSearch } from '@/services/chatSearch'
+import { useReconstructionWorkspaceStore } from '@/stores/reconstructionWorkspace'
+import { createStoryMemoryBinding } from '@/services/storyMemory'
 
 vi.mock('@/services/chatSearch', () => ({ chatWithOptionalSearch: vi.fn() }))
 beforeEach(() => { setActivePinia(createPinia()); vi.mocked(chatWithOptionalSearch).mockReset() })
@@ -25,6 +27,46 @@ function setup() {
 }
 
 describe('chat lifecycle and book isolation', () => {
+  it('uses valid earlier manuscript memories and omits future or changed ones', async () => {
+    const { first, scope, store } = setup()
+    const chapters = ['开篇证词。', '正在编辑。', '终局真相。'].map(content => store.addChapter(first.id, { content })!)
+    const memories = [0, 2].map((index, i) => {
+      const memoryScope = { kind: 'book' as const, throughChapterId: chapters[index].id }
+      const summary = i ? '未来回顾不可提前进入。' : '前文回顾可以使用。'
+      return { id: 'memory-' + i, novelId: first.id, title: '回顾', scope: memoryScope, summary, history: [],
+        source: createStoryMemoryBinding(first, memoryScope, summary, 'author', first.createdAt) }
+    })
+    useReconstructionWorkspaceStore().storyMemoriesByNovel[first.id] = memories
+    const local = effectScope(), chat = local.run(() => useAssistantChat(() => first.id, () => chapters[1].id))!
+    vi.mocked(chatWithOptionalSearch).mockResolvedValue({ content: '建议' })
+    chat.inputText.value = '结合前文帮我想一想'; await chat.sendMessage()
+    const prompt = vi.mocked(chatWithOptionalSearch).mock.calls[0][0].messages[0].content
+    expect(prompt).toContain(memories[0].summary)
+    expect(prompt).not.toContain(memories[1].summary)
+    store.updateChapter(first.id, chapters[0].id, { content: '作者改写了开篇。' })
+    chat.inputText.value = '再次检查'; await chat.sendMessage()
+    expect(vi.mocked(chatWithOptionalSearch).mock.calls[1][0].messages[0].content).not.toContain(memories[0].summary)
+    local.stop(); scope.stop()
+  })
+
+  it('excludes unconfirmed or stale chapter summaries and uses them only after confirmation', async () => {
+    const { chat, first, scope, store } = setup()
+    const chapter = store.addChapter(first.id, { content: '作者正文。' })!
+    store.updateChapter(first.id, chapter.id, { summary: '独特摘要：白塔钥匙归苏禾。', summarySource: undefined })
+    vi.mocked(chatWithOptionalSearch).mockResolvedValue({ content: '已检查' })
+    const ask = async () => {
+      chat.inputText.value = '整理目前剧情'
+      await chat.sendMessage()
+      const calls = vi.mocked(chatWithOptionalSearch).mock.calls
+      return calls[calls.length - 1][0].messages[0].content
+    }
+    expect(await ask()).not.toContain('白塔钥匙归苏禾')
+    store.updateChapter(first.id, chapter.id, { summary: chapter.summary })
+    expect(await ask()).toContain('白塔钥匙归苏禾')
+    store.updateChapter(first.id, chapter.id, { content: '作者修改了正文。' })
+    expect(await ask()).not.toContain('白塔钥匙归苏禾')
+    scope.stop()
+  })
   it('knows software operations and reads only mounted book knowledge with updates visible next turn', async () => {
     const { chat, first, scope, store } = setup()
     const knowledge = useKnowledgeStore()

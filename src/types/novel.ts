@@ -1,6 +1,10 @@
 import type { ChatSearchRecord } from './chat'
+import type { CreationEntryInput } from './creationEntry'
 import type { ChapterLengthPolicy } from '@/services/chapterLength'
 import type { StoredReviewCoverage } from '@/services/chapterReviewCoverage'
+import type { ChapterSourceBinding } from './derivedSources'
+import type { EntityProvenance } from './entityProvenance'
+import type { StoryTimeOrigin, StoryTimeRecord, StoryTimePointSource } from './storyTime'
 
 // 小说分类类型
 export interface Genre {
@@ -23,16 +27,18 @@ export interface Character {
   personality: string       // 性格
   powerLevel: string        // 实力等级
   faction: string           // 阵营/势力
-  status: '活跃' | '退场' | '死亡' | '失踪'
+  status: '活跃' | '退场' | '死亡' | '失踪' | '待核对'
   firstAppearChapter: number // 首次出场章节
   description: string       // 详细描述
   relationships: CharacterRelation[]
   events: string[]          // 关键事件
   avatarColor: string       // 头像卡片颜色
   avatarId?: string         // 内置头像的稳定 ID；省略或空值时按身份匹配
+  provenance?: EntityProvenance
 }
 
 interface CharacterRelation {
+  dimension?: string
   targetId: string          // 关联角色 ID
   targetName: string        // 关联角色名
   relation: string          // 关系描述
@@ -47,7 +53,7 @@ export interface EventLogEntry {
   characters: string[]      // 相关角色
   type: '主线' | '支线' | '伏笔' | '转折' | '战斗' | '其他'
   scope?: 'global' | 'volume' | 'chapter' // 事件追踪范围
-  status?: 'planted' | 'developing' | 'resolved' | 'abandoned' // 进度状态
+  status?: 'planted' | 'developing' | 'resolved' | 'abandoned' | 'unverified' // 进度状态
   hintCount?: number        // 已铺垫/提及次数
   storyTime?: string        // 故事内时间，如“玄历三年春”
   location?: string         // 事件发生地点
@@ -60,10 +66,11 @@ export interface EventLogEntry {
   resolvedChapterIndex?: number
   updatedAt?: string
   timestamp: string
+  provenance?: EntityProvenance
 }
 
 export type StoryArcType = 'main' | 'sub' | 'character' | 'relationship' | 'mystery' | 'world'
-export type StoryArcStatus = 'active' | 'paused' | 'completed' | 'abandoned'
+export type StoryArcStatus = 'active' | 'paused' | 'completed' | 'abandoned' | 'unverified'
 
 export interface StoryArcNode {
   id: string
@@ -71,7 +78,10 @@ export interface StoryArcNode {
   description: string
   targetChapter: number     // 预计发生章节（从 0 开始）
   actualChapter?: number    // 实际发生章节（从 0 开始）
-  status: 'pending' | 'completed' | 'abandoned'
+  status: 'pending' | 'completed' | 'abandoned' | 'unverified'
+  prerequisiteNodeIds?: string[]
+  consequenceEventIds?: string[]
+  provenance?: EntityProvenance
   createdAt: string
   updatedAt: string
 }
@@ -85,6 +95,18 @@ export interface StoryArc {
   status: StoryArcStatus
   reactivateAt: string
   characterIds: string[]
+  goal?: string
+  conflict?: string
+  expectedResolution?: string
+  dependencyArcIds?: string[]
+  /** Character development is a plan; changes in the story need chapter evidence. */
+  initialState?: string
+  desire?: string
+  fear?: string
+  falseBelief?: string
+  finalState?: string
+  turningPointEventIds?: string[]
+  provenance?: EntityProvenance
   nodes: StoryArcNode[]
   createdAt: string
   updatedAt: string
@@ -134,6 +156,7 @@ export interface StoryStateProposal {
   newValue: string
   reason: string
   evidence: string
+  chapterSource?: Extract<import('./entityProvenance').EntitySource, { kind: 'chapter' }>
   eventDraft?: StoryEventDraft
   chapterIndex: number
   status: 'pending' | 'accepted' | 'rejected'
@@ -157,15 +180,22 @@ export interface DataPanelAutomationRule {
   enabled: boolean
   lastEvaluatedChapterIndex?: number
   lastSourceValue?: number
+  storyTimeCursor?: DataPanelTimeCursor
+  /** Author reconfirmed the value; resume at the next selected chapter end, without replaying old elapsed days. */
+  storyTimeCursorPending?: boolean
   appliedCount?: number
   pendingChapterIndex?: number
 }
 
 export interface StoryClock {
+  /** Cached display only. Effective facts require story-time projection and source validation. */
   currentDay: number
   label: string
   lastChapterIndex?: number
   updatedAt: string
+  origin?: StoryTimeOrigin
+  history?: StoryTimeRecord[]
+  confirmationSequence?: number
 }
 
 export interface DataPanelField {
@@ -196,6 +226,7 @@ export interface DataPanelItem {
   equipmentState?: EquipmentState
   lastMentionChapterIndex?: number
   versions?: DataPanelVersion[]
+  referenceHistory?: DataPanelReferenceHistory
   createdAt: string
   updatedAt: string
 }
@@ -222,6 +253,38 @@ type DataPanelMutation =
   | { kind: 'equipment'; ownerItemName: string; state: EquipmentState }
   | { kind: 'field'; field: DataPanelField }
 
+export interface DataPanelRuleStep { ruleId: string; steps: number }
+export interface DataPanelTimeCursor { value: number; sources: StoryTimePointSource[] }
+export interface DataPanelAutomationTime {
+  end: StoryTimePointSource
+  cursors: Array<{ ruleId: string; cursor: DataPanelTimeCursor }>
+}
+export type DataPanelProposalSource = (
+  | { kind: 'author'; novelId: string; referenceVersion: string }
+  | { kind: 'chapter'; novelId: string; chapterId: string; sourceVersionId: string; referenceVersion: string; quote: string }
+  | { kind: 'automation'; novelId: string; chapterId: string; sourceVersionId: string; referenceVersion: string; ruleSteps: DataPanelRuleStep[]; time?: DataPanelAutomationTime }
+) & { ownerTarget?: { name: string; itemId: string | null } }
+
+export type DataPanelReferenceValue = string | number | boolean | string[] | DataPanelField
+export type DataPanelReferenceSource = { kind: 'author' } | { kind: 'unverified' }
+  | (Exclude<DataPanelProposalSource, { kind: 'author' }> & { chapterIndex: number })
+export interface DataPanelReferenceChange {
+  key: string
+  before?: DataPanelReferenceValue
+  after?: DataPanelReferenceValue
+}
+export interface DataPanelReferenceRevision {
+  id: string
+  appliedAt: string
+  source: DataPanelReferenceSource
+  changes: DataPanelReferenceChange[]
+  dependencies?: Record<string, DataPanelReferenceValue>
+}
+export interface DataPanelReferenceHistory {
+  baseline: Record<string, DataPanelReferenceValue>
+  revisions: DataPanelReferenceRevision[]
+}
+
 export interface DataPanelChange {
   id: string
   itemId: string
@@ -232,6 +295,8 @@ export interface DataPanelChange {
   newValue: string
   reason: string
   confidence?: 'clear' | 'possible' | 'none'
+  sourceBinding?: DataPanelProposalSource
+  updatedAt?: string
   mutation?: DataPanelMutation
   chapterIndex: number
   status: 'pending' | 'accepted' | 'rejected'
@@ -349,11 +414,12 @@ export interface PlanningVersion {
 // 章节数据类型
 export interface Chapter {
   id: string
-  volumeIndex: number     // 所属卷序号
+  volumeIndex: number     // 所属卷序号，-1 表示未分卷
   chapterIndex: number    // 章节序号（全局）
   title: string           // 章节名（AI 生成或用户编辑）
   content: string         // 正文内容
   summary: string         // 章节总结（AI 生成）
+  summarySource?: ChapterSourceBinding // 摘要依据的正文及摘要内容版本
   bannedReview?: string   // 违禁词审查结果
   contentReview?: string  // 内容一致性审查结果
   contentReviewSignature?: string // 内容审查对应的正文签名
@@ -387,6 +453,12 @@ export interface ChapterVersion {
 
 export type ChapterRevisionSource = 'ai' | 'user' | 'review'
 export type ChapterRevisionStatus = 'pending' | 'accepted' | 'rejected' | 'stale'
+export interface ChapterSelectionRevision {
+  mode: 'polish' | 'rewrite' | 'expand' | 'shorten' | 'continue'
+  startOffset: number
+  endOffset: number
+  contextVersion: string
+}
 
 export interface ChapterRevision {
   id: string
@@ -401,6 +473,7 @@ export interface ChapterRevision {
   createdAt: string
   updatedAt: string
   appliedAt?: string
+  selection?: ChapterSelectionRevision
 }
 
 // 小说数据类型
@@ -417,12 +490,15 @@ export interface Novel {
   currentWordCount: number    // 当前字数
   writingStyle: WritingStyle
   writingMode?: 'manual' | 'ai'
+  /** 作者手动选择的内置封面；缺省按作品类型自动匹配。只影响界面显示。 */
+  coverId?: string
   chapterLengthPolicy?: ChapterLengthPolicy // 缺省沿用默认篇幅，不更改既有字数统计
   settings: NovelSettings
   outline: string           // 总大纲内容（Markdown）
   synopsis: string          // 小说简介
   volumes: Volume[]         // 分卷列表
   chapters: Chapter[]       // 章节列表
+  archivedChapters?: Array<Chapter & { archivedAt: string }> // 删除后的原文和历史；不参与当前故事上下文
   characters: Character[]   // 角色库
   chatHistory: DialogueMessage[] // 书内助手对话，不含创建前的灵感讨论
   inspirationHistory?: DialogueMessage[] // 创建时确认保留的灵感存档，不受助手历史上限影响
@@ -443,6 +519,11 @@ export interface Novel {
 
 // 创建向导表单数据
 export interface CreateWizardForm {
+  workingTitle?: string
+  /** Initial author input only; carried into creationDraft by the initial aggregate commit. */
+  creationInput?: CreationEntryInput
+  /** Present only when the author has reviewed the visible initial-time setting. */
+  storyTimeOrigin?: { day: number; label?: string }
   writingMode?: 'manual' | 'ai'
   knowledgeEnabled?: boolean
   knowledgeBaseIds?: string[]

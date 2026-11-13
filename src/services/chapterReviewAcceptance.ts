@@ -1,5 +1,6 @@
 import { MAX_REVIEW_CHUNKS } from './chapterReviewCoverage'
 import type { StoredReviewCoverage } from './chapterReviewCoverage'
+import { copyReviewCheckpoint, isReviewCheckpoint } from './chapterReviewCheckpoint'
 
 function isFiniteInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)
@@ -62,6 +63,17 @@ export function normalizeStoredReviewCoverage(value: unknown): StoredReviewCover
     }
   }
 
+  let checkpoint: StoredReviewCoverage['checkpoint']
+  if (obj.checkpoint !== undefined) {
+    if (!isReviewCheckpoint(obj.checkpoint)) return undefined
+    checkpoint = obj.checkpoint
+    if (checkpoint.totalCharacters !== obj.totalCharacters
+      || checkpoint.totalChunks !== obj.totalChunks
+      || checkpoint.chunks.length !== obj.completedChunks
+      || (checkpoint.chunks[checkpoint.chunks.length - 1]?.end || 0) !== obj.coveredCharacters
+      || (obj.globalStatus === 'complete' && checkpoint.globalReport === undefined)) return undefined
+  }
+
   if (obj.status === 'complete' && (obj.completedChunks !== obj.totalChunks
     || obj.coveredCharacters !== obj.totalCharacters
     || (isMultiChunk && obj.globalStatus !== 'complete')
@@ -77,6 +89,7 @@ export function normalizeStoredReviewCoverage(value: unknown): StoredReviewCover
     status: obj.status,
     ...(obj.failedChunk !== undefined && { failedChunk: obj.failedChunk }),
     ...(obj.error !== undefined && { error: obj.error }),
+    ...(checkpoint !== undefined && { checkpoint: copyReviewCheckpoint(checkpoint) }),
   }
 }
 
@@ -90,6 +103,7 @@ export function isReviewCoverageComplete(
 
   if (coverage.signature !== expectedSignature) return false
   if (coverage.totalCharacters !== source.length) return false
+  if (coverage.checkpoint !== undefined && !isReviewCheckpoint(coverage.checkpoint, source)) return false
 
   if (coverage.status !== 'complete') return false
   if (coverage.completedChunks !== coverage.totalChunks) return false

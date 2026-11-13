@@ -1,3 +1,4 @@
+import type { StoryMemoryRecord } from '@/types/storyMemory'
 import { callAI, type ChatMessage } from '@/services/ai'
 import {
   augmentWritingContextWithVectorMemory,
@@ -6,8 +7,10 @@ import {
 } from '@/services/context'
 import type { ModelConfig, EmbeddingConfig } from '@/stores/config'
 import type { Chapter, Novel } from '@/types/novel'
+import type { CanonMutationRecord, CreationDraft } from '@/types/reconstruction'
 import { parseAiJsonObject } from '@/utils/aiJson'
 import { buildSoftwareAssistantContext } from './softwareAssistantContext'
+import { assertStructuredOutputComplete } from './aiDiagnostics'
 
 export type WritingAdviceMode = 'paragraph' | 'scene' | 'chapter'
 export type WritingAdviceKind = 'conflict' | 'investigation' | 'relationship' | 'revelation' | 'scene' | 'pacing'
@@ -46,6 +49,10 @@ export interface WritingAdviceResult {
 }
 
 export interface WritingAdviceRequest {
+  creationDraft?: CreationDraft
+  canonMutations?: CanonMutationRecord[]
+  storyMemories?: StoryMemoryRecord[]
+  readStoryMemories?: () => StoryMemoryRecord[]
   model: ModelConfig
   novel: Novel
   chapter: Chapter
@@ -138,7 +145,8 @@ export function buildWritingAdvicePrompt(
   currentContent = chapter.content,
 ): ChatMessage[] {
   const contextText = context.outlineContext.slice(0, 7000)
-  const planText = context.chapterGuidance.slice(0, 2200)
+  // 作者已批准的禁揭信息与后续场景不能被任意截掉，否则建议会遗漏关键约束。
+  const planText = context.chapterGuidance
   const summaryText = context.previousSummary.slice(-2200)
   const previousEnding = context.lastParagraph.slice(-1000)
   const chapterContent = limitText(currentContent, 6000)
@@ -170,6 +178,9 @@ ${previousEnding || '暂无'}
 
 【故事资料与已确认事实】
 ${contextText || '暂无'}
+
+【按章节还原的人物状态与约束】
+${context.structuredState || '暂无已确认状态；不得推定角色不知情。'}
 
 【输出要求】
 输出 JSON 对象，不要代码块，不要解释：
@@ -246,19 +257,22 @@ export async function requestWritingAdvice(request: WritingAdviceRequest): Promi
   const contextChapter = request.chapter.content === request.content
     ? request.chapter
     : { ...request.chapter, content: request.content }
-  let context = buildWritingContext(request.novel, contextChapter, request.model.contextWindow)
+  let context = buildWritingContext(request.novel, contextChapter, request.model.contextWindow, request.creationDraft, request.canonMutations, request.storyMemories)
   context = await augmentWritingContextWithVectorMemory(
     request.novel,
     contextChapter,
     context,
     request.embeddingConfig,
+    request.readStoryMemories || (() => request.storyMemories || []),
   )
   const result = await callAI({
     model: request.model,
     skillTask: 'planning',
+    noAutomaticRetry: true,
     messages: buildWritingAdvicePrompt(request.novel, request.chapter, request.focus, request.mode, context, request.content),
     maxTokens: Math.min(request.model.maxTokens || 2400, 2600),
     signal: request.signal,
   })
+  assertStructuredOutputComplete(result, '写作建议')
   return parseWritingAdviceResult(result.content, request.mode, request.focus, context)
 }

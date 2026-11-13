@@ -4,6 +4,7 @@ import path from 'node:path'
 import os from 'node:os'
 import vm from 'node:vm'
 import { createRequire } from 'node:module'
+import { Buffer } from 'node:buffer'
 
 const mainPath = path.resolve('app-main/main.js')
 const requireLocal = createRequire(mainPath)
@@ -46,18 +47,23 @@ describe('desktop file and instance safety', () => {
   })
   it.each([true, false])('uses a single-instance lock (%s) and restores the existing window', async locked => {
     const events = new Map<string, (...args: unknown[]) => void>()
+    const handlers = new Map<string, (event: unknown, request: unknown) => Promise<any>>()
+    const userData = temp()
     const ready = Promise.resolve()
     const app = { requestSingleInstanceLock: vi.fn(() => locked), quit: vi.fn(), isPackaged: false,
+      getPath: () => userData,
       whenReady: () => ready, on: (event: string, callback: (...args: unknown[]) => void) => events.set(event, callback) }
+    const nativeImage = { createFromDataURL: vi.fn(() => ({})) }
     const restore = vi.fn()
     const focus = vi.fn()
     const Window = vi.fn(function () { return { on: vi.fn(), loadURL: vi.fn(), isDestroyed: () => false, isMinimized: () => true,
-      restore, show: vi.fn(), focus, webContents: { openDevTools: vi.fn(), setWindowOpenHandler: vi.fn(), on: vi.fn() } } })
+      restore, show: vi.fn(), focus, webContents: { mainFrame: { url: 'http://localhost:5173/' }, openDevTools: vi.fn(), setWindowOpenHandler: vi.fn(), on: vi.fn() } } })
     Object.assign(Window, { getAllWindows: () => [] })
     const powerMonitor = { on: vi.fn() }
     vm.runInNewContext(fs.readFileSync(mainPath, 'utf8'), {
-      require: (name: string) => name === 'electron' ? { app, BrowserWindow: Window, powerMonitor, ipcMain: { handle: vi.fn(), on: vi.fn() } } : requireLocal(name),
-      process: { env: {}, platform: 'win32' }, __dirname: path.dirname(mainPath), console, setTimeout, clearTimeout, URL,
+      require: (name: string) => name === 'electron' ? { app, BrowserWindow: Window, powerMonitor, nativeImage,
+        ipcMain: { handle: (name: string, fn: (event: unknown, request: unknown) => Promise<any>) => handlers.set(name, fn), on: vi.fn() } } : requireLocal(name),
+      process: { env: {}, platform: 'win32' }, __dirname: path.dirname(mainPath), Buffer, console, setTimeout, clearTimeout, URL,
     })
     await ready
     expect(Window).toHaveBeenCalledTimes(locked ? 1 : 0)
@@ -66,6 +72,17 @@ describe('desktop file and instance safety', () => {
       events.get('second-instance')?.()
       expect(restore).toHaveBeenCalledOnce()
       expect(focus).toHaveBeenCalledOnce()
+      const projectRequest = handlers.get('project:request')!
+      const sender = Window.mock.results[0].value.webContents
+      for (const event of [{ sender: {}, senderFrame: sender.mainFrame },
+        { sender, senderFrame: { url: sender.mainFrame.url } }]) {
+        expect(await projectRequest(event, { method: 'read' })).toMatchObject({ ok: false })
+      }
+      sender.mainFrame.url = 'https://untrusted.example/'
+      expect(await projectRequest({ sender, senderFrame: sender.mainFrame }, { method: 'read' })).toMatchObject({ ok: false })
+      expect(fs.existsSync(path.join(userData, 'projects-v2'))).toBe(false)
+      sender.mainFrame.url = 'http://localhost:5173/'
+      expect(await projectRequest({ sender, senderFrame: sender.mainFrame }, { method: 'read' })).toMatchObject({ ok: true, value: { backup: null } })
     } else expect(app.quit).toHaveBeenCalledOnce()
   })
   it('allows only the explicit local vector port without enabling unsafe script evaluation', () => {

@@ -8,6 +8,7 @@ import {
 import { buildChapterEndingCheckPrompt, buildChapterEndingContinuationPrompt } from '@/services/prompts'
 import type { ModelConfig } from '@/stores/config'
 import { parseAiJsonObject } from '@/utils/aiJson'
+import { assertStructuredOutputComplete, structuredOutputDiagnostic } from '@/services/aiDiagnostics'
 
 export type { ChapterEndingCheck }
 
@@ -25,14 +26,19 @@ export function useChapterEndingCheck() {
       skillTask: 'review',
       messages: buildChapterEndingCheckPrompt(chapterText, chapterGuidance, writingPlan),
       maxTokens: 900,
+      structuredOutput: 'concise-json',
       signal,
       taskName: '章节结尾检查',
       noAutomaticRetry: true,
       activityParentId,
     })
     signal?.throwIfAborted()
-    if (result.finishReason && result.finishReason !== 'stop') throw new Error('结尾检查输出未正常完成，请检查模型输出上限后重试')
-    return normalizeChapterEndingCheck(parseAiJsonObject(result.content))
+    assertStructuredOutputComplete(result, '结尾检查')
+    const parsed = parseAiJsonObject<{ isComplete?: unknown }>(result.content)
+    if (!parsed || typeof parsed.isComplete !== 'boolean') {
+      throw new Error(`结尾检查返回格式无效，需要 JSON 布尔字段 isComplete；未将格式错误当作章节不完整（${structuredOutputDiagnostic(result)}）`)
+    }
+    return normalizeChapterEndingCheck(parsed)
   }
 
   async function generateEndingContinuation(

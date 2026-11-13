@@ -3,7 +3,9 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 // 向渲染进程暴露安全的 API
 contextBridge.exposeInMainWorld('electronAPI', {
+  clipboardWriteText: (value) => ipcRenderer.invoke('clipboard:write-text', value),
   getVersion: () => process.versions.electron,
+  projectRequest: (request) => ipcRenderer.invoke('project:request', request),
   // 数据库文件操作
   dbRead: () => ipcRenderer.invoke('db:read'),
   dbReadBackup: () => ipcRenderer.invoke('db:readBackup'),

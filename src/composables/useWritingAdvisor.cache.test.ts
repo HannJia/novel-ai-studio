@@ -88,7 +88,7 @@ describe('advisor cache lifecycle', () => {
     scope.stop()
   })
 
-  it.each(['settings', 'outline', 'plans', 'knowledge'] as const)('detects %s changes without starting an automatic analysis', async target => {
+  it.each(['settings', 'outline', 'plans', 'knowledge', 'notes', 'length'] as const)('detects %s changes without starting an automatic analysis', async target => {
     const { advisor, book, scope } = setup()
     const knowledge = useKnowledgeStore()
     const base = knowledge.createKB('资料', '')
@@ -98,6 +98,8 @@ describe('advisor cache lifecycle', () => {
     if (target === 'outline') book.outline = '新大纲'
     if (target === 'plans') book.chapterPlans = [{ id: 'new-plan' } as any]
     if (target === 'knowledge') knowledge.knowledgeBases[0].description = '新资料'
+    if (target === 'notes') book.chapters[0].sceneNotes = [{ id: 'note', title: '作者提示', content: '先不要开门', source: 'user', createdAt: book.createdAt, updatedAt: book.createdAt }]
+    if (target === 'length') book.chapterLengthPolicy = { minWords: 1000, targetWords: 2000, maxWords: 3000 }
     advisor.selectMode('scene')
     advisor.selectMode('paragraph')
     expect(advisor.stale.value).toBe(true)

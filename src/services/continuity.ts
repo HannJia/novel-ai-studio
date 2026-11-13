@@ -1,4 +1,5 @@
 import type { Chapter, Novel } from '@/types/novel'
+import { withCurrentStoryEntities } from './effectiveStory'
 
 type ContinuityAlertLevel = 'warning' | 'info'
 
@@ -17,6 +18,7 @@ function numberPattern(value: string): RegExp {
 
 /** Fast local checks only; this never mutates story data or calls an API. */
 export function scanContinuity(novel: Novel, chapter: Chapter, content: string): ContinuityAlert[] {
+  novel = withCurrentStoryEntities(novel, chapter.chapterIndex)
   const text = content.trim()
   if (!text) return []
   const alerts: ContinuityAlert[] = []
@@ -43,7 +45,7 @@ export function scanContinuity(novel: Novel, chapter: Chapter, content: string):
     }
   }
 
-  const previous = novel.chapters.filter(item => item.id !== chapter.id && item.content.trim())
+  const previous = novel.chapters.filter(item => item.chapterIndex < chapter.chapterIndex && item.content.trim())
   const firstSentence = text.split(/[。！？!?\n]/).map(item => item.trim()).find(item => item.length >= 18)
   if (firstSentence && previous.some(item => item.content.includes(firstSentence))) {
     add('info', '段落疑似重复', '本章开头有一段与其他章节完全相同的文字，可能是复制残留。', firstSentence.slice(0, 90))

@@ -1,3 +1,9 @@
+import { getCurrentChapterSummary } from '@/services/derivedSources'
+import type { StoryMemoryRecord } from '@/types/storyMemory'
+import { formatStoryMemoryContext } from './storyMemory'
+import { withCurrentStoryEntities } from './effectiveStory'
+import { formatArcDesign } from './storyArcEditing'
+import { bindStoryProposalSource } from './storyProposalSource'
 import type { ModelConfig } from '@/stores/config'
 import type {
   Chapter, ChapterPlan, ChapterPlanHorizon, Novel, StoryStateProposal,
@@ -6,11 +12,22 @@ import type {
 import { callAI } from '@/services/ai'
 import { parseAiJsonObject } from '@/utils/aiJson'
 import { buildBoundKnowledgeContext } from '@/services/knowledgeContext'
+import { assertStructuredOutputComplete } from './aiDiagnostics'
 
 export type ChapterPlanDraft = Omit<ChapterPlan, 'id' | 'createdAt' | 'updatedAt'>
 export type StoryStateProposalDraft = Omit<StoryStateProposal, 'id' | 'status' | 'createdAt' | 'updatedAt'>
 
-export interface StoryArcDraft {
+interface ArcDesignText {
+  goal?: string
+  conflict?: string
+  expectedResolution?: string
+  initialState?: string
+  desire?: string
+  fear?: string
+  falseBelief?: string
+  finalState?: string
+}
+export interface StoryArcDraft extends ArcDesignText {
   title: string
   description: string
   type: StoryArcType
@@ -53,7 +70,7 @@ interface AiStoryPromise {
   targetChapter?: unknown
 }
 
-interface AiStoryArc {
+interface AiStoryArc extends ArcDesignText {
   title?: string
   description?: string
   type?: string
@@ -79,8 +96,8 @@ function compact(value: string, limit: number): string {
 }
 
 export function hasChapterEvidence(content: string, evidence: string): boolean {
-  const quote = compact(evidence, 600)
-  return quote.length >= 4 && content.replace(/\s+/g, ' ').includes(quote)
+  return evidence.trim().length >= 4 && content.includes(evidence)
+    && content.indexOf(evidence) === content.lastIndexOf(evidence)
 }
 
 function stringList(value: unknown, limit = 12): string[] {
@@ -133,10 +150,13 @@ function planningTargets(novel: Novel) {
       id: arc.id,
       title: arc.title,
       description: compact(arc.description, 260),
+      design: formatArcDesign(arc),
       nodes: arc.nodes.filter(node => node.status === 'pending').map(node => ({
         id: node.id,
         title: node.title,
         targetChapter: node.targetChapter + 1,
+        prerequisiteNodeIds: node.prerequisiteNodeIds || [],
+        consequenceEventIds: node.consequenceEventIds || [],
       })),
     })),
     events: (novel.eventLog || []).filter(event => !['resolved', 'abandoned'].includes(event.status || '')).map(event => ({
@@ -170,12 +190,15 @@ export function normalizeStoryArcDrafts(arcs: AiStoryArc[]): StoryArcDraft[] {
       type,
       importance,
       characterNames: stringList(raw.characterNames, 20),
+      ...Object.fromEntries(['goal', 'conflict', 'expectedResolution', 'initialState', 'desire', 'fear', 'falseBelief', 'finalState']
+        .flatMap(key => { const value = raw[key as keyof ArcDesignText]; return typeof value === 'string' && value.trim() ? [[key, value.trim().slice(0, 1200)]] : [] })),
       nodes,
     }]
   })
 }
 
 export async function generateStoryArcDrafts(novel: Novel, model: ModelConfig): Promise<StoryArcDraft[]> {
+  novel = withCurrentStoryEntities(novel)
   if (!novel.outline.trim()) throw new Error('缺少总大纲，无法提取故事弧线')
   const knowledgeContext = buildBoundKnowledgeContext(novel, `${novel.title}\n${novel.outline}`, 10, 900)
   const result = await callAI({
@@ -185,6 +208,7 @@ export async function generateStoryArcDrafts(novel: Novel, model: ModelConfig): 
     messages: [{
       role: 'system',
       content: `你是小说结构编辑。请从总大纲提取跨章节叙事弧线和关键里程碑，只输出严格 JSON，不要解释。
+每条弧线分别填写 goal（目标）、conflict（核心冲突）、expectedResolution（预期收束）。type 为 character 时还应填写 initialState、desire、fear、falseBelief、finalState，描述预期人物成长；这都是待作者确认的计划，不能声称已经发生。
 
 ${knowledgeContext || '当前小说没有匹配的挂载知识库内容。'}`,
     }, {
@@ -198,14 +222,15 @@ ${knowledgeContext || '当前小说没有匹配的挂载知识库内容。'}`,
   return drafts
 }
 
-export async function generateChapterPlanDrafts(novel: Novel, model: ModelConfig): Promise<ChapterPlanDraft[]> {
+export async function generateChapterPlanDrafts(novel: Novel, model: ModelConfig, storyMemories: StoryMemoryRecord[] = []): Promise<ChapterPlanDraft[]> {
+  novel = withCurrentStoryEntities(novel)
   const nextChapter = nextWritableChapterIndex(novel)
   const targets = planningTargets(novel)
   const knowledgeContext = buildBoundKnowledgeContext(novel, `${novel.title}\n${novel.outline}\n${novel.volumes.map(volume => `${volume.title} ${volume.summary}`).join('\n')}`, 10, 900)
   const result = await callAI({
     model,
     skillTask: 'planning',
-    maxTokens: 3200,
+    maxTokens: model.maxTokens,
     messages: [{
       role: 'system',
       content: `你是长篇小说的章节策划编辑。把总纲拆成 next、near、far 三层滚动计划。只输出严格 JSON，不解释。
@@ -219,6 +244,7 @@ ${knowledgeContext || '当前小说没有匹配的挂载知识库内容。'}`,
 - next：1 条，只覆盖下一章，必须给出可直接写作的目标与 3-6 个节拍。
 - near：2-4 条，覆盖随后约 2-10 章，明确冲突升级和信息释放。
 - far：1-3 条，覆盖更远章节，只保留方向、关键转折和收束条件。
+- 若已确认的短篇或当前剩余篇幅不足以上层数，可以减少或省略 near、far；不得为了凑层数扩展结局后的章节。
 - 章节号从 1 开始。不得重复已完成剧情，不得创造与总纲冲突的新设定。
 
 【总纲】
@@ -230,7 +256,9 @@ ${novel.volumes.length
   : '尚未建立分卷规划；请仅生成保守的首批计划，并避免虚构跨卷结构。'}
 
 【最近章节】
-${novel.chapters.slice(-5).map(chapter => `第${chapter.chapterIndex + 1}章 ${chapter.title}：${compact(chapter.summary || chapter.content, 420)}`).join('\n') || '暂无'}
+${novel.chapters.slice(-5).map(chapter => `第${chapter.chapterIndex + 1}章 ${chapter.title}：${compact(getCurrentChapterSummary(chapter) || chapter.content, 420)}`).join('\n') || '暂无'}
+
+${formatStoryMemoryContext(novel, storyMemories, nextChapter, 2500)}
 
 【可关联目标，relatedArcIds / relatedEventIds 只能使用这里的 id】
 ${JSON.stringify(targets)}
@@ -239,6 +267,9 @@ ${JSON.stringify(targets)}
 {"plans":[{"horizon":"next|near|far","title":"计划名","objective":"阶段目标","summary":"冲突、推进与预期变化","beats":["节拍1"],"targetChapterStart":1,"targetChapterEnd":1,"relatedArcIds":["id"],"relatedEventIds":["id"]}]}`,
     }],
   })
+  if (result.finishReason && result.finishReason !== 'stop') {
+    throw new Error('章节计划未完整返回，请提高模型最大输出或缩小规划范围后重试。')
+  }
   const parsed = parseAiJsonObject<{ plans?: AiPlan[]; chapterPlans?: AiPlan[]; chapter_plans?: AiPlan[] }>(result.content)
   const rawPlans = parsed?.plans || parsed?.chapterPlans || parsed?.chapter_plans || []
   const drafts = normalizeChapterPlanDrafts(novel, Array.isArray(rawPlans) ? rawPlans : [])
@@ -303,9 +334,10 @@ export function normalizeStoryStateProposalDrafts(
   chapter: Chapter,
   proposals: AiProposal[],
 ): StoryStateProposalDraft[] {
+  const allowedTargets = stateTargets(novel, chapter)
   return proposals.slice(0, 20).flatMap(raw => {
     const target = currentTargetValue(novel, raw)
-    if (!target) return []
+    if (!target || !targetIsAllowed(allowedTargets, target)) return []
     if (!hasChapterEvidence(chapter.content, String(raw.evidence || ''))) return []
     let newValue = String(raw.newValue ?? '').trim()
     if (target.field === 'status') {
@@ -325,7 +357,8 @@ export function normalizeStoryStateProposalDrafts(
       oldValue: target.value,
       newValue,
       reason: compact(String(raw.reason || '章节正文已体现对应变化'), 500),
-      evidence: compact(String(raw.evidence || ''), 600),
+      evidence: String(raw.evidence || ''),
+      chapterSource: bindStoryProposalSource(chapter, String(raw.evidence || '')),
       chapterIndex: chapter.chapterIndex,
       source: 'ai' as const,
     }]
@@ -342,7 +375,7 @@ export function normalizeStoryPromiseDrafts(
   return promises.slice(0, 5).flatMap(raw => {
     const title = compact(String(raw.title || ''), 120)
     const description = compact(String(raw.description || ''), 600)
-    const evidence = compact(String(raw.evidence || ''), 200)
+    const evidence = String(raw.evidence || '')
     if (!title || !description || !hasChapterEvidence(chapter.content, evidence)) return []
     const key = title.toLocaleLowerCase()
     if (seen.has(key) || novel.eventLog.some(event => event.type === '伏笔'
@@ -362,6 +395,7 @@ export function normalizeStoryPromiseDrafts(
       newValue: 'planted',
       reason: description,
       evidence,
+      chapterSource: bindStoryProposalSource(chapter, evidence),
       eventDraft: {
         title, description, evidence, targetChapter,
         characters: stringList(raw.characters, 12),
@@ -387,6 +421,7 @@ function stateTargets(novel: Novel, chapter: Chapter) {
         + (a.nodes.some(node => chapter.content.includes(node.title)) ? 500 : 0)))
       .slice(0, 25).map(arc => ({
       id: arc.id, title: arc.title, status: arc.status, description: compact(arc.description, 140),
+      design: formatArcDesign(arc),
       nodes: arc.nodes.filter(node => node.status === 'pending')
         .sort((a, b) => relevance(b.title, b.targetChapter) - relevance(a.title, a.targetChapter))
         .slice(0, 8).map(node => ({
@@ -415,12 +450,34 @@ function stateTargets(novel: Novel, chapter: Chapter) {
   }
 }
 
+function targetIsAllowed(targets: ReturnType<typeof stateTargets>, proposal: Pick<StoryStateProposal, 'targetType' | 'targetId' | 'parentId' | 'field'>): boolean {
+  if (proposal.field === 'create') return proposal.targetType === 'event'
+  if (proposal.targetType === 'story_arc') return targets.storyArcs.some(item => item.id === proposal.targetId)
+  if (proposal.targetType === 'arc_node') return targets.storyArcs.some(arc => (!proposal.parentId || arc.id === proposal.parentId)
+    && arc.nodes.some(node => node.id === proposal.targetId))
+  if (proposal.targetType === 'event') return targets.events.some(item => item.id === proposal.targetId)
+  return targets.chapterPlans.some(item => item.id === proposal.targetId)
+}
+
+export function storyStateProposalTargetAllowed(novel: Novel, chapter: Chapter, proposal: StoryStateProposal): boolean {
+  return targetIsAllowed(stateTargets(withCurrentStoryEntities(novel, chapter.chapterIndex + 1), chapter), proposal)
+}
+
+export function captureStoryStateScanBaseline(novel: Novel, chapter: Chapter): string {
+  const current = withCurrentStoryEntities(novel, chapter.chapterIndex + 1)
+  return JSON.stringify([novel.id, chapter.id, chapter.chapterIndex, chapter.title, chapter.content,
+    getCurrentChapterSummary(chapter), stateTargets(current, chapter), current.storyArcs, current.eventLog, current.chapterPlans])
+}
+
 export async function generateStoryStateProposalDrafts(
   novel: Novel,
   chapter: Chapter,
   model: ModelConfig,
   activityParentId?: string,
+  signal?: AbortSignal,
 ): Promise<StoryStateProposalDraft[]> {
+  chapter = JSON.parse(JSON.stringify(chapter)) as Chapter
+  novel = JSON.parse(JSON.stringify(withCurrentStoryEntities(novel, chapter.chapterIndex + 1))) as Novel
   const chapterText = chapter.content.length > 12000
     ? `${chapter.content.slice(0, 7000)}\n\n【中段省略，仅根据展示的正文原句提出提案】\n\n${chapter.content.slice(-5000)}`
     : chapter.content
@@ -428,6 +485,8 @@ export async function generateStoryStateProposalDrafts(
     model,
     skillTask: 'analysis',
     activityParentId,
+    signal,
+    noAutomaticRetry: true,
     maxTokens: 2200,
     messages: [{
       role: 'system',
@@ -440,7 +499,7 @@ export async function generateStoryStateProposalDrafts(
 ${chapterText}
 
 【章节总结】
-${chapter.summary || '暂无'}
+${getCurrentChapterSummary(chapter) || '暂无有效摘要，以正文为准'}
 
 【允许修改的目标；targetId 必须来自这里】
 ${JSON.stringify(stateTargets(novel, chapter))}
@@ -457,7 +516,10 @@ ${JSON.stringify(stateTargets(novel, chapter))}
 {"proposals":[{"targetType":"story_arc|arc_node|event|chapter_plan","targetId":"id","parentId":"弧线id，仅arc_node需要","field":"status|targetChapter","newValue":"新状态或章节号","reason":"为什么要改","evidence":"正文原句"}],"newPromises":[{"title":"期待名称","description":"读者期待什么、以后如何兑现","evidence":"正文原句","characters":["角色名"],"relatedArcIds":["弧线id"],"targetChapter":20}]}`,
     }],
   })
+  assertStructuredOutputComplete(result, '故事状态扫描')
+  signal?.throwIfAborted()
   const parsed = parseAiJsonObject<{ proposals?: AiProposal[]; newPromises?: AiStoryPromise[] }>(result.content)
+  if (!parsed || !Array.isArray(parsed.proposals) || !Array.isArray(parsed.newPromises)) throw new Error('故事状态扫描结果不完整，请重试。')
   return [
     ...normalizeStoryStateProposalDrafts(novel, chapter, Array.isArray(parsed?.proposals) ? parsed!.proposals! : []),
     ...normalizeStoryPromiseDrafts(novel, chapter, Array.isArray(parsed?.newPromises) ? parsed!.newPromises! : []),

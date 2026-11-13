@@ -1,8 +1,8 @@
 <template>
   <section class="creation-mode-picker" aria-label="创建方式搭配">
-    <p class="picker-intro">先选正文由谁写，再选如何准备设定。两组可以自由搭配，都能继续生成大纲与章节计划。</p>
-    <fieldset class="choice-group">
-      <legend>1. 正文创作方式</legend>
+    <p class="picker-intro">从一句话、已有大纲或空白开始，也可以先自选设定。都进入作品契约 → 骨架候选 → 规划确认，默认由作者主笔。</p>
+    <fieldset class="choice-group writing-choice">
+      <legend><span class="choice-number">1. </span>正文创作方式</legend>
       <div class="choice-grid">
         <label v-for="option in writingOptions" :key="option.value" class="mode-option"
           :class="{ selected: writingMode === option.value }">
@@ -14,8 +14,8 @@
         </label>
       </div>
     </fieldset>
-    <fieldset class="choice-group">
-      <legend>2. 设定准备方式</legend>
+    <fieldset class="choice-group origin-choice">
+      <legend>2. 作品创建起点</legend>
       <div class="choice-grid">
         <label v-for="option in setupOptions" :key="option.value" class="mode-option"
           :class="{ selected: setupMethod === option.value }">
@@ -27,14 +27,15 @@
         </label>
       </div>
     </fieldset>
+    <slot name="input" />
     <div class="choice-actions">
       <p class="choice-summary" aria-live="polite">
-        {{ writingMode === 'ai' ? 'AI 模式' : '写作辅助' }}
-        ＋ {{ setupMethod === 'inspiration' ? '灵感模式' : setupMethod === 'custom' ? '自选设定' : '请选择设定准备方式' }}
+        {{ writingMode === 'ai' ? 'AI 模式' : '作者主笔 · 写作辅助' }}
+        ＋ {{ setupMethod ? creationSetupLabels[setupMethod] : '请选择创建起点' }}
       </p>
       <n-button type="primary" size="large" :disabled="disabled || !writingMode || !setupMethod"
         id="start-creation-btn" @click="emit('start')">
-        {{ setupMethod === 'inspiration' ? '开始灵感对话 →' : setupMethod === 'custom' ? '填写小说设定 →' : '选择后继续' }}
+        {{ setupMethod === 'inspiration' ? '填写一句话灵感 →' : setupMethod === 'outline' ? '读取或粘贴大纲 →' : setupMethod === 'blank' ? '准备空白作品 →' : setupMethod === 'custom' ? '填写小说设定 →' : '选择后继续' }}
       </n-button>
     </div>
   </section>
@@ -43,24 +44,27 @@
 <script setup lang="ts">
 import { NButton, NIcon } from 'naive-ui'
 import { SparklesOutline, CreateOutline, BulbOutline, OptionsOutline } from '@vicons/ionicons5'
+import { creationSetupLabels, type CreationSetupMethod } from '@/types/creationEntry'
 
 defineProps<{
   writingMode?: 'ai' | 'manual'
-  setupMethod: 'inspiration' | 'custom' | null
+  setupMethod: CreationSetupMethod | null
   disabled?: boolean
 }>()
 const emit = defineEmits<{
   'update:writingMode': [mode: 'ai' | 'manual']
-  'update:setupMethod': [method: 'inspiration' | 'custom']
+  'update:setupMethod': [method: CreationSetupMethod]
   start: []
 }>()
 const writingOptions = [
-  { value: 'ai' as const, label: 'AI 模式', icon: SparklesOutline, description: '允许 AI 生成正文，你可以编辑、调整和审查。' },
-  { value: 'manual' as const, label: '写作辅助', icon: CreateOutline, description: '正文由你亲自写，AI 提供思路、规划和审查。' },
+  { value: 'manual' as const, label: '作者主笔 · 写作辅助', icon: CreateOutline, description: '默认由你写正文，按需使用 AI 提供思路、规划和审查。' },
+  { value: 'ai' as const, label: 'AI 模式', icon: SparklesOutline, description: '允许 AI 生成候选正文，由你编辑、调整和确认。' },
 ]
 const setupOptions = [
-  { value: 'inspiration' as const, label: '灵感模式', icon: BulbOutline, description: '先与 AI 聊想法，整理并检查设定后再生成大纲。' },
-  { value: 'custom' as const, label: '自选设定', icon: OptionsOutline, description: '直接填写或导入小说设定，再由 AI 生成大纲。' },
+  { value: 'inspiration' as const, label: '一句话灵感', icon: BulbOutline, description: '写下一个想法即可开始契约，也可继续已有灵感讨论。' },
+  { value: 'outline' as const, label: '已有大纲文件 / 粘贴', icon: OptionsOutline, description: '本地读取 TXT、Markdown、DOCX，预览编辑并保存为候选。' },
+  { value: 'blank' as const, label: '空白模板', icon: CreateOutline, description: '无需模型或预设题材，从空白作品契约手工设计。' },
+  { value: 'custom' as const, label: '自选设定', icon: OptionsOutline, description: '保留详细类型、人物、世界和风格设置，再确认作品契约。' },
 ]
 </script>
 

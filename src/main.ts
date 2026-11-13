@@ -7,15 +7,23 @@ import { useConfigStore } from './stores/config'
 import { useKnowledgeStore } from './stores/knowledge'
 import { initializeAiTaskHistory } from './services/aiTaskQueue'
 import { showRecoveryScreen } from './services/recoveryScreen'
-import { cloudApplyBusy, flushEditorDrafts } from './services/appLifecycle'
+import { cloudApplyBusy, projectTransferBusy, flushEditorDrafts } from './services/appLifecycle'
+import { useReconstructionWorkspaceStore } from './stores/reconstructionWorkspace'
 import { prepareUpdateInstall } from './services/updateSafety'
 import { useCloudSyncStore } from './stores/cloudSync'
 import { useCloudPreferencesStore } from './stores/cloudPreferences'
 import { useInspirationSessionsStore } from './stores/inspirationSessions'
+import { initializeProjectKernel } from './services/projectKernelClient'
 
 // 全局样式
 import './styles/variables.css'
 import './styles/global.css'
+import '@fontsource-variable/noto-serif-sc/wght.css'
+import '@fontsource-variable/noto-sans-sc/wght.css'
+import '@fontsource-variable/jetbrains-mono/wght.css'
+import 'lxgw-wenkai-webfont/lxgwwenkai-regular.css'
+import './v3/styles/v3.css'
+import { startWritingLog } from './v3/writingLog'
 
 async function bootstrap() {
   const app = createApp(App)
@@ -25,13 +33,15 @@ async function bootstrap() {
   }
 
   const pinia = createPinia()
-  router.beforeEach(() => !cloudApplyBusy.value)
+  router.beforeEach(() => !cloudApplyBusy.value && !projectTransferBusy.value)
   app.use(pinia)
   app.use(router)
 
   try {
     const configStore = useConfigStore()
     await configStore.loadConfig()
+
+    await initializeProjectKernel()
 
     const novelStore = useNovelStore()
     await novelStore.initStore()
@@ -43,10 +53,11 @@ async function bootstrap() {
 
     window.electronAPI?.onBeforeClose?.(async () => {
       await flushEditorDrafts()
+      await knowledgeStore.flushPendingSaves()
+      await novelStore.flushPendingSaves()
       await Promise.all([
-        novelStore.flushPendingSaves(),
-        knowledgeStore.flushPendingSaves(),
         useInspirationSessionsStore().flushPendingSaves(),
+        useReconstructionWorkspaceStore().flushPendingSaves(novelStore.novels.map(novel => novel.id)),
         configStore.saveConfig(),
       ])
       await useCloudSyncStore().flushBeforeClose()
@@ -62,6 +73,7 @@ async function bootstrap() {
   }
 
   app.mount('#app')
+  startWritingLog()
   void useCloudSyncStore().initialize().then(() => useCloudPreferencesStore().initialize())
   router.afterEach(() => useCloudSyncStore().schedule())
 }

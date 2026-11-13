@@ -3,13 +3,13 @@
     <div class="outline-header">
       <h2 class="page-title">总大纲</h2>
       <div class="header-actions" v-if="novel?.outline">
-        <n-button size="small" @click="startEdit" v-if="!editing">
+        <n-button size="small" :disabled="saving || modifying" @click="startEdit" v-if="!editing">
           编辑
         </n-button>
-        <n-button size="small" @click="editing = false" v-if="editing">
+        <n-button size="small" :disabled="saving" @click="editing = false" v-if="editing">
           预览
         </n-button>
-        <n-button size="small" type="primary" @click="regenerate" :loading="regenerating">
+        <n-button size="small" type="primary" :disabled="saving || modifying || editing" @click="regenerate" :loading="regenerating">
           重新生成
         </n-button>
       </div>
@@ -29,13 +29,14 @@
     <div v-else-if="editing" class="outline-editor paper-panel">
       <n-input
         v-model:value="editContent"
+        :disabled="saving"
         type="textarea"
         :rows="30"
         placeholder="在此编辑大纲内容（Markdown 格式）"
       />
       <div class="editor-actions">
-        <n-button @click="editing = false">取消</n-button>
-        <n-button type="primary" @click="saveEdit">保存</n-button>
+        <n-button :disabled="saving" @click="editing = false">取消</n-button>
+        <n-button type="primary" :disabled="saving" :loading="saving" @click="saveEdit">保存</n-button>
       </div>
     </div>
 
@@ -52,6 +53,7 @@
         </div>
         <n-input
           v-model:value="modifyInstruction"
+          :disabled="saving || modifying"
           type="textarea"
           :rows="2"
           size="small"
@@ -62,7 +64,7 @@
           type="primary"
           @click="aiModifyOutline"
           :loading="modifying"
-          :disabled="!modifyInstruction.trim()"
+          :disabled="saving || modifying || !modifyInstruction.trim()"
           style="margin-top:6px;align-self:flex-end;"
         >
           {{ modifying ? 'AI 修改中...' : '生成修改建议' }}
@@ -71,8 +73,8 @@
           <div class="modify-label">修改预览：</div>
           <div class="modify-content" v-html="renderMd(modifyPreview)"></div>
           <div class="modify-actions">
-            <n-button size="tiny" @click="modifyPreview = ''">放弃</n-button>
-            <n-button size="tiny" type="primary" @click="acceptModify">采纳修改</n-button>
+            <n-button size="tiny" :disabled="saving || modifying" @click="modifyPreview = ''">放弃</n-button>
+            <n-button size="tiny" type="primary" :disabled="saving || modifying || !modifyComplete" @click="acceptModify">采纳修改</n-button>
           </div>
         </div>
       </aside>
@@ -81,13 +83,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onDeactivated, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NInput, useMessage } from 'naive-ui'
 import { useNovelStore } from '@/stores/novel'
 import { useConfigStore } from '@/stores/config'
 import { callAI } from '@/services/ai'
 import { renderMd } from '@/utils/markdown'
+import { captureStoryContextBaseline } from '@/services/storyImpactTransactions'
 
 const route = useRoute()
 const router = useRouter()
@@ -104,6 +107,15 @@ const regenerating = ref(false)
 const modifyInstruction = ref('')
 const modifying = ref(false)
 const modifyPreview = ref('')
+const saving = ref(false)
+const editBaseline = ref('')
+const modifyBaseline = ref('')
+const modifyComplete = ref(false)
+let modifyController: AbortController | undefined
+const abortModification = () => modifyController?.abort(new DOMException('已离开大纲页面', 'AbortError'))
+onDeactivated(abortModification)
+onBeforeUnmount(abortModification)
+watch(novelId, () => { abortModification(); editing.value = false; modifyPreview.value = ''; modifyComplete.value = false })
 
 const renderedContent = computed(() => {
   if (!novel.value?.outline) return ''
@@ -111,14 +123,21 @@ const renderedContent = computed(() => {
 })
 
 function startEdit() {
+  if (!novel.value || saving.value || modifying.value) return
+  editBaseline.value = captureStoryContextBaseline(novel.value)
   editContent.value = novel.value?.outline || ''
   editing.value = true
 }
 
-function saveEdit() {
-  novelStore.updateOutline(novelId.value, editContent.value)
-  editing.value = false
-  message.success('大纲已保存')
+async function saveEdit() {
+  if (saving.value || !editBaseline.value) return
+  saving.value = true
+  try {
+    await novelStore.updateOutlineWithImpact(novelId.value, editContent.value, editBaseline.value)
+    editing.value = false
+    message.success('大纲已保存')
+  } catch (error) { message.error(error instanceof Error ? error.message : '大纲保存失败') }
+  finally { saving.value = false }
 }
 
 async function regenerate() {
@@ -127,12 +146,16 @@ async function regenerate() {
 
 // AI 局部修改大纲
 async function aiModifyOutline() {
-  if (!novel.value || !modifyInstruction.value.trim()) return
+  if (!novel.value || !modifyInstruction.value.trim() || saving.value || modifying.value) return
   const model = configStore.getModelForTask('outline')
   if (!model) { message.error('未配置 AI 模型'); return }
 
   modifying.value = true
   modifyPreview.value = ''
+  modifyComplete.value = false
+  const owner = novelId.value
+  modifyBaseline.value = captureStoryContextBaseline(novel.value)
+  const controller = modifyController = new AbortController()
 
   try {
     const messages = [{
@@ -144,26 +167,38 @@ async function aiModifyOutline() {
     }]
 
     let result = ''
-    await callAI({
+    const response = await callAI({
       model,
       skillTask: 'planning',
       messages,
       stream: true,
+      signal: controller.signal,
+      noAutomaticRetry: true,
       onChunk: (chunk) => { result += chunk; modifyPreview.value = result },
     })
+    controller.signal.throwIfAborted()
+    if (owner !== novelId.value || !novel.value || captureStoryContextBaseline(novel.value) !== modifyBaseline.value) throw new Error('作品总纲或设定已经变化，请重新生成修改建议。')
+    if (response.finishReason && response.finishReason !== 'stop') throw new Error('修改建议未完整结束，不能采纳，请重新生成。')
+    modifyPreview.value = result || response.content
+    modifyComplete.value = !!modifyPreview.value.trim()
   } catch (err: any) {
     message.error(err.message || '修改失败')
   } finally {
     modifying.value = false
+    modifyController = undefined
   }
 }
 
-function acceptModify() {
-  if (modifyPreview.value) {
-    novelStore.updateOutline(novelId.value, modifyPreview.value)
-    modifyPreview.value = ''
-    modifyInstruction.value = ''
-    message.success('大纲已更新')
+async function acceptModify() {
+  if (modifyPreview.value && modifyComplete.value && !saving.value && !modifying.value) {
+    saving.value = true
+    try {
+      await novelStore.updateOutlineWithImpact(novelId.value, modifyPreview.value, modifyBaseline.value)
+      modifyPreview.value = ''
+      modifyInstruction.value = ''
+      message.success('大纲已更新')
+    } catch (error) { message.error(error instanceof Error ? error.message : '大纲保存失败') }
+    finally { saving.value = false }
   }
 }
 </script>

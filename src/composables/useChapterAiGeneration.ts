@@ -1,4 +1,4 @@
-import type { Ref } from 'vue'
+import { ref, type Ref } from 'vue'
 import { callAI, type ChatMessage } from '@/services/ai'
 import { buildChapterWritingPlanPrompt } from '@/services/prompts'
 import type { ModelConfig } from '@/stores/config'
@@ -8,12 +8,12 @@ import { MAX_CHAPTER_DRAFT_REQUESTS } from '@/services/chapterGeneration'
 import type { ChapterLengthPolicy } from '@/services/chapterLength'
 
 interface ChapterAiGenerationOptions {
-  content: Ref<string>
   writing: Ref<boolean>
   statusText: Ref<string>
   lengthPolicy: Ref<ChapterLengthPolicy>
   onChunk?: () => void
   onWarning?: (message: string) => void
+  ensureCurrent?: () => void
 }
 
 export function getChapterGenerationStatus(wordCount: number, minWords: number, softWords: number, hardWords: number): string {
@@ -26,16 +26,41 @@ export function getChapterGenerationStatus(wordCount: number, minWords: number, 
 export function useChapterAiGeneration(options: ChapterAiGenerationOptions) {
   let abortController: AbortController | null = null
   let draftRequests = 0
+  // This buffer is never the manuscript ref watched by editor autosave.
+  const draft = ref('')
 
-  function beginGeneration() {
+  function beginGeneration(baseContent = '') {
+    abortController?.abort()
+    draft.value = baseContent
     options.writing.value = true
     abortController = new AbortController()
     draftRequests = 0
   }
 
+  async function waitForGeneration<T>(request: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const signal = getGenerationSignal()
+    signal.throwIfAborted()
+    options.ensureCurrent?.()
+    return new Promise<T>((resolve, reject) => {
+      const onAbort = () => reject(signal.reason || new DOMException('生成已停止', 'AbortError'))
+      signal.addEventListener('abort', onAbort, { once: true })
+      Promise.resolve().then(() => {
+        signal.throwIfAborted()
+        return request(signal)
+      }).then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort))
+    })
+  }
+
+  async function requestDraft<T>(request: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    getGenerationSignal().throwIfAborted()
+    options.ensureCurrent?.()
+    if (draftRequests >= MAX_CHAPTER_DRAFT_REQUESTS) throw new Error('本次正文生成已达到 3 次请求上限，已保留候选，请检查后再继续')
+    draftRequests++
+    return waitForGeneration(request)
+  }
+
   function stopGeneration() {
     abortController?.abort()
-    options.writing.value = false
   }
 
   function getGenerationSignal(): AbortSignal {
@@ -50,20 +75,25 @@ export function useChapterAiGeneration(options: ChapterAiGenerationOptions) {
     chapterGuidance: string,
     activityParentId?: string,
   ): Promise<string> {
+    const signal = getGenerationSignal()
     try {
-      const result = await callAI({
+      signal.throwIfAborted()
+      options.ensureCurrent?.()
+      const result = await waitForGeneration(() => callAI({
         model,
         skillTask: 'planning',
         messages: buildChapterWritingPlanPrompt(novel, factCard, chapterGuidance),
         maxTokens: 1200,
-        signal: getGenerationSignal(),
+        signal,
         taskName: '写作计划',
         noAutomaticRetry: true,
         activityParentId,
-      })
+      }))
+      signal.throwIfAborted()
+      options.ensureCurrent?.()
       return result.content.trim()
     } catch (error) {
-      getGenerationSignal().throwIfAborted()
+      signal.throwIfAborted()
       if (error instanceof Error && error.name === 'AbortError') throw error
       options.onWarning?.('写作计划生成失败，已直接进入正文生成')
       return ''
@@ -78,9 +108,10 @@ export function useChapterAiGeneration(options: ChapterAiGenerationOptions) {
   ) {
     const signal = getGenerationSignal()
     signal.throwIfAborted()
-    if (draftRequests >= MAX_CHAPTER_DRAFT_REQUESTS) throw new Error('本次正文生成已达到 3 次请求上限，已保留草稿，请检查后再继续')
-    draftRequests++
-    const result = await callAI({
+    const before = draft.value
+    let streamed = ''
+    let receiving = true
+    const result = await requestDraft(() => callAI({
       model,
       skillTask: 'writing',
       messages,
@@ -91,21 +122,31 @@ export function useChapterAiGeneration(options: ChapterAiGenerationOptions) {
       taskName: streamOptions.taskName || '正文生成',
       activityParentId: streamOptions.activityParentId,
       onChunk: (chunk) => {
-        signal.throwIfAborted()
-        options.content.value += chunk
+        // Some transports still deliver queued chunks after abort/restart.
+        if (!receiving || signal.aborted || signal !== abortController?.signal) return
+        try { options.ensureCurrent?.() }
+        catch (error) { abortController?.abort(error); return }
+        streamed += chunk
+        draft.value = before + streamed
         options.statusText.value = getChapterGenerationStatus(
-          countNovelWords(options.content.value), options.lengthPolicy.value.minWords, options.lengthPolicy.value.targetWords, options.lengthPolicy.value.maxWords,
+          countNovelWords(draft.value), options.lengthPolicy.value.minWords, options.lengthPolicy.value.targetWords, options.lengthPolicy.value.maxWords,
         )
         options.onChunk?.()
       },
-    })
+    })).finally(() => { receiving = false })
     signal.throwIfAborted()
+    options.ensureCurrent?.()
+    if (!streamed) draft.value = before + result.content
+    else if (result.content && result.content !== streamed) {
+      if (result.content.startsWith(streamed)) draft.value = before + result.content
+      else throw new Error('模型最终输出与流式片段不一致，已保留收到的候选，请人工核对')
+    }
     if (result.finishReason && !['stop', 'length'].includes(result.finishReason)) {
       throw new Error('模型未正常完成正文输出，已保留草稿，请查看接口返回情况')
     }
-    if (result.finishReason === 'length') options.onWarning?.('输出达到模型上限，已保留正文，将检查是否需要收尾')
+    if (result.finishReason === 'length') options.onWarning?.('输出达到模型上限，已保留候选，将检查是否需要收尾')
     return result
   }
 
-  return { beginGeneration, stopGeneration, getGenerationSignal, generateWritingPlan, streamAppend }
+  return { draft, beginGeneration, stopGeneration, getGenerationSignal, generateWritingPlan, streamAppend, requestDraft, waitForGeneration }
 }

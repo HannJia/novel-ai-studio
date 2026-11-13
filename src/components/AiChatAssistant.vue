@@ -112,6 +112,7 @@
 </template>
 
 <script setup lang="ts">
+import { getCurrentChapterSummary } from '@/services/derivedSources'
 import { ref, nextTick, watch } from 'vue'
 import { NButton, NIcon, NInput, useDialog } from 'naive-ui'
 import { SaveOutline } from '@vicons/ionicons5'
@@ -128,6 +129,8 @@ const props = defineProps<{
   novelId: string
   chapterId?: string
   host?: HTMLElement | null
+  prefill?: string
+  prefillVersion?: number
 }>()
 
 const dialog = useDialog()
@@ -200,13 +203,19 @@ watch(() => messages.value[messages.value.length - 1]?.id, () => {
   if (!showChat.value && !props.host?.getBoundingClientRect().height && messages.value[messages.value.length - 1]?.role === 'assistant') unread.value = true
 })
 watch(() => props.novelId, () => { unread.value = false; showKnowledgeDraft.value = false })
+watch([() => props.prefill, () => props.prefillVersion], (values, previousValues) => {
+  const value = values[0]
+  const previous = previousValues?.[0]
+  if (value) inputText.value = value
+  else if (previous && inputText.value === previous) inputText.value = ''
+}, { immediate: true })
 
 // 跨章节分析
 function crossChapterAnalysis() {
   if (!novel.value) return
   const chapSummaries = novel.value.chapters
-    .filter(c => c.summary)
-    .map(c => `第${c.chapterIndex + 1}章《${c.title}》: ${c.summary.substring(0, 100)}`)
+    .filter(c => getCurrentChapterSummary(c))
+    .map(c => `第${c.chapterIndex + 1}章《${c.title}》: ${getCurrentChapterSummary(c).substring(0, 100)}`)
     .join('\n')
   inputText.value = `请分析以下章节之间的连贯性和可能的问题（级类押韵、角色表现不一致、剧情漏洞等），并给出具体修改建议：\n\n${chapSummaries || '（暂无章节总结，请先完成一些章节）'}`
   sendMessage()

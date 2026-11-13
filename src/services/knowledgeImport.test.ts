@@ -55,6 +55,27 @@ describe('bounded knowledge imports', () => {
     zip.file('word/document.xml', '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>父亲寄来一封信。</w:t></w:r></w:p></w:body></w:document>')
     expect(await readKnowledgeFile(new File([await zip.generateAsync({ type: 'arraybuffer' })], 'sample.docx'))).toContain('父亲寄来一封信')
   })
+  it.each(['custom/styles.xml', '/word/custom/styles.xml'])(
+    'removes invalid DOCX style types before Mammoth indexes them (%s)',
+    async (stylesTarget) => {
+      const zip = new JSZip()
+      const marker = 'knowledgeImportPrototypePollutionMarker'
+      zip.file('_rels/.rels', '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>')
+      zip.file('word/_rels/document.xml.rels', `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="${stylesTarget}"/></Relationships>`)
+      zip.file('word/custom/styles.xml', `<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="__proto__" w:styleId="${marker}"/><w:style w:type="paragraph" w:styleId="Normal"/></w:styles>`)
+      zip.file('word/document.xml', '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>安全导入的正文。</w:t></w:r></w:p></w:body></w:document>')
+      let polluted = false
+      try {
+        const buffer = await zip.generateAsync({ type: 'arraybuffer' })
+        const text = await readKnowledgeFile(new File([buffer], 'malicious-style.docx'))
+        polluted = Object.prototype.hasOwnProperty.call(Object.prototype, marker)
+        expect(text).toContain('安全导入的正文')
+      } finally {
+        delete (Object.prototype as Record<string, unknown>)[marker]
+      }
+      expect(polluted).toBe(false)
+    },
+  )
   it('cleans up the PDF worker when its page limit is exceeded', async () => {
     const destroy = vi.fn().mockResolvedValue(undefined)
     vi.doMock('pdfjs-dist', () => ({

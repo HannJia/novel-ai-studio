@@ -3,6 +3,7 @@ import type {
   DataPanelChange,
   DataPanelField,
   DataPanelItem,
+  DataPanelRuleStep,
   Novel,
 } from '@/types/novel'
 import { evaluateFormula } from './safeFormula'
@@ -41,6 +42,7 @@ export interface DataPanelAutomationSuggestion {
   reason: string
   chapterIndex: number
   rules: DataPanelAutomationRule[]
+  ruleSteps: DataPanelRuleStep[]
 }
 
 export function createDataPanelId(): string {
@@ -319,7 +321,8 @@ function ruleDelta(
   storyDay?: number,
 ): { delta: number; steps: number } | null {
   if (!rule.enabled || rule.pendingChapterIndex !== undefined) return null
-  if (rule.lastEvaluatedChapterIndex !== undefined && rule.lastEvaluatedChapterIndex >= chapterIndex) return null
+  if (rule.lastEvaluatedChapterIndex !== undefined && (rule.lastEvaluatedChapterIndex > chapterIndex
+    || rule.lastEvaluatedChapterIndex === chapterIndex && rule.trigger !== 'elapsed_days')) return null
 
   if (rule.trigger === 'on_mention') {
     return itemIsMentioned(item, chapterText) ? { delta: rule.amount, steps: 1 } : null
@@ -361,14 +364,17 @@ export function buildDataPanelAutomationSuggestions(
   for (const item of items) {
     for (const field of item.fields) {
       const matchedRules: DataPanelAutomationRule[] = []
+      const ruleSteps: DataPanelRuleStep[] = []
       let delta = 0
       for (const rule of field.automationRules || []) {
         const result = ruleDelta(rule, item, chapterIndex, chapterText, storyDay)
         if (!result) continue
         delta += result.delta
         matchedRules.push(rule)
+        ruleSteps.push({ ruleId: rule.id, steps: result.steps })
       }
-      if (!matchedRules.length || delta === 0) continue
+      // Zero is still a schedule step; only an author decision may consume it.
+      if (!matchedRules.length) continue
       suggestions.push({
         itemId: item.id,
         fieldId: field.id,
@@ -376,9 +382,11 @@ export function buildDataPanelAutomationSuggestions(
         fieldName: field.name,
         oldValue: field.value,
         newValue: formatDataPanelNumber(toDataPanelNumber(field.value) + delta),
-        reason: matchedRules.map(rule => `自动规则「${getDataPanelRuleLabel(rule, field)}」`).join('；'),
+        reason: matchedRules.map(rule => `自动规则「${getDataPanelRuleLabel(rule, field)}」`).join('；')
+          + (delta === 0 ? '；本次数值不变，处理后推进规则进度' : ''),
         chapterIndex,
         rules: matchedRules,
+        ruleSteps,
       })
     }
   }
@@ -406,21 +414,41 @@ export function initializeElapsedRuleBaselines(items: DataPanelItem[], storyDay?
   return changed
 }
 
+/** A stable ID wins; name fallback must identify exactly one field. */
+export function findDataPanelField(item: Pick<DataPanelItem, 'fields'> | undefined, fieldId: string, fieldName: string): DataPanelField | undefined {
+  if (!item) return undefined
+  const byId = item.fields.filter(field => field.id === fieldId)
+  if (byId.length) return byId.length === 1 ? byId[0] : undefined
+  const byName = item.fields.filter(field => field.name === fieldName)
+  return byName.length === 1 ? byName[0] : undefined
+}
+
 export function settleDataPanelAutomationRules(item: DataPanelItem, change: DataPanelChange, storyDay?: number): void {
-  const field = item.fields.find(candidate => candidate.id === change.fieldId || candidate.name === change.fieldName)
+  const field = findDataPanelField(item, change.fieldId, change.fieldName)
   if (!field) return
   for (const rule of field.automationRules || []) {
     if (rule.pendingChapterIndex !== change.chapterIndex) continue
+    const evaluated = rule.trigger === 'on_mention' ? { steps: 1 } : ruleDelta({ ...rule, pendingChapterIndex: undefined }, item, change.chapterIndex, '', storyDay)
+    const steps = change.sourceBinding?.kind === 'automation'
+      ? change.sourceBinding.ruleSteps.find(entry => entry.ruleId === rule.id)?.steps || 0 : evaluated?.steps || 0
     rule.lastEvaluatedChapterIndex = change.chapterIndex
-    rule.appliedCount = (rule.appliedCount || 0) + 1
+    rule.appliedCount = (rule.appliedCount || 0) + steps
     if (rule.trigger === 'elapsed_days' && rule.sourceFieldName === STORY_CLOCK_SOURCE) {
-      if (storyDay !== undefined) rule.lastSourceValue = storyDay
+      if (rule.lastSourceValue !== undefined) rule.lastSourceValue += steps * Math.max(1, rule.interval)
     } else if (rule.trigger === 'elapsed_days') {
-      const source = item.fields.find(candidate => candidate.name === rule.sourceFieldName)
-      if (source) rule.lastSourceValue = toDataPanelNumber(source.value)
+      if (rule.lastSourceValue !== undefined) rule.lastSourceValue += steps * Math.max(1, rule.interval)
     }
     delete rule.pendingChapterIndex
   }
+}
+
+/** Runtime reservations and counters do not change the story reference itself. */
+export function dataPanelReferenceInput(items: DataPanelItem[]) {
+  return items.map(item => [item.id, item.name, item.category, item.ownerItemId, item.equipmentState, item.relatedKeywords, item.lastMentionChapterIndex,
+    item.fields.map(field => ({ ...field, automationRules: (field.automationRules || []).map(rule => ({
+      id: rule.id, trigger: rule.trigger, amount: rule.amount, interval: rule.interval, schedule: rule.schedule,
+      sourceFieldName: rule.sourceFieldName, enabled: rule.enabled,
+    })) }))])
 }
 
 export function pruneDataPanelChangeHistory(

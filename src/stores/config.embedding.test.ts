@@ -4,7 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { useConfigStore, type ModelConfig } from './config'
 import { joinConfig, splitConfig, validatePublicSettings } from '@/services/configSync'
 
-const model = (kind: 'chat' | 'embedding' = 'chat'): Omit<ModelConfig, 'id'> => ({
+const makeModel = (kind: 'chat' | 'embedding' = 'chat'): Omit<ModelConfig, 'id'> => ({
   name: kind === 'embedding' ? '资料检索' : '日常写作', kind,
   baseUrl: 'https://example.test/v1', modelName: kind === 'embedding' ? 'synthetic-vector' : 'synthetic-chat',
   apiKey: 'synthetic-session-secret', maxTokens: 4096, temperature: 0.7, topP: 0.9,
@@ -22,13 +22,13 @@ afterEach(() => vi.unstubAllGlobals())
 describe('统一模型的向量用途', () => {
   it('does not offer an embedding-only configuration to writing tasks', async () => {
     const store = useConfigStore()
-    const vector = store.addModel(model('embedding'))
+    const vector = store.addModel(makeModel('embedding'))
     expect(store.assignments.outline).toBe('')
     expect(store.getModelForTask('writing')).toBeNull()
     expect(store.getModelForTask('chat')).toBeNull()
     expect(store.getModelForTask('embedding')?.id).toBe(vector.id)
     expect(store.embedding.enabled).toBe(false)
-    const chat = store.addModel(model())
+    const chat = store.addModel(makeModel())
     expect(store.getModelForTask('writing')?.id).toBe(chat.id)
     store.setAssignment('writing', vector.id)
     store.setAssignment('embedding', chat.id)
@@ -39,7 +39,7 @@ describe('统一模型的向量用途', () => {
 
   it('shares assigned connection changes and disables retrieval when the assignment is removed', async () => {
     const store = useConfigStore()
-    const vector = store.addModel(model('embedding'))
+    const vector = store.addModel(makeModel('embedding'))
     store.updateEmbeddingConfig({ enabled: true, batchSize: 8 })
     store.updateModel(vector.id, { baseUrl: 'https://other.example.test/v1', modelName: 'second-vector', apiKey: 'replacement-synthetic-secret' })
     expect(store.embedding).toMatchObject({ enabled: true, batchSize: 8, baseUrl: 'https://other.example.test/v1', modelName: 'second-vector', apiKey: 'replacement-synthetic-secret' })
@@ -58,8 +58,8 @@ describe('统一模型的向量用途', () => {
 
   it('does not silently switch to another vector service after deleting or changing the assigned model', async () => {
     const store = useConfigStore()
-    const first = store.addModel(model('embedding'))
-    store.addModel({ ...model('embedding'), baseUrl: 'https://second.example.test/v1' })
+    const first = store.addModel(makeModel('embedding'))
+    store.addModel({ ...makeModel('embedding'), baseUrl: 'https://second.example.test/v1' })
     store.updateEmbeddingConfig({ enabled: true })
     store.deleteModel(first.id)
     expect(store.getModelForTask('embedding')).toBeNull()
@@ -74,7 +74,7 @@ describe('统一模型的向量用途', () => {
 
   it('never returns an embedding model from malformed legacy chat assignments', async () => {
     const store = useConfigStore()
-    localStorage.setItem('novel-writer-config', JSON.stringify({ models: [{ id: 'vector', ...model('embedding') }], assignments: { outline: 'vector', writing: 'vector', review: 'vector', chat: 'vector' } }))
+    localStorage.setItem('novel-writer-config', JSON.stringify({ models: [{ id: 'vector', ...makeModel('embedding') }], assignments: { outline: 'vector', writing: 'vector', review: 'vector', chat: 'vector' } }))
     await store.loadConfig()
     for (const task of ['outline', 'writing', 'review', 'chat'] as const) expect(store.getModelForTask(task)).toBeNull()
   })
@@ -100,7 +100,7 @@ describe('统一模型的向量用途', () => {
   })
 
   it('does not create a default disabled vector model and preserves ordinary legacy models', async () => {
-    const chat = { id: 'old-chat', ...model() }
+    const chat = { id: 'old-chat', ...makeModel() }
     delete chat.kind
     localStorage.setItem('novel-writer-config', JSON.stringify({ models: [chat], assignments: { outline: chat.id }, embedding: {
       enabled: false, baseUrl: 'http://127.0.0.1:11434', modelName: 'bge-m3', apiKey: '', batchSize: 16,
@@ -114,8 +114,8 @@ describe('统一模型的向量用途', () => {
 
   it('round-trips model kinds and vector assignment through the cloud settings/secret split', async () => {
     const store = useConfigStore()
-    store.addModel(model())
-    const vector = store.addModel(model('embedding'))
+    store.addModel(makeModel())
+    const vector = store.addModel(makeModel('embedding'))
     const original = store.exportConfig()
     const parts = splitConfig(original, 'fanqie')
     expect(JSON.stringify(parts.settings)).not.toContain('synthetic-session-secret')
@@ -130,12 +130,25 @@ describe('统一模型的向量用途', () => {
 
   it('keeps ordinary chat configuration compatible with the old server wire shape', () => {
     const store = useConfigStore()
-    store.addModel(model())
+    store.addModel(makeModel())
     const parts = splitConfig(store.exportConfig(), 'fanqie')
     expect(parts.settings.models[0]).not.toHaveProperty('kind')
     expect(parts.settings.assignments).not.toHaveProperty('embedding')
     const joined = joinConfig(parts.settings, parts.secrets)
     expect(joined.models[0].apiKey).toBe(store.models[0].apiKey)
     expect(joined.models[0].modelName).toBe(store.models[0].modelName)
+  })
+
+  it('keeps local connection test records out of cloud settings and restores no remote test result', () => {
+    const store = useConfigStore()
+    const configured = store.addModel(makeModel())
+    configured.connectionTest = {
+      status: 'ok', testedAt: '2026-11-10T00:00:00.000Z', fingerprint: 'a'.repeat(64), environment: 'browser',
+    }
+
+    const parts = splitConfig(store.exportConfig(), 'fanqie')
+    expect(parts.settings.models[0]).not.toHaveProperty('connectionTest')
+    const joined = joinConfig(parts.settings, parts.secrets)
+    expect(joined.models[0]).not.toHaveProperty('connectionTest')
   })
 })

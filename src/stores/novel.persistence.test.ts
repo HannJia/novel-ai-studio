@@ -28,6 +28,40 @@ function createBook() {
 }
 
 describe('persistence audit regressions', () => {
+  it('publishes a chapter length policy only after a successful durable save and allows retry', async () => {
+    const store = useNovelStore()
+    const book = createBook()
+    await store.saveNovelNow(book.id)
+    const policy = { minWords: 1800, targetWords: 2100, maxWords: 2500 }
+    vi.mocked(saveNovelToDb).mockRejectedValueOnce(new Error('磁盘空间不足'))
+    await expect(store.saveChapterLengthPolicy(book.id, policy)).rejects.toThrow('磁盘空间不足')
+    expect(store.getNovel(book.id)?.chapterLengthPolicy).toBeUndefined()
+    expect(store.saveError).toBe('磁盘空间不足')
+    await store.saveChapterLengthPolicy(book.id, policy)
+    expect(store.getNovel(book.id)?.chapterLengthPolicy).toEqual(policy)
+    expect(store.saveError).toBe('')
+    expect(vi.mocked(saveNovelToDb).mock.calls.slice(-1)[0]?.[0].chapterLengthPolicy).toEqual(policy)
+  })
+
+  it('keeps concurrent author edits when a length policy save commits', async () => {
+    const store = useNovelStore()
+    const book = createBook()
+    await store.saveNovelNow(book.id)
+    let finish!: () => void
+    vi.mocked(saveNovelToDb).mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve }))
+    const policy = { minWords: 1800, targetWords: 2100, maxWords: 2500 }
+    const saving = store.saveChapterLengthPolicy(book.id, policy)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(store.getNovel(book.id)?.chapterLengthPolicy).toBeUndefined()
+    store.updateTitle(book.id, '保存期间的作者改名')
+    finish()
+    await saving
+    expect(store.getNovel(book.id)?.title).toBe('保存期间的作者改名')
+    expect(store.getNovel(book.id)?.chapterLengthPolicy).toEqual(policy)
+    await store.flushPendingSaves()
+    expect(vi.mocked(saveNovelToDb).mock.calls.slice(-1)[0]?.[0].title).toBe('保存期间的作者改名')
+  })
+
   it('saves a changed knowledge binding even without any other edits', async () => {
     const store = useNovelStore()
     await store.initStore()

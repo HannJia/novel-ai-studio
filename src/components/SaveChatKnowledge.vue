@@ -161,7 +161,7 @@ async function save() {
       const entry = store.addEntry(kb.id, {
         title: title.value.trim(), content: draft.value.trim(), category: category.value, summary: summary.value.trim(),
         tags: tags.value.split(/[,，、]/).map(tag => tag.trim()).filter(Boolean).slice(0, 20),
-      })
+      }, 'author')
       if (!entry) throw new Error('未能创建条目，请重试。')
       pending.value = { kbId: kb.id, entryId: entry.id, title: entry.title }
     }

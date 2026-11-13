@@ -3,12 +3,19 @@
 import { useConfigStore, type ModelConfig } from '@/stores/config'
 import type { WritingSkillTask } from '@/types/skill'
 import { finishAiActivity, startAiActivity } from '@/services/aiActivity'
+import { structuredRequestFields, type StructuredOutputMode } from './aiStructuredRequest'
+import { safeAiUsage } from './aiDiagnostics'
 import { createParser } from 'eventsource-parser'
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
   imageDataUrls?: string[]
+}
+
+export interface AiRequestLifecycle {
+  beforeRequest(options: ChatCompletionOptions): Promise<void>
+  afterRequest(outcome: { result?: ChatCompletionResult; error?: unknown }): Promise<void>
 }
 
 export function serializeChatMessages(messages: ChatMessage[]) {
@@ -38,6 +45,8 @@ export interface ChatCompletionOptions {
   activityParentId?: string
   redactErrors?: boolean
   noAutomaticRetry?: boolean
+  structuredOutput?: StructuredOutputMode // 显式短 JSON 判断，不改变普通请求或输出预算
+  requestLifecycle?: AiRequestLifecycle
   shouldStop?: () => boolean
 }
 
@@ -56,9 +65,10 @@ export interface ChatCompletionResult {
   content: string
   finishReason?: string
   usage?: {
-    prompt_tokens: number
-    completion_tokens: number
-    total_tokens: number
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
+    completion_tokens_details?: { reasoning_tokens?: number }
   }
 }
 
@@ -154,6 +164,7 @@ async function chatCompletion(options: ChatCompletionOptions): Promise<ChatCompl
           temperature: model.temperature,
           top_p: model.topP,
           stream: false,
+          ...structuredRequestFields(model, options.structuredOutput),
         }),
         signal: request.signal,
       })
@@ -170,9 +181,9 @@ async function chatCompletion(options: ChatCompletionOptions): Promise<ChatCompl
 
       const data = await response.json()
       return {
-        content: data.choices?.[0]?.message?.content || '',
-        finishReason: data.choices?.[0]?.finish_reason,
-        usage: data.usage,
+        content: typeof data.choices?.[0]?.message?.content === 'string' ? data.choices[0].message.content : '',
+        finishReason: typeof data.choices?.[0]?.finish_reason === 'string' ? data.choices[0].finish_reason : undefined,
+        usage: safeAiUsage(data.usage),
       }
     } catch (err) {
       lastError = err
@@ -200,6 +211,7 @@ async function chatCompletionStream(options: ChatCompletionOptions): Promise<Cha
         model: model.modelName, messages: serializeChatMessages(messages),
         max_tokens: maxTokens || model.maxTokens, temperature: model.temperature,
         top_p: model.topP, stream: true,
+        ...structuredRequestFields(model, options.structuredOutput),
       }),
       signal: request.signal,
     })
@@ -222,7 +234,7 @@ async function chatCompletionStream(options: ChatCompletionOptions): Promise<Cha
         if (parsed.error) throw new Error('模型接口在输出过程中返回错误，已停止接收')
         const choice = parsed.choices?.find((item: { index?: number }) => item.index === 0) || parsed.choices?.[0]
         if (typeof choice?.finish_reason === 'string') finishReason = choice.finish_reason
-        if (parsed.usage) usage = parsed.usage
+        if (parsed.usage) usage = safeAiUsage(parsed.usage) ?? usage
         const delta = choice?.delta?.content
         if (typeof delta === 'string' && delta) {
           fullContent += delta
@@ -317,6 +329,10 @@ export async function callAI(options: ChatCompletionOptions): Promise<ChatComple
     analysis: 'AI 分析任务',
   }[options.skillTask || 'planning'] || 'AI 任务'), options.activityParentId)
   let enrichedOptions = options
+  const lifecycle = options.requestLifecycle
+  let lifecycleAdmitted = false
+  let lifecycleAfterAttempted = false
+  let lifecycleOutcome: 'success' | 'error' | undefined
   try {
     if (options.skillTask) {
       try {
@@ -326,13 +342,41 @@ export async function callAI(options: ChatCompletionOptions): Promise<ChatComple
         // Pinia 尚未初始化的独立调用不注入 Skill。
       }
     }
-    if (enrichedOptions.stream && enrichedOptions.onChunk) {
-      return await chatCompletionStream(enrichedOptions)
+    if (lifecycle) {
+      enrichedOptions = { ...enrichedOptions, noAutomaticRetry: true }
     }
-    return await chatCompletion(enrichedOptions)
+    enrichedOptions.signal?.throwIfAborted()
+    if (lifecycle) {
+      await lifecycle.beforeRequest(enrichedOptions)
+      lifecycleAdmitted = true
+      enrichedOptions = { ...enrichedOptions, noAutomaticRetry: true, requestLifecycle: lifecycle }
+      // Admission can wait on an async budget/store decision. If the caller
+      // cancels while that decision is pending, settle the admitted request
+      // without entering either HTTP path.
+      enrichedOptions.signal?.throwIfAborted()
+    }
+    const result = enrichedOptions.stream && enrichedOptions.onChunk
+      ? await chatCompletionStream(enrichedOptions)
+      : await chatCompletion(enrichedOptions)
+    if (lifecycle) {
+      lifecycleAfterAttempted = true
+      lifecycleOutcome = 'success'
+      await lifecycle.afterRequest({ result })
+    }
+    return result
   } catch (error) {
-    const visibleError = options.redactErrors && !options.signal?.aborted
-      ? new Error('图片识别接口请求失败，请检查模型、额度和连接。') : error
+    let finalError = error
+    if (lifecycleAdmitted && lifecycle && !lifecycleAfterAttempted) {
+      lifecycleAfterAttempted = true
+      lifecycleOutcome = 'error'
+      try {
+        await lifecycle.afterRequest({ error })
+      } catch (lifecycleError) {
+        finalError = lifecycleError
+      }
+    }
+    const visibleError = options.redactErrors && !options.signal?.aborted && lifecycleOutcome !== 'success' && finalError === error
+      ? new Error('图片识别接口请求失败，请检查模型、额度和连接。') : finalError
     finishAiActivity(activity, visibleError)
     throw visibleError
   } finally {

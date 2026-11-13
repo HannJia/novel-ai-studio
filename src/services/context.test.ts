@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { buildChapterFactCard, buildReviewContext, buildWritingContext, selectRelevantCharacters } from './context'
+import { createChapterSourceBinding } from './derivedSources'
+import { createStoryMemoryBinding } from './storyMemory'
+import type { StoryMemoryRecord } from '@/types/storyMemory'
 import { buildSemanticRecords } from './semanticIndex'
-import type { Novel } from '@/types/novel'
+import type { Chapter, Novel } from '@/types/novel'
+import { buildLongformFixture } from '@/test/longformEvalFixture'
 
 function createNovel(characterNames: string[]): Novel {
   return {
@@ -116,6 +120,18 @@ function createNovel(characterNames: string[]): Novel {
 }
 
 describe('写作上下文', () => {
+  it('preserves confirmed memory and causality in a late chapter with many unknown times', () => {
+    const fixture = buildLongformFixture('large')
+    fixture.novel.outline = '早期总纲与风格背景。'.repeat(1000)
+    const chapter = fixture.novel.chapters[fixture.novel.chapters.length - 1]
+    const context = buildWritingContext(fixture.novel, chapter, 8000, undefined, fixture.records, [], [])
+    for (const fact of ['白鹭转交的父亲亲笔信', '明确不知情', '镇海司', '信任', '南城盐仓失火', '渔户围堵府衙']) {
+      expect(context.outlineContext).toContain(fact)
+    }
+    expect(context.outlineContext.length).toBeLessThanOrEqual(8000)
+    expect(context.outlineContext.match(/时间来源未知/g)?.length || 0).toBeLessThanOrEqual(4)
+    expect(context.outlineContext).toContain('不得从全局最新时钟补值')
+  })
   it('事实卡和检索记忆区分基础值与装备后的生效值', () => {
     const novel = createNovel(['林青'])
     novel.dataPanels = [
@@ -155,11 +171,13 @@ describe('写作上下文', () => {
     expect(ctx.outlineContext).toContain('剑修')
   })
 
-  it('写作上下文包含当前卷级摘要', () => {
+  it('写作上下文将卷大纲明确标为预期规划', () => {
     const novel = createNovel(['林青'])
     const ctx = buildWritingContext(novel, novel.chapters[0], 8000)
-    expect(ctx.outlineContext).toContain('当前卷级摘要')
+    expect(ctx.outlineContext).toContain('当前卷规划（预期走向，不能作为已发生事实）')
     expect(ctx.outlineContext).toContain('失落传承')
+    expect(ctx.structuredState).toContain('硬规则')
+    expect(ctx.outlineContext).toContain('V2 结构化故事状态')
   })
 
   it('写作上下文注入活跃弧线和临近时间线', () => {
@@ -232,19 +250,138 @@ describe('写作上下文', () => {
   it('长书上下文保留最近阶段而不是最早阶段，并提示未兑现期待', () => {
     const novel = createNovel(['林青'])
     const first = novel.chapters[0]
-    novel.chapters = Array.from({ length: 160 }, (_, index) => ({
-      ...first, id: `chapter-${index}`, chapterIndex: index,
-      title: `第${index + 1}章`, summary: `阶段${index + 1}的经历`,
-    }))
+    novel.chapters = Array.from({ length: 160 }, (_, index) => {
+      const content = `第${index + 1}章正文：林青记录阶段${index + 1}的线索。`
+      const summary = `阶段${index + 1}的经历`
+      const chapter = {
+        ...first, id: `chapter-${index}`, chapterIndex: index,
+        title: `第${index + 1}章`, content, summary, wordCount: content.length,
+      }
+      return { ...chapter, summarySource: createChapterSourceBinding(chapter, summary, 'ai', novel.createdAt) }
+    })
     novel.eventLog = [{
       id: 'promise', chapterIndex: 70, title: '密信之谜', description: '找到密信的主人',
       characters: [], type: '伏笔', status: 'planted', timestamp: novel.createdAt,
     }]
-    const context = buildWritingContext(novel, novel.chapters[159], 8000)
+    const scope = { kind: 'book' as const, throughChapterId: novel.chapters[129].id }
+    const summary = '阶段130的经历'
+    const memory: StoryMemoryRecord = { id: 'earlier-memory', novelId: novel.id, title: '较早阶段回顾', scope, summary,
+      source: createStoryMemoryBinding(novel, scope, summary, 'author', '2026-10-28T00:00:00.000Z'), history: [] }
+    const context = buildWritingContext(novel, novel.chapters[159], 8000, undefined, [], [memory])
     expect(context.previousSummary).toContain('阶段130的经历')
     expect(context.previousSummary).not.toContain('阶段1的经历')
     expect(context.previousSummary).toContain('阶段159的经历')
     expect(context.outlineContext).toContain('尚未兑现的读者期待')
     expect(context.outlineContext).toContain('密信之谜')
+  })
+
+  it('上下文排除过期和未确认摘要，重新确认后恢复', () => {
+    const novel = createNovel(['林青'])
+    novel.id = 'summary-validation-context'
+    const base = novel.chapters[0]
+    const oldContent = '林青在旧钟楼找到铜盒。'
+    const stale = {
+      ...base,
+      id: 'chapter-stale',
+      chapterIndex: 0,
+      title: '过期来源',
+      content: '林青在药铺找到铜盒。',
+      summary: '过期摘要只应在重新确认后出现',
+      summarySource: createChapterSourceBinding({ id: 'chapter-stale', content: oldContent }, '过期摘要只应在重新确认后出现', 'ai', novel.createdAt),
+    }
+    const unverified: Chapter = {
+      ...base,
+      id: 'chapter-unverified',
+      chapterIndex: 1,
+      title: '未确认来源',
+      content: '林青在南门听见铜盒的回声。',
+      summary: '未确认摘要只应在重新确认后出现',
+      summarySource: undefined,
+    }
+    const current = { ...base, id: 'chapter-current', chapterIndex: 2, title: '当前章节', content: '', summary: '', summarySource: undefined }
+    novel.chapters = [stale, unverified, current]
+
+    const rejected = buildWritingContext(novel, current, 8000)
+    expect(rejected.previousSummary).not.toContain('过期摘要只应在重新确认后出现')
+    expect(rejected.previousSummary).not.toContain('未确认摘要只应在重新确认后出现')
+
+    stale.summarySource = createChapterSourceBinding(stale, stale.summary, 'author', novel.createdAt)
+    unverified.summarySource = createChapterSourceBinding(unverified, unverified.summary, 'author', novel.createdAt)
+    const confirmed = buildWritingContext(novel, current, 8000)
+    expect(confirmed.previousSummary).toContain('过期摘要只应在重新确认后出现')
+    expect(confirmed.previousSummary).toContain('未确认摘要只应在重新确认后出现')
+  })
+})
+
+
+describe('当前写作上下文缓存', () => {
+  function cachedBook(id: string) {
+    const novel = createNovel(['林青'])
+    novel.id = id
+    novel.outline = '铜盒线索追查'
+    novel.chapters[0].content = '林青把铜盒藏进旧钟楼。'
+    novel.chapters.push({ ...novel.chapters[0], id: id + '-current', chapterIndex: 1, title: '林青追查铜盒', content: '', summary: '' })
+    return { novel, chapter: novel.chapters[1] }
+  }
+
+  it('invalidates equal-length outline edits without relying on updatedAt', () => {
+    const { novel, chapter } = cachedBook('cache-outline-content')
+    novel.outline = '铜盒藏在东岸'
+    const before = buildWritingContext(novel, chapter, 32000)
+    expect(before.outlineContext).toContain('铜盒藏在东岸')
+    expect(buildWritingContext(novel, chapter, 32000)).toBe(before)
+    novel.outline = '铜盒藏在西岸'
+    const after = buildWritingContext(novel, chapter, 32000)
+    expect(after.outlineContext).toContain('铜盒藏在西岸')
+    expect(after.outlineContext).not.toContain('铜盒藏在东岸')
+  })
+
+  it('invalidates character descriptions and relationship text with unchanged counts', () => {
+    const { novel, chapter } = cachedBook('cache-character-content')
+    const hero = novel.characters[0]
+    novel.characters.push({ ...hero, id: 'guard', name: '守卫', relationships: [] })
+    hero.relationships = [{ targetId: 'guard', targetName: '守卫', relation: '结义兄弟' }]
+    hero.description = '铜盒上刻着旧纹章'
+    const before = buildWritingContext(novel, chapter, 32000)
+    expect(before.outlineContext).toContain('结义兄弟')
+    hero.relationships[0].relation = '杀父仇人'
+    hero.description = '铜盒上刻着新纹章'
+    const after = buildWritingContext(novel, chapter, 32000)
+    expect(after.outlineContext).toContain('杀父仇人')
+    expect(after.outlineContext).not.toContain('结义兄弟')
+    expect(after.semanticEvidence).not.toContain('旧纹章')
+    expect(after.semanticEvidence).toContain('新纹章')
+  })
+
+  it('invalidates event descriptions and current planning without timestamp changes', () => {
+    const { novel, chapter } = cachedBook('cache-event-content')
+    novel.eventLog = [{ id: 'cache-event', chapterIndex: 0, title: '铜盒证词', description: '旧证词提到南门', characters: ['林青'], type: '主线', status: 'resolved', timestamp: 'same' }]
+    novel.chapterPlans![0].targetChapterStart = 1
+    novel.chapterPlans![0].targetChapterEnd = 1
+    novel.chapterPlans![0].objective = '去南门查访'
+    const before = buildWritingContext(novel, chapter, 32000)
+    expect(before.outlineContext).toContain('旧证词提到南门')
+    expect(before.chapterGuidance).toContain('去南门查访')
+    novel.eventLog[0].description = '新证词提到北门'
+    novel.chapterPlans![0].objective = '去北门查访'
+    const after = buildWritingContext(novel, chapter, 32000)
+    expect(after.outlineContext).toContain('新证词提到北门')
+    expect(after.outlineContext).not.toContain('旧证词提到南门')
+    expect(after.chapterGuidance).toContain('去北门查访')
+    expect(after.chapterGuidance).not.toContain('去南门查访')
+  })
+
+  it('replaces prior-chapter excerpts and invalidates world rules and clock changes', () => {
+    const { novel, chapter } = cachedBook('cache-source-content')
+    novel.settings.worldBuilding.specialRules = '城内禁用火术'
+    const before = buildWritingContext(novel, chapter, 32000)
+    expect(before.structuredState).toContain('城内禁用火术')
+    novel.chapters[0].content = '林青把铜盒藏进新钟楼。'
+    novel.settings.worldBuilding.specialRules = '城内禁用水术'
+    const after = buildWritingContext(novel, chapter, 32000)
+    expect(after.lastParagraph).toContain('新钟楼')
+    expect(after.semanticEvidence).not.toContain('旧钟楼')
+    expect(after.structuredState).toContain('城内禁用水术')
+    expect(after.structuredState).not.toContain('城内禁用火术')
   })
 })

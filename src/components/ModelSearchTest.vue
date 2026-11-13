@@ -1,15 +1,15 @@
 <template>
-  <div class="model-search-test">
-    <p class="search-protocol">{{ description }}<span v-if="!result"> · 尚未验证服务商能力</span></p>
+  <div class="model-search-test" :class="{ 'model-search-test--compact': compact }">
+    <p v-if="!compact || busy || result || cancelled" class="search-protocol">{{ description }}<span v-if="!result"> · 尚未验证服务商能力</span></p>
     <div class="search-actions">
-      <n-button size="small" :disabled="busy || !model.baseUrl.trim() || !model.modelName.trim() || !model.apiKey.trim()"
+      <n-button :size="compact ? 'tiny' : 'small'" :quaternary="compact" :disabled="busy || !model.baseUrl.trim() || !model.modelName.trim() || !model.apiKey.trim()"
         :loading="busy" @click="confirmTest">
         <template #icon><n-icon><globe-outline /></n-icon></template>测试联网
       </n-button>
-      <n-button v-if="busy" size="small" @click="stop">
+      <n-button v-if="busy" :size="compact ? 'tiny' : 'small'" :quaternary="compact" @click="stop">
         <template #icon><n-icon><stop-outline /></n-icon></template>停止测试
       </n-button>
-      <n-button v-if="result" size="small" quaternary @click="copyDiagnostic">
+      <n-button v-if="result" :size="compact ? 'tiny' : 'small'" quaternary @click="copyDiagnostic">
         <template #icon><n-icon><copy-outline /></n-icon></template>复制诊断
       </n-button>
     </div>
@@ -30,7 +30,7 @@ import { GlobeOutline, StopOutline, CopyOutline } from '@vicons/ionicons5'
 import type { ModelConfig } from '@/stores/config'
 import { searchProtocolDescription, testChatSearch, type ChatSearchTestResult } from '@/services/chatSearch'
 
-const props = defineProps<{ model: ModelConfig }>()
+const props = defineProps<{ model: ModelConfig; compact?: boolean }>()
 const dialog = useDialog()
 const message = useMessage()
 const busy = ref(false)
@@ -102,6 +102,8 @@ onBeforeUnmount(stop)
 
 <style scoped>
 .model-search-test { display: grid; gap: 8px; min-width: 0; }
+.model-search-test--compact, .model-search-test--compact .search-actions { display: contents; }
+.model-search-test--compact .search-protocol, .model-search-test--compact .search-result { order: 1; flex-basis: 100%; min-width: 0; }
 .search-protocol, .search-result { margin: 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .search-protocol, time { color: var(--text-color-tertiary); }
 .search-actions { display: flex; flex-wrap: wrap; gap: 8px; }

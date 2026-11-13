@@ -4,29 +4,25 @@ import { ref } from 'vue'
 import { loadAllKnowledgeBasesFromDb, saveKnowledgeBaseToDb, deleteKnowledgeBaseFromDb } from '@/services/db/knowledge'
 import { createRevisionPersistence } from './revisionPersistence'
 import { splitKnowledgeText } from '@/services/knowledgeText'
+import { entrySourceVersion, baseSourceVersion, createEntrySummarySource, createBaseSummarySource } from '@/services/knowledgeSources'
+import { selectKnowledgeEntries } from '@/services/knowledgeSelection'
+import type { KBEntry, KnowledgeBase, KnowledgeSummarySource, KnowledgeSummaryHistory, KnowledgeSummaryCoverage } from '@/types/knowledge'
+export type { KBEntry, KnowledgeBase } from '@/types/knowledge'
 
 // 知识库条目
-export interface KBEntry {
-  id: string
-  category: string    // 分类：世界观/人物/势力/功法/道具/其他
-  title: string       // 标题
-  content: string     // 内容（Markdown）— 原始完整内容
-  summary: string     // AI 总结（写作时注入此字段，审查时才用完整 content）
-  tags: string[]      // 标签
-  createdAt: string
-  updatedAt: string
+type SummaryTarget = { summary?: string; summarySource?: KnowledgeSummarySource; summaryLevel?: KnowledgeBase['summaryLevel']; summaryHistory?: KnowledgeSummaryHistory[] }
+
+/** A summary editor cannot overwrite a newer confirmation of the same source. */
+export function knowledgeSummaryEditVersion(target: SummaryTarget): string {
+  return JSON.stringify([target.summary || '', target.summarySource, target.summaryLevel])
 }
 
-// 知识库
-export interface KnowledgeBase {
-  id: string
-  name: string
-  description: string
-  entries: KBEntry[]
-  summary?: string
-  summaryLevel?: 'brief' | 'standard' | 'detailed'
-  summaryUpdatedAt?: string
-  createdAt: string
+function retainSummary(target: SummaryTarget, now: string) {
+  if (!target.summary && !target.summarySource) return
+  target.summaryHistory = [...(target.summaryHistory || []), {
+    id: 'summary:' + Date.now().toString(36) + Math.random().toString(36).slice(2),
+    summary: target.summary || '', summarySource: target.summarySource, summaryLevel: target.summaryLevel, savedAt: now,
+  }].slice(-20)
 }
 
 // 预设分类
@@ -81,21 +77,52 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     return kb
   }
 
-  function updateSummary(id: string, summary: string, level: KnowledgeBase['summaryLevel'] = 'standard') {
-    const kb = getKB(id)
-    if (!kb) return
-    kb.summary = summary
-    kb.summaryLevel = level
-    kb.summaryUpdatedAt = new Date().toISOString()
-    persistence.markDirty(id)
+  async function saveEntrySummary(kbId: string, entryId: string, expectedSourceVersion: string, expectedSummaryVersion: string,
+    summary: string, origin: KnowledgeSummarySource['origin'] = 'author', coverage?: KnowledgeSummaryCoverage): Promise<void> {
+    await persistence.transact(kbId, async draft => {
+      const entry = draft.entries.find(item => item.id === entryId)
+      if (!entry) throw new Error('资料条目已不存在')
+      if (entrySourceVersion(kbId, entry) !== expectedSourceVersion || knowledgeSummaryEditVersion(entry) !== expectedSummaryVersion) {
+        throw new Error('资料或摘要在操作期间发生变化，请重新核对')
+      }
+      const now = new Date().toISOString()
+      const binding = createEntrySummarySource(kbId, entry, summary, origin, now, coverage)
+      retainSummary(entry, now)
+      entry.summary = summary
+      entry.summarySource = binding
+      entry.updatedAt = now
+      return { value: undefined, persist: () => saveKnowledgeBaseToDb(draft) }
+    })
+  }
+
+  async function saveBaseSummary(kbId: string, expectedSourceVersion: string, expectedSummaryVersion: string, summary: string,
+    level: NonNullable<KnowledgeBase['summaryLevel']> = 'standard', origin: KnowledgeSummarySource['origin'] = 'author', coverage?: KnowledgeSummaryCoverage): Promise<void> {
+    await persistence.transact(kbId, async draft => {
+      if (baseSourceVersion(draft) !== expectedSourceVersion || knowledgeSummaryEditVersion(draft) !== expectedSummaryVersion) {
+        throw new Error('知识库或摘要在操作期间发生变化，请重新核对')
+      }
+      const now = new Date().toISOString()
+      const binding = createBaseSummarySource(draft, summary, origin, now, coverage)
+      retainSummary(draft, now)
+      draft.summary = summary
+      draft.summarySource = binding
+      draft.summaryLevel = level
+      draft.summaryUpdatedAt = now
+      return { value: undefined, persist: () => saveKnowledgeBaseToDb(draft) }
+    })
   }
 
   // 删除知识库
   async function deleteKB(id: string) {
     await flushPendingSaves()
+    const { useInspirationSessionsStore } = await import('./inspirationSessions')
+    const inspiration = useInspirationSessionsStore()
+    await inspiration.initialize()
+    await inspiration.flushPendingSaves()
     await deleteKnowledgeBaseFromDb(id)
     knowledgeBases.value = knowledgeBases.value.filter(kb => kb.id !== id)
     persistence.forget(id)
+    inspiration.detachKnowledgeBase(id)
   }
 
   // 获取知识库
@@ -104,7 +131,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
   }
 
   // 添加条目
-  function addEntry(kbId: string, entry: Omit<KBEntry, 'id' | 'createdAt' | 'updatedAt'>): KBEntry | null {
+  function addEntry(kbId: string, entry: Omit<KBEntry, 'id' | 'createdAt' | 'updatedAt'>, summaryOrigin?: KnowledgeSummarySource['origin']): KBEntry | null {
     const kb = getKB(kbId)
     if (!kb) return null
     const newEntry: KBEntry = {
@@ -113,9 +140,8 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
+    if (summaryOrigin && newEntry.summary.trim()) newEntry.summarySource = createEntrySummarySource(kbId, newEntry, newEntry.summary, summaryOrigin, newEntry.createdAt)
     kb.entries.unshift(newEntry)
-    kb.summary = ''
-    kb.summaryUpdatedAt = ''
     persistence.markDirty(kbId)
     return newEntry
   }
@@ -127,8 +153,6 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     const entry = kb.entries.find(e => e.id === entryId)
     if (entry) {
       Object.assign(entry, data, { updatedAt: new Date().toISOString() })
-      kb.summary = ''
-      kb.summaryUpdatedAt = ''
       persistence.markDirty(kbId)
     }
   }
@@ -138,8 +162,6 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     const kb = getKB(kbId)
     if (!kb) return
     kb.entries = kb.entries.filter(e => e.id !== entryId)
-    kb.summary = ''
-    kb.summaryUpdatedAt = ''
     persistence.markDirty(kbId)
   }
 
@@ -159,26 +181,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
 
   // 获取与关键词相关的知识条目（供 AI Prompt 注入）
   function getRelevantEntries(kbIds: string[], keywords: string[], maxEntries = 5): KBEntry[] {
-    const all: KBEntry[] = []
-    for (const kbId of kbIds) {
-      const kb = getKB(kbId)
-      if (kb) all.push(...kb.entries)
-    }
-    if (!keywords.length) return all.slice(0, maxEntries)
-    // 关键词匹配评分
-    const scored = all.map(entry => {
-      let score = 0
-      for (const kw of keywords) {
-        const kwl = kw.toLowerCase()
-        if (entry.title.toLowerCase().includes(kwl)) score += 3
-        if (entry.content.toLowerCase().includes(kwl)) score += 1
-        if (entry.summary.toLowerCase().includes(kwl)) score += 2
-        if (entry.tags.some(t => t.toLowerCase().includes(kwl))) score += 2
-      }
-      return { entry, score }
-    }).sort((a, b) => b.score - a.score)
-    const matched = scored.filter(s => s.score > 0).slice(0, maxEntries).map(s => s.entry)
-    return matched.length > 0 ? matched : all.slice(0, Math.min(maxEntries, 3))
+    return selectKnowledgeEntries(knowledgeBases.value, kbIds, keywords, maxEntries)
   }
 
   return {
@@ -189,7 +192,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     adoptImportedKnowledgeBases,
     saveError, saving, hasPendingSaves,
     createKB, deleteKB, getKB,
-    updateSummary,
+    saveEntrySummary, saveBaseSummary,
     addEntry, updateEntry, deleteEntry,
     importFromText, getRelevantEntries,
   }

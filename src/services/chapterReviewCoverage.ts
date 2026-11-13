@@ -1,16 +1,8 @@
 import { contentReviewVerdict } from './contentReview'
-
-export const REVIEW_CHUNK_SIZE = 3200
-export const MAX_REVIEW_CHUNKS = 8
-const OVERLAP = 160
-
-export interface ReviewChunk {
-  text: string
-  start: number
-  end: number
-  index: number
-  total: number
-}
+import { buildAnalysisSourceVersionId } from './reconstructionCandidates'
+import { REVIEW_CHUNK_SIZE, REVIEW_CHUNK_OVERLAP, splitReviewChunks, readReviewChunkFacts, isReviewCheckpoint, copyReviewCheckpoint, type ReviewCheckpoint, type ReviewChunk } from './chapterReviewCheckpoint'
+export { REVIEW_CHUNK_SIZE, MAX_REVIEW_CHUNKS, splitReviewChunks } from './chapterReviewCheckpoint'
+export type { ReviewCheckpoint, ReviewChunk } from './chapterReviewCheckpoint'
 
 // Coverage records completed inspections, not whether the prose has no issues.
 export interface ReviewCoverage {
@@ -22,6 +14,7 @@ export interface ReviewCoverage {
   status: 'running' | 'complete' | 'failed'
   failedChunk?: number
   error?: string
+  checkpoint?: ReviewCheckpoint
 }
 
 export interface StoredReviewCoverage extends ReviewCoverage {
@@ -35,33 +28,6 @@ export class ChapterReviewCoverageError extends Error {
   }
 }
 
-function atLowSurrogate(text: string, position: number): boolean {
-  const current = text.charCodeAt(position)
-  const previous = text.charCodeAt(position - 1)
-  return current >= 0xdc00 && current <= 0xdfff && previous >= 0xd800 && previous <= 0xdbff
-}
-
-export function splitReviewChunks(text: string): ReviewChunk[] {
-  if (!text.trim()) throw new Error('正文为空，无法审查')
-  if (text.length > MAX_REVIEW_CHUNKS * REVIEW_CHUNK_SIZE) {
-    throw new Error(`正文过长，请先拆章；一次最多审查 ${MAX_REVIEW_CHUNKS} 段，不会只审开头`)
-  }
-  const chunks: ReviewChunk[] = []
-  let start = 0
-  while (start < text.length) {
-    let end = Math.min(start + REVIEW_CHUNK_SIZE, text.length)
-    if (atLowSurrogate(text, end)) end--
-    chunks.push({ text: text.slice(start, end), start, end, index: chunks.length, total: 0 })
-    if (chunks.length > MAX_REVIEW_CHUNKS) {
-      throw new Error(`正文需要超过 ${MAX_REVIEW_CHUNKS} 段审查，请先拆章；未发送部分审查请求`)
-    }
-    if (end === text.length) break
-    start = end - OVERLAP
-    if (atLowSurrogate(text, start)) start--
-  }
-  return chunks.map(chunk => ({ ...chunk, total: chunks.length }))
-}
-
 export function reviewCoverageLabel(coverage: ReviewCoverage): string {
   const stage = coverage.globalStatus === 'not-needed' ? '单段全文'
     : `全章摘要关系复核${({ pending: '待完成', complete: '已完成', failed: '失败', 'not-needed': '' })[coverage.globalStatus]}`
@@ -72,42 +38,70 @@ export async function requestChapterReviewWithCoverage(
   source: string,
   review: (part: ReviewChunk, kind: 'chunk' | 'global', facts?: string) => Promise<string>,
   onProgress?: (coverage: ReviewCoverage) => void,
+  recovery?: { binding: string; checkpoint?: ReviewCheckpoint; onCheckpoint: (coverage: ReviewCoverage) => Promise<void> },
 ): Promise<string> {
   const coverage: ReviewCoverage = {
-    totalChunks: Math.max(1, Math.ceil(source.length / (REVIEW_CHUNK_SIZE - OVERLAP))),
+    totalChunks: Math.max(1, Math.ceil(source.length / (REVIEW_CHUNK_SIZE - REVIEW_CHUNK_OVERLAP))),
     completedChunks: 0, coveredCharacters: 0, totalCharacters: source.length,
     globalStatus: 'pending', status: 'running',
   }
-  const emit = () => onProgress?.({ ...coverage })
+  const snapshot = (): ReviewCoverage => ({ ...coverage, ...(coverage.checkpoint ? { checkpoint: copyReviewCheckpoint(coverage.checkpoint) } : {}) })
+  const emit = () => onProgress?.(snapshot())
+  const persist = async () => {
+    if (coverage.completedChunks === coverage.totalChunks && ['complete', 'not-needed'].includes(coverage.globalStatus)) coverage.status = 'complete'
+    if (recovery) await recovery.onCheckpoint(snapshot())
+  }
   let runningGlobal = false
   try {
     const chunks = splitReviewChunks(source)
     coverage.totalChunks = chunks.length
     coverage.globalStatus = chunks.length > 1 ? 'pending' : 'not-needed'
+    if (recovery) {
+      const previous = recovery.checkpoint, sourceVersionId = buildAnalysisSourceVersionId(source)
+      if (previous !== undefined && !isReviewCheckpoint(previous)) throw new Error('分段审核断点损坏，不能继续使用')
+      if (previous?.binding === recovery.binding && previous.sourceVersionId === sourceVersionId) {
+        if (!isReviewCheckpoint(previous, source)) throw new Error('分段审核断点与正文范围不一致')
+        coverage.checkpoint = copyReviewCheckpoint(previous)
+      } else coverage.checkpoint = { version: 1, binding: recovery.binding, sourceVersionId, totalCharacters: source.length, totalChunks: chunks.length, chunks: [] }
+      coverage.completedChunks = coverage.checkpoint.chunks.length
+      coverage.coveredCharacters = coverage.checkpoint.chunks.slice(-1)[0]?.end || 0
+      if (coverage.checkpoint.globalReport) coverage.globalStatus = 'complete'
+      // A retained result from a failed write must be durable before another paid request.
+      if (coverage.completedChunks) await persist()
+    }
     emit()
     const reports: string[] = []
     const summaries: string[] = []
     for (const chunk of chunks) {
-      coverage.failedChunk = chunk.index + 1
-      const report = await review(chunk, 'chunk')
+      const cached = coverage.checkpoint?.chunks[chunk.index]
+      if (!cached) coverage.failedChunk = chunk.index + 1
+      const report = cached?.report ?? await review(chunk, 'chunk')
       if (contentReviewVerdict(report) === 'unknown') throw new Error(`第 ${chunk.index + 1} 段审查结论无法识别`)
       if (chunks.length > 1) {
-        const summary = report.replace(/\r/g, '').match(/^##\s+本段事实摘要\s*\n([\s\S]*?)(?=\n#{1,2}\s|$)/m)?.[1]?.trim()
-        if (!summary || summary.length > 600) throw new Error(`第 ${chunk.index + 1} 段缺少有效的事实摘要（需 1–600 字符），全章关系复核未完成`)
+        const summary = readReviewChunkFacts(report)
+        if (!summary) throw new Error(`第 ${chunk.index + 1} 段缺少有效的事实摘要（需 1–600 字符），全章关系复核未完成`)
         summaries.push(`【第 ${chunk.index + 1} 段，原文字符 ${chunk.start + 1}–${chunk.end}】\n${summary}`)
       }
       reports.push(report)
-      coverage.completedChunks++
-      coverage.coveredCharacters = chunk.end
-      delete coverage.failedChunk
-      emit()
+      if (!cached) {
+        coverage.checkpoint?.chunks.push({ index: chunk.index, start: chunk.start, end: chunk.end, report })
+        coverage.completedChunks++
+        coverage.coveredCharacters = chunk.end
+        delete coverage.failedChunk
+        await persist()
+        emit()
+      }
     }
     if (chunks.length > 1) {
       runningGlobal = true
-      const global = await review({ text: '', start: 0, end: source.length, index: 0, total: chunks.length }, 'global', summaries.join('\n\n'))
+      const global = coverage.checkpoint?.globalReport ?? await review({ text: '', start: 0, end: source.length, index: 0, total: chunks.length }, 'global', summaries.join('\n\n'))
       if (contentReviewVerdict(global) === 'unknown') throw new Error('全章事实摘要关系复核结论无法识别')
       reports.push(global)
       coverage.globalStatus = 'complete'
+      if (coverage.checkpoint && !coverage.checkpoint.globalReport) {
+        coverage.checkpoint.globalReport = global
+        await persist()
+      }
     }
     coverage.status = 'complete'
     emit()
@@ -121,8 +115,8 @@ export async function requestChapterReviewWithCoverage(
   } catch (error) {
     coverage.status = 'failed'
     if (runningGlobal) coverage.globalStatus = 'failed'
-    coverage.error = error instanceof Error ? error.message : String(error)
+    coverage.error = (error instanceof Error ? error.message : String(error)).slice(0, 2000)
     emit()
-    throw new ChapterReviewCoverageError(coverage.error, { ...coverage })
+    throw new ChapterReviewCoverageError(coverage.error, snapshot())
   }
 }

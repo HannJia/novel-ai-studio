@@ -1,13 +1,30 @@
+import { formatEventCausalityContext } from './eventCausality'
+import { formatArcDesign } from './storyArcEditing'
+import { getCurrentChapterSummary } from '@/services/derivedSources'
+import type { StoryMemoryRecord } from '@/types/storyMemory'
+import { formatStoryMemoryContext, storyMemorySignature } from './storyMemory'
+import { withCurrentStoryEntities, formatEntitySourceWarnings } from './effectiveStory'
 // 上下文窗口管理 — 组装 AI 生成时的上下文信息
 
 import type { Novel, Chapter, Character, EventLogEntry } from '@/types/novel'
 import type { EmbeddingConfig } from '@/stores/config'
 import { useKnowledgeStore } from '@/stores/knowledge'
-import { buildSemanticRecords, formatEvidence, queryPersistedSemanticEvidence, retrieveSemanticEvidence } from '@/services/semanticIndex'
+import type { KnowledgeBase } from '@/types/knowledge'
+import { orderKnowledgeSources, selectKnowledgeEntries } from './knowledgeSelection'
+import { buildSemanticRecords, formatEvidence, queryPersistedSemanticEvidence, retrieveSemanticEvidence, SemanticSourceChangedError } from '@/services/semanticIndex'
 import { isRemoteEmbeddingEnabled } from '@/services/embeddings'
 import { formatChapterPlanContext } from '@/services/storyPlanning'
 import { buildBoundKnowledgeSignature } from '@/services/knowledgeContext'
+import { projectStoryTime, projectStoryTimeTimeline } from './storyTime'
 import { equipmentSnapshot, formatEquipmentTotals } from '@/services/dataPanelEquipment'
+import { buildReconstructionContextPack, formatReconstructionContextPack } from '@/services/reconstructionContext'
+import type { CanonMutationRecord, ContextPack, CreationDraft } from '@/types/reconstruction'
+import { formatApprovedPlanning, getApprovedPlanning } from './reconstructionPlanning'
+import { formatCharacterStateContext } from './reconstructionCharacterState'
+import { getRelationshipProjection } from './relationshipProjection'
+import { resolveChapterLengthPolicy, type ChapterLengthPolicy } from './chapterLength'
+import { countNovelWords } from '@/utils/format'
+
 
 export interface WritingContext {
   outlineContext: string
@@ -15,9 +32,12 @@ export interface WritingContext {
   lastParagraph: string
   chapterGuidance: string
   semanticEvidence: string
+  structuredState?: string
 }
 
 export interface ReviewContext {
+  lengthPolicy?: ChapterLengthPolicy
+  chapterWordCount?: number
   settings: string
   style: string
   characters: string
@@ -27,6 +47,7 @@ export interface ReviewContext {
   previousSummary: string
   chapterContent: string
   semanticEvidence: string
+  structuredState?: string
 }
 
 interface ContextBudget {
@@ -42,9 +63,12 @@ interface ContextBudget {
   lastParagraph: number
   reviewEvents: number
   semanticEvidence: number
+  structuredState: number
 }
 
-const contextCache = new Map<string, WritingContext>()
+const contextCache = new Map<string, { signature: string; context: WritingContext }>()
+const contextSources = new WeakMap<WritingContext, string>()
+const contextCanon = new WeakMap<WritingContext, CanonMutationRecord[]>()
 
 function getContextBudget(contextWindow = 8000): ContextBudget {
   return {
@@ -60,6 +84,7 @@ function getContextBudget(contextWindow = 8000): ContextBudget {
     lastParagraph: Math.min(Math.floor(contextWindow * 0.08), 800),
     reviewEvents: Math.min(Math.floor(contextWindow * 0.12), 900),
     semanticEvidence: Math.min(Math.floor(contextWindow * 0.16), 1500),
+    structuredState: Math.min(Math.floor(contextWindow * 0.18), 1400),
   }
 }
 
@@ -81,7 +106,7 @@ function includesAny(source: string, values: string[]): boolean {
 }
 
 export function selectRelevantCharacters(novel: Novel, sourceText: string, limit = 12): Character[] {
-  const activeChars = (novel.characters || []).filter(c => !c.status || c.status === '活跃' || c.status === '失踪')
+  const activeChars = (novel.characters || []).filter(c => !c.status || c.status === '活跃' || c.status === '失踪' || c.status === '待核对')
   if (activeChars.length <= limit) return activeChars
 
   const protagonistName = novel.settings?.protagonist?.name || ''
@@ -105,14 +130,15 @@ export function selectRelevantCharacters(novel: Novel, sourceText: string, limit
   return selected.length > 0 ? selected : activeChars.slice(0, limit)
 }
 
-function formatCharacter(c: Character): string {
+function formatCharacter(c: Character, relationships: ReturnType<typeof getRelationshipProjection>): string {
   let entry = `• ${c.name}（${c.identity || '未知身份'}）`
   if (c.personality) entry += `，性格：${c.personality}`
   if (c.faction) entry += `，阵营：${c.faction}`
   if (c.powerLevel) entry += `，实力：${c.powerLevel}`
   if (c.status === '失踪') entry += `，当前状态：失踪`
-  if (c.relationships && c.relationships.length > 0) {
-    const rels = c.relationships.map(r => `${r.targetName}(${r.relation})`).join('、')
+  const current = relationships.edges.filter(edge => edge.source.id === c.id)
+  if (current.length > 0) {
+    const rels = current.map(edge => `${edge.target.name}(${edge.relation})`).join('、')
     entry += `，关系：${rels}`
   }
   return entry
@@ -131,34 +157,14 @@ function formatDataPanelItem(item: Novel['dataPanels'][number], panels: Novel['d
   return `• [${item.category}] ${item.name}：${fields || '暂无字段'}${owner}${keywords}${effective ? `\n${effective}` : ''}`
 }
 
-function buildStageSummary(novel: Novel, chapterIdx: number, limit: number): string {
-  const olderSummaries = novel.chapters
-    .filter(c => c.chapterIndex < chapterIdx - 15 && c.summary)
-    .sort((a, b) => b.chapterIndex - a.chapterIndex)
-    .slice(0, 30)
-    .reverse()
-
-  if (olderSummaries.length === 0) return ''
-
-  const groups: string[] = []
-  for (let i = 0; i < olderSummaries.length; i += 10) {
-    const group = olderSummaries.slice(i, i + 10)
-    const first = group[0]
-    const last = group[group.length - 1]
-    const text = group.map(c => c.summary).join('；')
-    groups.push(`【第${first.chapterIndex + 1}-${last.chapterIndex + 1}章阶段摘要】${limitText(text, 220)}`)
-  }
-  return limitText(groups.join('\n'), limit)
-}
-
-function buildPreviousSummary(novel: Novel, chapterIdx: number, budget: ContextBudget): string {
+function buildPreviousSummary(novel: Novel, chapterIdx: number, budget: ContextBudget, storyMemories: StoryMemoryRecord[]): string {
   const summaryChapters = novel.chapters
-    .filter(c => c.chapterIndex < chapterIdx && c.summary)
+    .filter(c => c.chapterIndex < chapterIdx && getCurrentChapterSummary(c))
     .sort((a, b) => b.chapterIndex - a.chapterIndex)
     .slice(0, budget.summaryChapterCount)
     .reverse()
 
-  const stageSummary = buildStageSummary(novel, chapterIdx, Math.floor(budget.summaryText * 0.35))
+  const stageSummary = formatStoryMemoryContext(novel, storyMemories, chapterIdx, Math.floor(budget.summaryText * 0.65))
   const recentBudget = budget.summaryText - stageSummary.length - (stageSummary ? 2 : 0)
   const recent: string[] = []
   let remaining = recentBudget
@@ -166,77 +172,40 @@ function buildPreviousSummary(novel: Novel, chapterIdx: number, budget: ContextB
     const label = `【第${chapter.chapterIndex + 1}章 ${chapter.title}】`
     const available = remaining - label.length - (recent.length ? 2 : 0)
     if (available <= 0) break
-    const line = label + limitText(chapter.summary, available)
+    const line = label + limitText(getCurrentChapterSummary(chapter), available)
     recent.unshift(line)
     remaining -= line.length + (recent.length > 1 ? 2 : 0)
   }
   return [stageSummary, recent.join('\n\n')].filter(Boolean).join('\n\n')
 }
 
-function buildContextSignature(novel: Novel, currentChapter: Chapter, contextWindow?: number): string {
-  const previousChapter = novel.chapters.find(c => c.chapterIndex === currentChapter.chapterIndex - 1)
-  const currentVolume = novel.volumes?.find(v => v.volumeIndex === currentChapter.volumeIndex)
-  const characterSig = (novel.characters || [])
-    .map(c => [c.id, c.name, c.status, c.identity, c.powerLevel, c.relationships?.length || 0].join(':'))
-    .join('|')
-  const eventSig = (novel.eventLog || [])
-    .map(e => [e.id, e.title, e.status || '', e.hintCount || 0, e.targetChapter ?? '', e.updatedAt || ''].join(':'))
-    .join('|')
-  const arcSig = (novel.storyArcs || [])
-    .map(arc => [
-      arc.id,
-      arc.status,
-      arc.updatedAt,
-      arc.nodes.map(node => `${node.id}:${node.status}:${node.targetChapter}:${node.actualChapter ?? ''}`).join(','),
-    ].join(':'))
-    .join('|')
-  const dataSig = (novel.dataPanels || [])
-    .map(item => [
-      item.id,
-      item.name,
-      item.updatedAt,
-      item.ownerItemId || '',
-      item.equipmentState || '',
-      item.fields.map(f => `${f.name}:${f.value}:${JSON.stringify(f.modifier || {})}`).join(','),
-    ].join(':'))
-    .join('|')
-  const planSig = (novel.chapterPlans || [])
-    .map(plan => [
-      plan.id,
-      plan.status,
-      plan.targetChapterStart,
-      plan.targetChapterEnd,
-      plan.updatedAt,
-    ].join(':'))
-    .join('|')
+function readContextKnowledge(snapshot?: KnowledgeBase[]): KnowledgeBase[] {
+  if (snapshot !== undefined) return snapshot
+  try { return useKnowledgeStore().knowledgeBases } catch { return [] }
+}
 
-  return [
-    novel.id,
-    currentChapter.id,
-    currentChapter.title,
-    currentChapter.updatedAt,
-    previousChapter?.updatedAt || '',
-    previousChapter?.content.length || 0,
-    novel.chapters.filter(chapter => chapter.chapterIndex < currentChapter.chapterIndex && chapter.summary)
-      .sort((a, b) => b.chapterIndex - a.chapterIndex).slice(0, 45)
-      .map(chapter => `${chapter.id}:${chapter.updatedAt}:${chapter.summary.length}`).join(','),
-    contextWindow || 8000,
-    novel.outline.length,
-    currentVolume ? [currentVolume.title, currentVolume.theme, currentVolume.summary, currentVolume.keyTurningPoints, currentVolume.characterChanges].join(':') : '',
-    characterSig,
-    eventSig,
-    arcSig,
-    planSig,
-    dataSig,
-    novel.knowledgeBaseIds?.join(',') || '',
-    buildBoundKnowledgeSignature(novel),
-  ].join('|')
+function buildContextSignature(novel: Novel, currentChapter: Chapter, storyMemories: StoryMemoryRecord[] = [], canonMutations: CanonMutationRecord[] = [], knowledge?: KnowledgeBase[]): string {
+  novel = withCurrentStoryEntities(novel, currentChapter.chapterIndex)
+  // Keep exact content, including same-length edits and fields whose timestamps
+  // have not yet been saved. Only a few current chapter contexts are retained.
+  return JSON.stringify({
+    canonMutations, novelId: novel.id, currentChapter: { id: currentChapter.id, chapterIndex: currentChapter.chapterIndex,
+      volumeIndex: currentChapter.volumeIndex, title: currentChapter.title, content: currentChapter.content, summary: getCurrentChapterSummary(currentChapter) },
+    outline: novel.outline, settings: novel.settings,
+    storyMemory: storyMemorySignature(novel, storyMemories, currentChapter.chapterIndex),
+    storyTime: { current: projectStoryTime(novel, currentChapter), prior: projectStoryTimeTimeline(novel, currentChapter.chapterIndex) },
+    volumes: novel.volumes, characters: novel.characters,
+    events: novel.eventLog, arcs: novel.storyArcs, plans: novel.chapterPlans, data: novel.dataPanels,
+    chapters: novel.chapters.filter(chapter => chapter.chapterIndex < currentChapter.chapterIndex)
+      .map(chapter => [chapter.id, chapter.chapterIndex, chapter.volumeIndex, chapter.title, chapter.status, getCurrentChapterSummary(chapter), chapter.content]),
+    knowledgeIds: novel.knowledgeBaseIds, knowledge: buildBoundKnowledgeSignature(novel, readContextKnowledge(knowledge)),
+  })
 }
 
 function buildVolumeContext(novel: Novel, currentChapter: Chapter, budget: ContextBudget): string {
   const currentVolume = novel.volumes?.find(v => v.volumeIndex === currentChapter.volumeIndex)
   if (!currentVolume) return ''
-  return limitText(`\n\n【当前卷级摘要：${currentVolume.title}】\n主题：${currentVolume.theme}\n剧情概要：${currentVolume.summary}`, budget.volume)
+  return limitText(`\n\n【当前卷规划（预期走向，不能作为已发生事实）：${currentVolume.title}】\n主题：${currentVolume.theme}\n剧情概要：${currentVolume.summary}`, budget.volume)
 }
 
 function buildStoryArcContext(novel: Novel, currentChapter: Chapter, budget: ContextBudget): string {
@@ -254,7 +223,8 @@ function buildStoryArcContext(novel: Novel, currentChapter: Chapter, budget: Con
       ? `；下一节点：第${nextNode.targetChapter + 1}章「${nextNode.title}」${nextNode.description ? `（${nextNode.description}）` : ''}`
       : ''
     const paused = arc.status === 'paused' && arc.reactivateAt ? `；恢复条件：${arc.reactivateAt}` : ''
-    return `• [${arc.type}/${arc.status}/重要度${arc.importance}] ${arc.title}：${arc.description || '暂无描述'}${next}${paused}`
+    const prerequisites = nextNode?.prerequisiteNodeIds?.length ? '；前置节点 ID：' + nextNode.prerequisiteNodeIds.join('、') : ''
+    return `• [${arc.type}/${arc.status}/重要度${arc.importance}] ${arc.title}：${arc.description || '暂无描述'}；${formatArcDesign(arc)}${next}${paused}${prerequisites}`
   })
   return limitText(`\n\n【当前故事弧线（按节奏推进，不要提前完成远期节点）】\n${lines.join('\n')}`, budget.storyArcs)
 }
@@ -266,7 +236,7 @@ function buildTimelineContext(novel: Novel, currentChapter: Chapter, budget: Con
     .sort((a, b) => b.chapterIndex - a.chapterIndex)
     .slice(0, 5)
   const upcoming = (novel.eventLog || [])
-    .filter(event => !isActiveGlobalPlan(event) && event.status !== 'resolved' && event.status !== 'abandoned' && event.targetChapter !== undefined)
+    .filter(event => !isActiveGlobalPlan(event) && event.status !== 'resolved' && event.status !== 'abandoned' && event.status !== 'unverified' && event.targetChapter !== undefined)
     .sort((a, b) => (a.targetChapter || 0) - (b.targetChapter || 0) || (b.importance || 3) - (a.importance || 3))
     .slice(0, 6)
   const entries = [...recent, ...upcoming.filter(item => !recent.some(event => event.id === item.id))]
@@ -293,10 +263,22 @@ export function buildWritingContext(
   novel: Novel,
   currentChapter: Chapter,
   contextWindow?: number,
+  creationDraft?: CreationDraft,
+  canonMutations: CanonMutationRecord[] = [],
+  storyMemories: StoryMemoryRecord[] = [],
+  knowledgeSnapshot?: KnowledgeBase[],
 ): WritingContext {
-  const cacheKey = buildContextSignature(novel, currentChapter, contextWindow)
+  const knowledge = orderKnowledgeSources(readContextKnowledge(knowledgeSnapshot))
+  const sourceWarnings = formatEntitySourceWarnings(novel, currentChapter.chapterIndex)
+  novel = withCurrentStoryEntities(novel, currentChapter.chapterIndex)
+  const maxContext = contextWindow || 8000
+  const characterState = formatCharacterStateContext(novel, canonMutations, currentChapter.chapterIndex,
+    { limit: Math.min(6000, Math.floor(maxContext * 0.45)) })
+  const cacheKey = JSON.stringify([novel.id, currentChapter.id, contextWindow || 8000])
+  const sourceSignature = buildContextSignature(novel, currentChapter, storyMemories, canonMutations, knowledge)
+  const signature = sourceSignature + JSON.stringify(getApprovedPlanning(creationDraft, currentChapter.chapterIndex, novel)) + characterState + sourceWarnings
   const cached = contextCache.get(cacheKey)
-  if (cached) return cached
+  if (cached?.signature === signature) return cached.context
 
   const budget = getContextBudget(contextWindow)
   const chapterIdx = currentChapter.chapterIndex
@@ -305,10 +287,31 @@ export function buildWritingContext(
   const volumeContext = buildVolumeContext(novel, currentChapter, budget)
   const storyArcContext = buildStoryArcContext(novel, currentChapter, budget)
   const timelineContext = buildTimelineContext(novel, currentChapter, budget)
-  const chapterGuidance = formatChapterPlanContext(novel, chapterIdx)
-  const storyClockContext = novel.storyClock
-    ? `\n\n【故事时间】当前为${novel.storyClock.label || `第 ${novel.storyClock.currentDay + 1} 天`}（故事日 ${novel.storyClock.currentDay}）。涉及成长、倒计时、资源产出和状态变化时，必须以这个时间为准。`
-    : ''
+  const chapterGuidance = creationDraft ? formatApprovedPlanning(creationDraft, chapterIdx, novel) : formatChapterPlanContext(novel, chapterIdx)
+  const chapterTime = projectStoryTime(novel, currentChapter)
+  const timeline = projectStoryTimeTimeline(novel, currentChapter.chapterIndex).sort((a, b) => a.chapterIndex - b.chapterIndex)
+  const recentTimes = timeline.slice(-3)
+  const knownTimes = timeline.filter(item => item.time.known)
+  const nearestKnown = knownTimes[knownTimes.length - 1]
+  if (nearestKnown && !recentTimes.includes(nearestKnown)) recentTimes.unshift(nearestKnown)
+  const unknownTimes = timeline.filter(item => !item.time.known).length
+  const priorTimes = recentTimes.map(item => item.time.known
+    ? `第${item.chapterIndex + 1}章「${limitText(item.title, 40)}」：故事日 ${item.time.startDay}–${item.time.endDay}${item.time.label ? `（${limitText(item.time.label, 40)}）` : ''}`
+    : `第${item.chapterIndex + 1}章「${limitText(item.title, 40)}」：时间来源未知（${limitText(item.time.reason || '待核对', 70)}）`).join('\n')
+  const storyClockContext = limitText(`\n\n【按章故事时间】${chapterTime.known
+    ? `本章边界为故事日 ${chapterTime.startDay}–${chapterTime.endDay}，本章经过 ${chapterTime.elapsedDays} 天。`
+    : `${chapterTime.startDay !== undefined ? `本章已知开始为故事日 ${chapterTime.startDay}；` : '本章开始时间未知；'}本章结束时间未知（${chapterTime.reason || '待作者确认'}），不得从全局最新时钟补值。`}${chapterTime.label ? ` 时间标签：${chapterTime.label}。` : ''}${priorTimes ? `\n前序 ${timeline.length} 章中 ${unknownTimes} 章时间待核对；仅列最近章节及最近有效锚点，未知间隔不能推算：\n${priorTimes}` : ''}`, Math.min(900, Math.floor(maxContext * 0.1)))
+  const reconstructionPack = buildReconstructionContextPack(novel, currentChapter, {
+    creationDraft,
+    canonMutations,
+    targetType: 'chapter',
+    targetId: currentChapter.id,
+    authorInstruction: '写作时优先遵守已确认的结构化故事状态；无法确认的内容只能作为候选，不要自行写入 Canon。',
+  })
+  // 人物状态已按完整条目限制长度，不能在总预算处把证据或误信说明截成半句。
+  const structuredState = [limitText(sourceWarnings, Math.floor(maxContext * 0.05)), characterState,
+    formatEventCausalityContext(novel, canonMutations, currentChapter.chapterIndex, Math.min(5000, Math.floor(maxContext * 0.2))),
+    limitText(formatReconstructionContextPack({ ...reconstructionPack, characterState: '' }), Math.min(budget.structuredState, Math.floor(maxContext * 0.18)))].filter(Boolean).join('\n\n')
 
   let lastParagraph = ''
   if (chapterIdx > 0) {
@@ -318,21 +321,22 @@ export function buildWritingContext(
     }
   }
 
-  const previousSummary = buildPreviousSummary(novel, chapterIdx, budget)
+  const previousSummary = buildPreviousSummary(novel, chapterIdx, budget, storyMemories)
   const relevanceSource = [currentChapter.title, chapterGuidance, volumeContext, storyArcContext, timelineContext, lastParagraph, previousSummary].join('\n')
   let semanticEvidence = ''
 
   let characterContext = ''
+  const relationships = getRelationshipProjection(novel, canonMutations, chapterIdx, 'before')
   const relevantChars = selectRelevantCharacters(novel, relevanceSource, 12)
   if (relevantChars.length > 0) {
-    characterContext = limitText(`\n\n【相关角色库（请严格遵循以下设定，根据剧情安排出场）】\n${relevantChars.map(formatCharacter).join('\n')}`, budget.characters)
+    characterContext = limitText(`\n\n【相关角色库（请严格遵循以下设定，根据剧情安排出场）】\n${relevantChars.map(character => formatCharacter(character, relationships)).join('\n')}`, budget.characters)
   }
 
   let globalPlanContext = ''
   const activeGlobalPlans = (novel.eventLog || []).filter(isActiveGlobalPlan)
   const activePromises = (novel.eventLog || [])
     .filter(event => event.type === '伏笔' && event.chapterIndex >= 0 && event.chapterIndex < chapterIdx
-      && event.status !== 'resolved' && event.status !== 'abandoned')
+      && event.status !== 'resolved' && event.status !== 'abandoned' && event.status !== 'unverified')
     .sort((a, b) => (b.lastProgressChapterIndex ?? b.chapterIndex) - (a.lastProgressChapterIndex ?? a.chapterIndex))
   if (activeGlobalPlans.length > 0) {
     const lines = activeGlobalPlans.map(event => {
@@ -350,43 +354,41 @@ export function buildWritingContext(
 
   let knowledgeContext = ''
   if (novel.knowledgeBaseIds && novel.knowledgeBaseIds.length > 0) {
-    try {
-      const kbStore = useKnowledgeStore()
-      const keywords = splitKeywords([relevanceSource, ...relevantChars.map(c => c.name)].join('\n')).slice(0, 30)
-      const relevantEntries = kbStore.getRelevantEntries(novel.knowledgeBaseIds, keywords, 8)
-      const entries = relevantEntries.map(entry => {
-        const text = entry.summary || entry.content.substring(0, budget.knowledgeEntry)
-        return `• [${entry.category}] ${entry.title}：${text}`
-      })
-      if (entries.length > 0) {
-        knowledgeContext = `\n\n【知识库（已按本章相关性筛选，请确保内容一致）】\n${entries.join('\n')}`
-      }
-      semanticEvidence = formatEvidence(
-        retrieveSemanticEvidence(relevanceSource, buildSemanticRecords(novel, kbStore.knowledgeBases), 8),
-        budget.semanticEvidence,
-      )
-    } catch {
-      // 知识库 store 未初始化时静默跳过
+    const keywords = splitKeywords([relevanceSource, ...relevantChars.map(c => c.name)].join('\n')).slice(0, 30)
+    const relevantEntries = selectKnowledgeEntries(knowledge, novel.knowledgeBaseIds, keywords, 8)
+    const entries = relevantEntries.map(entry => {
+      const text = entry.summary || entry.content.substring(0, budget.knowledgeEntry)
+      return `• [${entry.category}] ${entry.title}：${text}`
+    })
+    if (entries.length > 0) {
+      knowledgeContext = `\n\n【知识库（已按本章相关性筛选，请确保内容一致）】\n${entries.join('\n')}`
     }
+    semanticEvidence = formatEvidence(
+      retrieveSemanticEvidence(relevanceSource, buildSemanticRecords(novel, knowledge, chapterIdx, storyMemories, canonMutations), 8),
+      budget.semanticEvidence, relevanceSource,
+    )
   }
 
   if (!semanticEvidence) {
     semanticEvidence = formatEvidence(
-      retrieveSemanticEvidence(relevanceSource, buildSemanticRecords(novel, []), 8),
-      budget.semanticEvidence,
+      retrieveSemanticEvidence(relevanceSource, buildSemanticRecords(novel, [], chapterIdx, storyMemories, canonMutations), 8),
+      budget.semanticEvidence, relevanceSource,
     )
   }
 
   const result = {
-    outlineContext: outlineContext + storyClockContext + volumeContext + storyArcContext + timelineContext + characterContext + globalPlanContext + knowledgeContext + (semanticEvidence ? `\n\n【语义记忆召回】\n${semanticEvidence}` : ''),
+    outlineContext: limitText('\n\n【V2 结构化故事状态】\n' + structuredState + storyClockContext + outlineContext + volumeContext + storyArcContext + timelineContext + characterContext + globalPlanContext + knowledgeContext + (semanticEvidence ? '\n\n【语义记忆召回】\n' + semanticEvidence : ''), maxContext),
     previousSummary,
     lastParagraph,
     chapterGuidance,
     semanticEvidence,
+    structuredState,
   }
 
-  if (contextCache.size > 30) contextCache.clear()
-  contextCache.set(cacheKey, result)
+  if (contextCache.size >= 4 && !contextCache.has(cacheKey)) contextCache.delete(contextCache.keys().next().value!)
+  contextCache.set(cacheKey, { signature, context: result })
+  contextSources.set(result, sourceSignature)
+  contextCanon.set(result, JSON.parse(JSON.stringify(canonMutations)))
   return result
 }
 
@@ -395,8 +397,13 @@ export async function augmentWritingContextWithVectorMemory(
   currentChapter: Chapter,
   context: WritingContext,
   embeddingConfig?: EmbeddingConfig,
+  readStoryMemories: () => StoryMemoryRecord[] = () => [],
+  readCanon: () => CanonMutationRecord[] = () => contextCanon.get(context) || [],
 ): Promise<WritingContext> {
   if (!isRemoteEmbeddingEnabled(embeddingConfig)) return context
+  const sourceSignature = buildContextSignature(novel, currentChapter, readStoryMemories(), readCanon())
+  const originalSource = contextSources.get(context)
+  if (originalSource && originalSource !== sourceSignature) throw new SemanticSourceChangedError()
   const query = [
     currentChapter.title,
     context.chapterGuidance,
@@ -405,16 +412,26 @@ export async function augmentWritingContextWithVectorMemory(
   ].filter(Boolean).join('\n')
   if (!query.trim()) return context
   try {
-    const evidence = await queryPersistedSemanticEvidence(novel.id, query, 8, embeddingConfig)
-    const formatted = formatEvidence(evidence, 1500)
+    const source = () => {
+      let knowledgeBases: ReturnType<typeof useKnowledgeStore>['knowledgeBases'] = []
+      try { knowledgeBases = useKnowledgeStore().knowledgeBases } catch { /* no active knowledge store */ }
+      return { novel, knowledgeBases, storyMemories: readStoryMemories(), canonMutations: readCanon() }
+    }
+    const evidence = await queryPersistedSemanticEvidence(source, query, 8, embeddingConfig, undefined, currentChapter.chapterIndex)
+    if (buildContextSignature(novel, currentChapter, readStoryMemories(), readCanon()) !== sourceSignature) throw new SemanticSourceChangedError()
+    const formatted = formatEvidence(evidence, 1500, query)
     if (!formatted) return context
-    const usesRemoteVectors = evidence.some(item => (item.metadata as any)?._embedding?.provider === 'remote')
-    return {
+    const usesRemoteVectors = evidence.some(item => item.retrieval?.method === 'remote')
+    const augmented = {
       ...context,
-      outlineContext: `${context.outlineContext}\n\n【${usesRemoteVectors ? 'BGE 向量' : '持久化'}记忆召回】\n${formatted}`,
+      outlineContext: `${context.outlineContext}\n\n【${usesRemoteVectors ? '向量' : '当前内容'}记忆召回】\n${formatted}`,
       semanticEvidence: formatted,
     }
+    contextSources.set(augmented, sourceSignature)
+    contextCanon.set(augmented, contextCanon.get(context) || [])
+    return augmented
   } catch (error) {
+    if (error instanceof SemanticSourceChangedError) throw error
     console.warn('Vector memory query failed, using local context', error)
     return context
   }
@@ -426,6 +443,7 @@ export function buildChapterFactCard(
   writingContext = buildWritingContext(novel, currentChapter),
 ): string {
   const chapterIdx = currentChapter.chapterIndex
+  novel = withCurrentStoryEntities(novel, chapterIdx)
   const previousChapter = novel.chapters.find(c => c.chapterIndex === chapterIdx - 1)
   const relevanceSource = [
     currentChapter.title,
@@ -434,6 +452,7 @@ export function buildChapterFactCard(
     writingContext.lastParagraph,
   ].join('\n')
   const relevantCharacters = selectRelevantCharacters(novel, relevanceSource, 8)
+  const relationships = getRelationshipProjection(novel, contextCanon.get(writingContext) || [], chapterIdx, 'before')
   const recentEvents = (novel.eventLog || [])
     .filter(e => e.chapterIndex < chapterIdx && !isActiveGlobalPlan(e))
     .slice(-8)
@@ -444,7 +463,7 @@ export function buildChapterFactCard(
     .map(event => `• [${event.status === 'planted' ? '待推进' : '推进中'}] ${event.title}：${event.description}${event.hintCount ? `（已铺垫${event.hintCount}次）` : ''}`)
   const openPromises = (novel.eventLog || [])
     .filter(event => event.type === '伏笔' && event.chapterIndex >= 0 && event.chapterIndex < chapterIdx
-      && event.status !== 'resolved' && event.status !== 'abandoned')
+      && event.status !== 'resolved' && event.status !== 'abandoned' && event.status !== 'unverified')
     .sort((a, b) => (b.lastProgressChapterIndex ?? b.chapterIndex) - (a.lastProgressChapterIndex ?? a.chapterIndex))
     .slice(0, 5)
     .map(event => `• ${event.title}：${limitText(event.description, 100)}`)
@@ -475,7 +494,8 @@ export function buildChapterFactCard(
     previousChapter ? `上一章标题：第${previousChapter.chapterIndex + 1}章 ${previousChapter.title}` : '',
     writingContext.lastParagraph ? `上一章结尾：${limitText(writingContext.lastParagraph, 500)}` : '',
     writingContext.previousSummary ? `前文摘要：${limitText(writingContext.previousSummary, 1200)}` : '',
-    relevantCharacters.length ? `必须遵守的角色状态：\n${relevantCharacters.map(formatCharacter).join('\n')}` : '',
+    writingContext.structuredState ? `结构化故事状态：\n${writingContext.structuredState}` : '',
+    relevantCharacters.length ? `必须遵守的角色状态：\n${relevantCharacters.map(character => formatCharacter(character, relationships)).join('\n')}` : '',
     recentEvents.length ? `近期已发生事件：\n${recentEvents.join('\n')}` : '',
     activeGlobalPlans.length ? `待推进的全书规划：\n${activeGlobalPlans.join('\n')}` : '',
     openPromises.length ? `尚未兑现的读者期待：\n${openPromises.join('\n')}` : '',
@@ -490,29 +510,53 @@ export function buildReviewContext(
   currentChapter: Chapter,
   chapterContent: string,
   contextWindow?: number,
+  reconstructionPack?: ContextPack,
+  creationDraft?: CreationDraft,
+  canonMutations: CanonMutationRecord[] = [],
+  storyMemories: StoryMemoryRecord[] = [],
+  knowledgeSnapshot?: KnowledgeBase[],
 ): ReviewContext {
+  // Review the author's plan for this chapter. Workflow progress and later plans
+  // are not evidence that the current manuscript changed. Keep original records intact.
+  novel = { ...novel, chapterPlans: (novel.chapterPlans || []).filter(plan => plan.status !== 'archived'
+    && plan.targetChapterStart <= currentChapter.chapterIndex && plan.targetChapterEnd >= currentChapter.chapterIndex)
+    .map(plan => ({ ...plan, status: 'planned' })) }
   const budget = getContextBudget(contextWindow)
-  const writingContext = buildWritingContext(novel, currentChapter, contextWindow)
+  const writingContext = buildWritingContext(novel, currentChapter, contextWindow, creationDraft, canonMutations, storyMemories, knowledgeSnapshot)
+  novel = withCurrentStoryEntities(novel, currentChapter.chapterIndex)
   const reviewSource = [currentChapter.title, writingContext.chapterGuidance, writingContext.previousSummary, chapterContent.slice(0, 1200)].join('\n')
+  const relationships = getRelationshipProjection(novel, canonMutations, currentChapter.chapterIndex, 'before')
   const characters = selectRelevantCharacters(novel, reviewSource, 12)
-    .map(formatCharacter)
+    .map(character => formatCharacter(character, relationships))
     .join('\n') || '暂无角色信息'
   const recentEvents = limitText((novel.eventLog || [])
     .filter(e => e.chapterIndex < currentChapter.chapterIndex && !isActiveGlobalPlan(e))
     .slice(-10)
     .map(e => `${e.chapterIndex < 0 ? '全书规划' : `第${e.chapterIndex + 1}章`} [${e.type}] ${e.title}：${e.description}`)
     .join('\n') || '暂无事件记录', budget.reviewEvents)
+  const structuredState = formatReconstructionContextPack(reconstructionPack || buildReconstructionContextPack(novel, currentChapter, {
+    creationDraft,
+    canonMutations,
+    targetType: 'review',
+    targetId: currentChapter.id,
+    authorInstruction: '审核时只依据正文证据判断；没有证据或作者确认的推断只能标记为未知或候选。',
+  }))
 
   return {
     settings: limitText(JSON.stringify(novel.settings), 1200),
+    lengthPolicy: resolveChapterLengthPolicy(novel.chapterLengthPolicy),
+    chapterWordCount: countNovelWords(chapterContent),
     style: limitText(JSON.stringify(novel.writingStyle), 500),
     characters: limitText(characters, budget.characters),
     outline: limitText(writingContext.outlineContext, budget.outline + budget.volume),
-    chapterGuidance: writingContext.chapterGuidance || '暂无章节计划',
+    chapterGuidance: ['章节：第' + (currentChapter.chapterIndex + 1) + '章 ' + currentChapter.title, writingContext.chapterGuidance, currentChapter.sceneNotes?.length
+      ? '本章场景笔记（计划与约束，不能作为已发生事实）：\n' + limitText(currentChapter.sceneNotes
+        .map(note => note.title + '：' + note.content).join('\n'), budget.globalPlans) : ''].filter(Boolean).join('\n\n') || '暂无章节计划',
     recentEvents,
     previousSummary: writingContext.previousSummary || '暂无前章总结',
     // Review callers split and track coverage; never silently substitute a prefix for the supplied body.
     chapterContent,
     semanticEvidence: writingContext.semanticEvidence || '暂无可引用证据',
+    structuredState: [structuredState, formatEventCausalityContext(novel, canonMutations, currentChapter.chapterIndex)].filter(Boolean).join('\n\n'),
   }
 }

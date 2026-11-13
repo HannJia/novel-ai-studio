@@ -3,12 +3,17 @@ import { defineStore } from 'pinia'
 import { createRevisionPersistence } from './revisionPersistence'
 import { loadInspirationSessions, saveInspirationSessions } from '@/services/db/inspirationSessions'
 import { latestInspirationSessions, parseInspirationSession, type InspirationSession } from '@/services/inspirationSessions'
+import { usesProjectKernel } from '@/services/projectKernelClient'
+import { useKnowledgeStore } from './knowledge'
 
 export const useInspirationSessionsStore = defineStore('inspirationSessions', () => {
   const initialized = ref(false)
   const records = ref([{ id: 'sessions', sessions: [] as InspirationSession[] }])
   const sessions = computed(() => records.value[0].sessions)
-  const persistence = createRevisionPersistence(records, initialized, snapshot => saveInspirationSessions(snapshot.sessions))
+  const persistence = createRevisionPersistence(records, initialized, async snapshot => {
+    if (usesProjectKernel()) await useKnowledgeStore().flushPendingSaves()
+    await saveInspirationSessions(snapshot.sessions)
+  })
   let loading: Promise<void> | null = null
   function adopt(items: InspirationSession[]) {
     records.value[0].sessions = latestInspirationSessions(items.map(parseInspirationSession))
@@ -26,6 +31,15 @@ export const useInspirationSessionsStore = defineStore('inspirationSessions', ()
     records.value[0].sessions = latestInspirationSessions([checked, ...sessions.value.filter(old => old.id !== item.id)])
     persistence.markDirty('sessions')
   }
-  return { sessions, initialized, initialize, upsert, adopt, flushPendingSaves: persistence.flush,
+  function detachKnowledgeBase(id: string) {
+    let changed = false
+    for (const session of sessions.value) {
+      if (!session.knowledgeIds?.includes(id)) continue
+      session.knowledgeIds = session.knowledgeIds.filter(value => value !== id)
+      changed = true
+    }
+    if (changed) persistence.markDirty('sessions')
+  }
+  return { sessions, initialized, initialize, upsert, adopt, detachKnowledgeBase, flushPendingSaves: persistence.flush,
     saveError: persistence.saveError, saving: persistence.saving, hasPendingSaves: persistence.hasPendingSaves }
 })

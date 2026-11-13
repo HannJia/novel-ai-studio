@@ -16,6 +16,30 @@ vi.mock('naive-ui', async original => ({
 beforeEach(() => { setActivePinia(createPinia()); vi.mocked(chatWithOptionalSearch).mockReset() })
 
 describe('chat window background behavior', () => {
+  it('clears an unchanged selection prefill when reset and preserves later manual edits', async () => {
+    const store = useNovelStore()
+    const book = store.addNovel({ genre: '', subGenre: '', tags: [], targetWordCountMin: 1, targetWordCountMax: 2,
+      writingStyle: store.defaultWritingStyle(), settings: store.defaultSettings() })
+    const wrapper = shallowMount(AiChatAssistant, { props: { novelId: book.id, prefill: '旧章节选区正文' }, global: { renderStubDefaultSlot: true, stubs: {
+      Input: { props: ['value'], emits: ['update:value'], template: '<textarea :value="value" @input="$emit(\'update:value\', $event.target.value)" />' },
+    } } })
+    await wrapper.find('.chat-fab').trigger('click')
+    expect(wrapper.get('textarea').element.value).toBe('旧章节选区正文')
+    await wrapper.setProps({ prefill: '', prefillVersion: 1 })
+    await flushPromises()
+    expect(wrapper.get('textarea').element.value).toBe('')
+    await wrapper.setProps({ prefill: '新的选区正文', prefillVersion: 2 })
+    await flushPromises()
+    await wrapper.setProps({ prefill: '新的选区正文', prefillVersion: 3 })
+    await flushPromises()
+    expect(wrapper.get('textarea').element.value).toBe('新的选区正文')
+    await wrapper.get('textarea').setValue('作者手动补充的问题')
+    await wrapper.setProps({ prefill: '', prefillVersion: 4 })
+    await flushPromises()
+    expect(wrapper.get('textarea').element.value).toBe('作者手动补充的问题')
+    wrapper.unmount()
+  })
+
   it('keeps an IME composition in the input when Ctrl+Enter is pressed', async () => {
     const store = useNovelStore()
     const book = store.addNovel({ genre: '', subGenre: '', tags: [], targetWordCountMin: 1, targetWordCountMax: 2,

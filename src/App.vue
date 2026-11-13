@@ -2,7 +2,8 @@
   <n-config-provider class="app-provider" :locale="zhCN" :date-locale="dateZhCN" :theme="isDark ? darkTheme : undefined" :theme-overrides="themeStore.themeOverrides">
     <n-message-provider>
       <n-dialog-provider>
-        <div class="app-shell" :inert="settingsOpen || projectTransferBusy || appUpdateInstalling || (cloudApplyBusy && !cloudConfigApplying)">
+        <V3Shell v-if="route?.meta?.shell === 'v3'" :inert="settingsOpen || projectTransferBusy || appUpdateInstalling || (cloudApplyBusy && !cloudConfigApplying)" />
+        <div v-else class="app-shell" :inert="settingsOpen || projectTransferBusy || appUpdateInstalling || (cloudApplyBusy && !cloudConfigApplying)">
           <AppHeader @open-settings="settingsOpen = true" />
           <SaveStatusBar />
           <AppUpdateNotice />
@@ -19,7 +20,7 @@
             </router-view>
           </main>
         </div>
-        <div v-if="projectTransferBusy" class="project-transfer-overlay" role="status">正在安全导入项目，请勿关闭软件…</div>
+        <div v-if="projectTransferBusy" class="project-transfer-overlay" role="status">正在备份或恢复项目，请勿关闭软件…</div>
         <div v-if="appUpdateInstalling" class="project-transfer-overlay" role="status">正在保存并准备安装更新，请勿关闭软件…</div>
         <div v-if="cloudApplyBusy && !cloudConfigApplying" class="project-transfer-overlay" role="status">正在安全合并云端内容，请勿关闭软件…</div>
         <ExitConfirmDialog />
@@ -40,6 +41,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { NConfigProvider, NMessageProvider, NDialogProvider, NIcon, darkTheme, zhCN, dateZhCN } from 'naive-ui'
 import { CloseOutline } from '@vicons/ionicons5'
 import AppHeader from '@/components/AppHeader.vue'
@@ -47,13 +49,15 @@ import SaveStatusBar from '@/components/SaveStatusBar.vue'
 import AppUpdateNotice from '@/components/AppUpdateNotice.vue'
 import ExitConfirmDialog from '@/components/ExitConfirmDialog.vue'
 import SettingsView from '@/views/SettingsView.vue'
+import V3Shell from '@/v3/V3Shell.vue'
+import { settingsOpen } from '@/v3/shell'
 import { appUpdateInstalling, cloudApplyBusy, cloudConfigApplying } from '@/services/appLifecycle'
 import { projectTransferBusy } from '@/services/projectTransfer'
 import { useThemeStore } from '@/stores/theme'
 
+const route = useRoute()
 const themeStore = useThemeStore()
 const isDark = computed(() => themeStore.isDark)
-const settingsOpen = ref(false)
 const settingsDialog = ref<HTMLElement | null>(null)
 let settingsReturnFocus: HTMLElement | null = null
 watch(settingsOpen, async open => {

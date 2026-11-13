@@ -1,27 +1,100 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Novel, Chapter, Volume, Character, DialogueMessage, CreateWizardForm, WritingStyle, NovelSettings, DataPanelItem, DataPanelChange, ChapterRevision, ChapterRevisionSource, EventLogEntry, StoryArc, StoryArcNode, ChapterPlan, StoryStateProposal, SceneNote, ChapterVersion, DataPanelVersion, StoryClock } from '@/types/novel'
+import type { Novel, Chapter, Volume, Character, DialogueMessage, CreateWizardForm, WritingStyle, NovelSettings, DataPanelItem, DataPanelChange, ChapterRevision, ChapterRevisionSource, EventLogEntry, StoryArc, StoryArcNode, ChapterPlan, StoryStateProposal, SceneNote, ChapterVersion, StoryClock } from '@/types/novel'
 import { genres } from '@/data/genres'
 import { loadAllNovelsFromDb, saveNovelToDb, deleteNovelFromDb } from '@/services/db/novels'
-import { createRevisionPersistence } from './revisionPersistence'
+import { createRevisionPersistence, type PreparedPersistence } from './revisionPersistence'
 import { countNovelWords } from '@/utils/format'
 import { resolveChapterLengthPolicy, type ChapterLengthPolicy } from '@/services/chapterLength'
 import { createChapterRevision, getChapterRevision, listChapterRevisions, updateChapterRevisionStatus } from '@/services/db/chapterRevisions'
-import {
-  buildDataPanelAutomationSuggestions,
-  calculateDataPanelFields,
-  initializeElapsedRuleBaselines,
-  pruneDataPanelChangeHistory,
-  settleDataPanelAutomationRules,
-  type DataPanelHistoryCleanup,
-} from '@/services/dataPanel'
+import { pruneDataPanelChangeHistory, type DataPanelHistoryCleanup } from '@/services/dataPanel'
+import { preserveDataPanelReferenceHistory } from '@/services/dataPanelReference'
 import { appendPlanningVersion, createPlanningSnapshot } from '@/services/planningVersions'
-import { equipmentSnapshot } from '@/services/dataPanelEquipment'
+import { captureDataPanelBaseline, captureDataClockBaseline as captureClockBaseline, editDataPanel, decideDataPanelProposals, queueDataPanelAutomation, editDataStoryClock } from '@/services/dataPanelTransactions'
+import { bindAuthorDataPanelProposalSource, dataPanelProposalSourceIsCurrent } from '@/services/dataPanelProposalSource'
+import { usesProjectKernel } from '@/services/projectKernelClient'
+import { readStoryAggregate } from '@/services/storyAggregate'
+import type { ChapterSelectionRevision } from '@/types/novel'
+import { validateSelectionRevision } from '@/services/selectionRevisionMetadata'
+import { buildChapterReviewSignature, buildReviewContextVersion } from '@/services/reconstructionReviewVersion'
+import { buildBoundKnowledgeSignature } from '@/services/knowledgeContext'
+import { useKnowledgeStore } from './knowledge'
+import { useReconstructionWorkspaceStore } from './reconstructionWorkspace'
+import { createChapterSourceBinding } from '@/services/derivedSources'
+import { appendEntityRevision, captureEntityRevision } from '@/services/entityProvenance'
+import type { EntityDefinitionEdit } from '@/services/entityDefinitionEditing'
+import { createStoryClock, invalidateStoryTimeSources, type StoryTimeConfirmation } from '@/services/storyTime'
+import { confirmDataChapterTime, confirmStoryTimeRelative } from '@/services/dataPanelTransactions'
+import type { StoryImpactChange, StoryImpactKind } from '@/types/storyImpact'
+import { captureStoryImpact } from '@/services/storyImpactAnalysis'
+import { appendStoryImpactReport, captureStoryContextBaseline, editDefinitionsWithImpact, editNovelContextWithImpact, editStoryArcWithImpact,
+  editVolumeWithImpact, editVolumeCollectionWithImpact, invalidateWrittenChapterReviews,
+  type StoryContextField } from '@/services/storyImpactTransactions'
+import { applyStoryArcEdit, type StoryArcEdit, type ArcEditImpact } from '@/services/storyArcEditing'
+import { storyProposalSourceIsCurrent } from '@/services/storyProposalSource'
+import { storyStateProposalTargetAllowed } from '@/services/storyPlanning'
+import { applyChapterPlanEdit, type ChapterPlanEdit, type ChapterPlanInput } from '@/services/storyPlanTransactions'
+import { captureChapterDeletionBaseline as captureDeletionBaseline, assertChapterDeletionBaseline, deleteChaptersWithImpact,
+  type ChapterDeletionBaseline } from '@/services/chapterDeletionTransactions'
 
 // 生成唯一 ID
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substring(2, 8)
 }
+
+function findGenreLabels(genreValue: string, subGenreValue: string) {
+  const genre = genres.find(item => item.value === genreValue)
+  const subGenre = genre?.children.find(item => item.value === subGenreValue)
+  return { genreLabel: genre?.label || genreValue, subGenreLabel: subGenre?.label || subGenreValue }
+}
+
+/** Build a new novel without publishing it to Pinia or marking it dirty. */
+export function createNovelDraft(form: CreateWizardForm, now = new Date().toISOString(), id = generateId()): Novel {
+  const blank = form.creationInput?.method === 'blank'
+  const genre = blank ? '' : form.genre, subGenre = blank ? '' : form.subGenre
+  const { genreLabel, subGenreLabel } = findGenreLabels(genre, subGenre)
+  if (form.workingTitle !== undefined && typeof form.workingTitle !== 'string') throw new Error('作品名称必须是文字')
+  const origin = form.storyTimeOrigin
+  if (origin !== undefined && (!origin || typeof origin !== 'object' || typeof origin.day !== 'number'
+    || !Number.isFinite(origin.day) || origin.day < 0 || (origin.label !== undefined && typeof origin.label !== 'string'))) {
+    throw new Error('创建时的故事起点必须是作者明确确认的有效数字。')
+  }
+  return {
+    id,
+    title: form.workingTitle?.trim() || '未命名小说',
+    genre,
+    subGenre,
+    genreLabel,
+    subGenreLabel,
+    tags: blank ? [] : JSON.parse(JSON.stringify(form.tags)),
+    targetWordCountMin: blank ? 0 : form.targetWordCountMin,
+    targetWordCountMax: blank ? 0 : form.targetWordCountMax,
+    currentWordCount: 0,
+    writingStyle: blank ? defaultWritingStyle() : JSON.parse(JSON.stringify(form.writingStyle)),
+    writingMode: form.writingMode === 'ai' ? 'ai' : 'manual',
+    settings: blank ? defaultSettings() : JSON.parse(JSON.stringify(form.settings)),
+    outline: '',
+    volumes: [],
+    synopsis: '',
+    chapters: [],
+    characters: [],
+    chatHistory: [],
+    inspirationHistory: [],
+    knowledgeBaseIds: form.knowledgeEnabled === false ? [] : JSON.parse(JSON.stringify(form.knowledgeBaseIds || [])),
+    eventLog: [],
+    storyArcs: [],
+    chapterPlans: [],
+    storyStateProposals: [],
+    dataPanels: [],
+    dataPanelChanges: [],
+    storyClock: origin === undefined ? undefined : createStoryClock(id, now, origin.day, origin.label),
+    status: 'creating',
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+const copyEntity = <T extends Character | EventLogEntry | StoryArc | StoryArcNode>(entity: T): T => JSON.parse(JSON.stringify(entity))
 
 function appendSnapshot<T extends { id: string; label: string; savedAt: string; snapshot: string }>(versions: T[] | undefined, snapshot: string, label: string): T[] {
   const previous = versions || []
@@ -35,39 +108,7 @@ function appendSnapshot<T extends { id: string; label: string; savedAt: string; 
 }
 
 function chapterSnapshot(chapter: Chapter): string {
-  return JSON.stringify({ title: chapter.title, content: chapter.content, summary: chapter.summary, status: chapter.status })
-}
-
-function dataPanelSnapshot(item: DataPanelItem): string {
-  return JSON.stringify({
-    category: item.category,
-    name: item.name,
-    fields: item.fields,
-    relatedKeywords: item.relatedKeywords,
-    ownerItemId: item.ownerItemId,
-    equipmentState: item.equipmentState,
-    lastMentionChapterIndex: item.lastMentionChapterIndex,
-  })
-}
-
-function cleanCharacterName(value: string): string {
-  return value
-    .replace(/\*\*/g, '')
-    .replace(/\*/g, '')
-    .replace(/^[《》「」『』“”‘’"'\s]+|[《》「」『』“”‘’"'\s]+$/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function normalizeCharacterName(value: string): string {
-  return cleanCharacterName(value).toLowerCase()
-}
-
-function cleanMarkdownText(value: string): string {
-  return value
-    .replace(/\*\*/g, '')
-    .replace(/\*/g, '')
-    .trim()
+  return JSON.stringify({ title: chapter.title, content: chapter.content, summary: chapter.summary, summarySource: chapter.summarySource, status: chapter.status })
 }
 
 // 默认写作风格
@@ -138,11 +179,34 @@ export const useNovelStore = defineStore('novel', () => {
   // 小说列表
   const novels = ref<Novel[]>([])
   const isInitialized = ref(false)
+  const deletingChapters = new Set<string>()
+  function assertChapterEditAvailable(novelId: string) {
+    if (deletingChapters.has(novelId)) throw new Error('章节删除正在保存，请等待完成后再编辑章节。')
+  }
 
-  const persistence = createRevisionPersistence(novels, isInitialized, saveNovelToDb)
+  const persistence = createRevisionPersistence(novels, isInitialized, async snapshot => {
+    // A newly attached library must exist before validating the complete project.
+    if (usesProjectKernel()) await useKnowledgeStore().flushPendingSaves()
+    await saveNovelToDb(snapshot)
+  })
   const { saveError, saving, hasPendingSaves } = persistence
   const saveNovelNow = persistence.saveNow
   const flushPendingSaves = persistence.flush
+  async function transactNovel<R>(id: string, prepare: (draft: Novel) => Promise<PreparedPersistence<R>>): Promise<R> {
+    await useKnowledgeStore().flushPendingSaves()
+    return persistence.transact(id, prepare, (committed, merged) => {
+      for (const chapter of merged.chapters) {
+        const saved = committed.chapters.find(item => item.id === chapter.id)
+        if (saved && chapter.status === saved.status && ['completed', 'reviewed', 'finalized'].includes(saved.status)
+          && (chapter.content !== saved.content || chapter.title !== saved.title)) {
+          chapter.status = 'writing'
+          chapter.contentReviewSignature = ''
+          chapter.contentReviewCoverage = undefined
+        }
+      }
+      return merged
+    })
+  }
   function touchNovel(novel: Novel, timestamp = new Date().toISOString()) {
     novel.updatedAt = timestamp
     persistence.markDirty(novel.id)
@@ -174,53 +238,9 @@ export const useNovelStore = defineStore('novel', () => {
   )
   const trashedNovels = computed(() => novels.value.filter(n => n.status === 'trash'))
 
-  // 根据分类 value 查找显示名
-  function findGenreLabels(genreValue: string, subGenreValue: string) {
-    const genre = genres.find(g => g.value === genreValue)
-    const subGenre = genre?.children.find(s => s.value === subGenreValue)
-    return {
-      genreLabel: genre?.label || genreValue,
-      subGenreLabel: subGenre?.label || subGenreValue,
-    }
-  }
-
   // 创建新小说
   function addNovel(form: CreateWizardForm): Novel {
-    const { genreLabel, subGenreLabel } = findGenreLabels(form.genre, form.subGenre)
-    const now = new Date().toISOString()
-    const novel: Novel = {
-      id: generateId(),
-      title: '未命名小说',
-      genre: form.genre,
-      subGenre: form.subGenre,
-      genreLabel,
-      subGenreLabel,
-      tags: form.tags,
-      targetWordCountMin: form.targetWordCountMin,
-      targetWordCountMax: form.targetWordCountMax,
-      currentWordCount: 0,
-      writingStyle: { ...form.writingStyle },
-      writingMode: form.writingMode === 'ai' ? 'ai' : 'manual',
-      settings: JSON.parse(JSON.stringify(form.settings)),
-      outline: '',
-      volumes: [],
-      synopsis: '',
-      chapters: [],
-      characters: [],
-      chatHistory: [],
-      inspirationHistory: [],
-      knowledgeBaseIds: form.knowledgeEnabled === false ? [] : [...(form.knowledgeBaseIds || [])],
-      eventLog: [],
-      storyArcs: [],
-      chapterPlans: [],
-      storyStateProposals: [],
-      dataPanels: [],
-      dataPanelChanges: [],
-      storyClock: { currentDay: 0, label: '第 1 天', lastChapterIndex: -1, updatedAt: now },
-      status: 'creating',
-      createdAt: now,
-      updatedAt: now,
-    }
+    const novel = createNovelDraft(form)
     novels.value.unshift(novel)
     persistence.markDirty(novel.id)
     return novel
@@ -231,6 +251,15 @@ export const useNovelStore = defineStore('novel', () => {
     return novels.value.find(n => n.id === id)
   }
 
+  /** Publish only after the creation aggregate has been durably committed. */
+  function publishCreatedNovel(novel: Novel): Novel {
+    const existing = getNovel(novel.id)
+    if (existing) return existing
+    const published = JSON.parse(JSON.stringify(novel)) as Novel
+    novels.value.unshift(published)
+    return published
+  }
+
   // 按书切换正文创作方式
   function setWritingMode(id: string, mode: NonNullable<Novel['writingMode']>) {
     const novel = getNovel(id)
@@ -239,11 +268,30 @@ export const useNovelStore = defineStore('novel', () => {
     touchNovel(novel, new Date().toISOString())
   }
 
+  /** 设置内置封面；传空字符串恢复按类型自动匹配。封面只影响显示，不触发影响分析或审核失效。 */
+  function setCover(id: string, coverId: string) {
+    const novel = getNovel(id)
+    if (!novel || typeof coverId !== 'string' || coverId.length > 64) return
+    if ((novel.coverId || '') === coverId) return
+    if (coverId) novel.coverId = coverId
+    else delete novel.coverId
+    touchNovel(novel, new Date().toISOString())
+  }
+
   function setChapterLengthPolicy(id: string, value: ChapterLengthPolicy) {
     const novel = getNovel(id)
     if (!novel) return
     novel.chapterLengthPolicy = resolveChapterLengthPolicy(value)
     touchNovel(novel, new Date().toISOString())
+  }
+
+  async function saveChapterLengthPolicy(id: string, value: ChapterLengthPolicy) {
+    const policy = resolveChapterLengthPolicy(value)
+    await transactNovel(id, async draft => {
+      draft.chapterLengthPolicy = policy
+      draft.updatedAt = new Date().toISOString()
+      return { persist: () => saveNovelToDb(draft), value: undefined }
+    })
   }
 
   function updateOutline(id: string, outline: string) {
@@ -265,6 +313,7 @@ export const useNovelStore = defineStore('novel', () => {
 
   // 添加章节
   function addChapter(novelId: string, chapterData: Partial<Chapter>): Chapter | null {
+    assertChapterEditAvailable(novelId)
     const novel = novels.value.find(n => n.id === novelId)
     if (!novel) return null
     const chapter: Chapter = {
@@ -288,6 +337,8 @@ export const useNovelStore = defineStore('novel', () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
+    chapter.summarySource = chapterData.summarySource || (chapter.summary.trim() && chapter.content.trim()
+      ? createChapterSourceBinding(chapter, chapter.summary, 'author', chapter.createdAt) : undefined)
     novel.chapters.push(chapter)
     novel.currentWordCount = novel.chapters.reduce((sum, c) => sum + c.wordCount, 0)
     touchNovel(novel, new Date().toISOString())
@@ -296,16 +347,23 @@ export const useNovelStore = defineStore('novel', () => {
 
   // 更新章节
   function updateChapter(novelId: string, chapterId: string, updates: Partial<Chapter>): boolean {
+    assertChapterEditAvailable(novelId)
     const novel = novels.value.find(n => n.id === novelId)
     if (!novel) return false
     const chapter = novel.chapters.find(c => c.id === chapterId)
     if (!chapter || chapter.status === 'locked') return false
     const before = chapterSnapshot(chapter)
+    if (updates.summary !== undefined && !Object.prototype.hasOwnProperty.call(updates, 'summarySource')) {
+      const sourceChapter = { ...chapter, content: updates.content ?? chapter.content }
+      updates = { ...updates, summarySource: updates.summary.trim() && sourceChapter.content.trim()
+        ? createChapterSourceBinding(sourceChapter, updates.summary, 'author', new Date().toISOString()) : undefined }
+    }
     const next = { ...chapter, ...updates, wordCount: updates.content === undefined ? chapter.wordCount : countNovelWords(updates.content || '') } as Chapter
     if (before !== chapterSnapshot(next) && (updates.content !== undefined || updates.title !== undefined || updates.summary !== undefined)) {
       chapter.versions = appendSnapshot<ChapterVersion>(chapter.versions, before, '编辑前版本')
     }
     Object.assign(chapter, updates)
+    invalidateStoryTimeSources(novel)
     if (updates.content !== undefined) {
       // 过滤空白符和换行，只统计实际文字
       chapter.wordCount = countNovelWords(updates.content)
@@ -317,6 +375,7 @@ export const useNovelStore = defineStore('novel', () => {
   }
 
   function addSceneNote(novelId: string, chapterId: string, data: { title: string; content: string; source?: SceneNote['source'] }): SceneNote | null {
+    assertChapterEditAvailable(novelId)
     const chapter = getNovel(novelId)?.chapters.find(item => item.id === chapterId)
     if (!chapter || !data.content.trim()) return null
     const now = new Date().toISOString()
@@ -328,18 +387,69 @@ export const useNovelStore = defineStore('novel', () => {
     return note
   }
 
-  function restoreChapterVersion(novelId: string, chapterId: string, versionId: string): boolean {
-    const novel = getNovel(novelId)
-    const chapter = novel?.chapters.find(item => item.id === chapterId)
-    const version = chapter?.versions?.find(item => item.id === versionId)
-    if (!novel || !chapter || !version || chapter.status === 'locked') return false
-    try {
-      const snapshot = JSON.parse(version.snapshot) as Partial<Chapter>
-      return updateChapter(novelId, chapterId, {
-        title: String(snapshot.title || chapter.title), content: String(snapshot.content || ''),
-        summary: String(snapshot.summary || ''), status: snapshot.status as Chapter['status'],
-      })
-    } catch { return false }
+  async function restoreChapterVersion(novelId: string, chapterId: string, versionId: string, expectedChapter?: string): Promise<boolean> {
+    const baseline = expectedChapter ?? JSON.stringify(getNovel(novelId)?.chapters.find(item => item.id === chapterId))
+    return useReconstructionWorkspaceStore().transactStory(novelId, aggregate => {
+      const { novel, workspace } = aggregate
+      const chapter = novel.chapters.find(item => item.id === chapterId)
+      if (!chapter || chapter.status === 'locked') throw new Error('章节不存在或已锁定。')
+      if (JSON.stringify(chapter) !== baseline) throw new Error('章节已变化，请重新打开历史版本后核对。')
+      const version = chapter.versions?.find(item => item.id === versionId)
+      if (!version) throw new Error('历史版本不存在，请重新打开后核对。')
+      let snapshot: Partial<Chapter>
+      try { snapshot = JSON.parse(version.snapshot) } catch { throw new Error('历史版本格式无效，未恢复。') }
+      if (!snapshot || typeof snapshot.content !== 'string'
+        || snapshot.title !== undefined && typeof snapshot.title !== 'string'
+        || snapshot.summary !== undefined && typeof snapshot.summary !== 'string') throw new Error('历史版本格式无效，未恢复。')
+      const updates = { title: snapshot.title ?? chapter.title, content: snapshot.content, summary: snapshot.summary ?? '', summarySource: snapshot.summarySource }
+      const fields = (Object.keys(updates) as Array<keyof typeof updates>).filter(field => JSON.stringify(chapter[field]) !== JSON.stringify(updates[field]))
+      if (!fields.length) return false
+      const before = captureStoryImpact(novel, workspace), now = new Date().toISOString()
+      const signature = (item: Chapter) => buildChapterReviewSignature(item.content, buildReviewContextVersion(novel, item,
+        useKnowledgeStore().knowledgeBases, workspace.creationDraft, workspace.canonMutations, workspace.storyMemories))
+      const inputs = new Map(novel.chapters.filter(item => item.content.trim()).map(item => [item.id, signature(item)]))
+      chapter.versions = appendSnapshot<ChapterVersion>(chapter.versions, chapterSnapshot(chapter), '恢复前版本')
+      Object.assign(chapter, updates, { wordCount: countNovelWords(updates.content), updatedAt: now })
+      invalidateStoryTimeSources(novel)
+      if (fields.includes('content') || fields.includes('title')) {
+        chapter.status = chapter.content.trim() ? 'writing' : 'draft'
+        chapter.contentReviewSignature = ''; chapter.contentReviewCoverage = undefined; chapter.reviewRewriteBlockedSignature = ''
+      }
+      novel.currentWordCount = novel.chapters.reduce((sum, item) => sum + item.wordCount, 0)
+      novel.updatedAt = now
+      const unchanged = novel.chapters.filter(item => inputs.get(item.id) === signature(item)).map(item => item.id)
+      const reviewChapterIds = invalidateWrittenChapterReviews(aggregate, unchanged)
+      appendStoryImpactReport(aggregate, before, [{ target: { kind: 'chapter', id: chapter.id, label: chapter.title || '未命名章节' },
+        action: 'update', fields }], reviewChapterIds, now, generateId, undefined, 'changed-inputs')
+      return true
+    }, changed => !changed)
+  }
+
+  async function saveChapterSummary(novelId: string, chapterId: string, expectedContent: string, expectedSummary: string,
+    summary = expectedSummary, origin: 'ai' | 'author' = 'author'): Promise<void> {
+    await useReconstructionWorkspaceStore().transactStory(novelId, aggregate => {
+      const { novel, workspace } = aggregate
+      const chapter = novel.chapters.find(item => item.id === chapterId)
+      if (!chapter || chapter.status === 'locked') throw new Error('章节不存在或已锁定。')
+      if (chapter.content !== expectedContent || chapter.summary !== expectedSummary) throw new Error('正文或总结已变化，请重新核对后保存。')
+      const now = new Date().toISOString()
+      const binding = summary.trim() ? createChapterSourceBinding(chapter, summary, origin, now) : undefined
+      const bindingSignature = (value: Chapter['summarySource']) => value
+        ? JSON.stringify([value.chapterId, value.sourceVersionId, value.derivedValue, value.origin]) : ''
+      if (chapter.summary === summary && bindingSignature(chapter.summarySource) === bindingSignature(binding)) return false
+      const before = captureStoryImpact(novel, workspace)
+      const signature = (item: Chapter) => buildChapterReviewSignature(item.content, buildReviewContextVersion(novel, item,
+        useKnowledgeStore().knowledgeBases, workspace.creationDraft, workspace.canonMutations, workspace.storyMemories))
+      const inputs = new Map(novel.chapters.map(item => [item.id, signature(item)]))
+      const fields = chapter.summary === summary ? ['summarySource'] : ['summary', 'summarySource']
+      chapter.versions = appendSnapshot<ChapterVersion>(chapter.versions, chapterSnapshot(chapter), '更新总结前版本')
+      Object.assign(chapter, { summary, summarySource: binding, updatedAt: now })
+      novel.updatedAt = now
+      const unchanged = novel.chapters.filter(item => inputs.get(item.id) === signature(item)).map(item => item.id)
+      appendStoryImpactReport(aggregate, before, [{ target: { kind: 'chapter', id: chapter.id, label: chapter.title || '未命名章节' },
+        action: 'update', fields }], invalidateWrittenChapterReviews(aggregate, unchanged), now, generateId, undefined, 'changed-inputs')
+      return true
+    }, changed => !changed)
   }
 
   async function proposeChapterRevision(
@@ -348,46 +458,83 @@ export const useNovelStore = defineStore('novel', () => {
     proposedContent: string,
     source: ChapterRevisionSource = 'ai',
     reason = '',
+    options: { selection?: ChapterSelectionRevision; expectedBaseContent?: string } = {},
   ): Promise<ChapterRevision | null> {
+    assertChapterEditAvailable(novelId)
     const chapter = novels.value.find(n => n.id === novelId)?.chapters.find(c => c.id === chapterId)
     if (!chapter || chapter.status === 'locked' || chapter.content === proposedContent) return null
-    return createChapterRevision(novelId, chapterId, chapter.content, proposedContent, source, reason)
+    const baseContent = chapter.content
+    if (options.expectedBaseContent !== undefined && baseContent !== options.expectedBaseContent) throw new Error('正文已经变化，请重新生成选区候选。')
+    if (usesProjectKernel()) await flushPendingSaves()
+    if (options.selection) {
+      const currentNovel = getNovel(novelId), currentChapter = currentNovel?.chapters.find(item => item.id === chapterId)
+      const expected = await readStoryAggregate(novelId)
+      if (!currentNovel || !currentChapter || currentChapter.content !== baseContent
+        || options.selection.contextVersion !== buildReviewContextVersion(currentNovel, currentChapter, useKnowledgeStore().knowledgeBases,
+          expected.workspace.creationDraft, expected.workspace.canonMutations, expected.workspace.storyMemories)) throw new Error('正文或写作依据已经变化，请重新生成选区候选。')
+    }
+    return createChapterRevision(novelId, chapterId, baseContent, proposedContent, source, reason, options.selection)
   }
 
   async function acceptChapterRevision(novelId: string, chapterId: string, revisionId: string): Promise<ChapterRevision | null> {
-    const revision = await getChapterRevision(revisionId)
-    const chapter = novels.value.find(n => n.id === novelId)?.chapters.find(c => c.id === chapterId)
-    if (!revision || !chapter || revision.novelId !== novelId || revision.chapterId !== chapterId) return null
-    if (revision.status !== 'pending') return revision
-    if (chapter.status === 'locked') throw new Error('Locked chapters cannot be changed')
-    if (chapter.content !== revision.baseContent) {
-      await updateChapterRevisionStatus(revision.id, 'stale')
+    if (!getNovel(novelId)?.chapters.some(chapter => chapter.id === chapterId)) return null
+    type RevisionPreparation = { revision: ChapterRevision | null; acceptedAt?: string }
+    type RevisionOutcome = { kind: 'missing' | 'unchanged' | 'stale' | 'accepted'; revision: ChapterRevision | null }
+    const prepared: RevisionPreparation = { revision: null }
+    const outcome = await useReconstructionWorkspaceStore().transactStory<RevisionOutcome, RevisionPreparation>(
+      novelId,
+      (aggregate, queued) => {
+        const { novel, workspace } = aggregate
+        const revision = queued.revision
+        const chapter = novel.chapters.find(chapter => chapter.id === chapterId)
+        if (!revision || !chapter || revision.novelId !== novelId || revision.chapterId !== chapterId) return { kind: 'missing', revision: null }
+        if (revision.status !== 'pending') return { kind: 'unchanged', revision }
+        if (chapter.status === 'locked') throw new Error('Locked chapters cannot be changed')
+        if (chapter.content !== revision.baseContent) return { kind: 'stale', revision }
+        validateSelectionRevision(revision)
+        if (revision.selection && revision.selection.contextVersion !== buildReviewContextVersion(novel, chapter, useKnowledgeStore().knowledgeBases,
+          workspace.creationDraft, workspace.canonMutations, workspace.storyMemories)) throw new Error('写作依据已经变化，请重新生成选区候选。')
+
+        const before = captureStoryImpact(novel, workspace)
+        const now = new Date().toISOString()
+        chapter.versions = appendSnapshot<ChapterVersion>(chapter.versions, chapterSnapshot(chapter), '接受修订前版本')
+        Object.assign(chapter, { content: revision.proposedContent, status: 'writing', contentReviewSignature: '',
+          contentReviewCoverage: undefined, reviewRewriteBlockedSignature: '', wordCount: countNovelWords(revision.proposedContent), updatedAt: now })
+        invalidateStoryTimeSources(novel)
+        novel.currentWordCount = novel.chapters.reduce((sum, item) => sum + item.wordCount, 0)
+        novel.updatedAt = now
+        const after = captureStoryImpact(novel, workspace)
+        const target = after.refs.get(JSON.stringify(['chapter', chapter.id])) || before.refs.get(JSON.stringify(['chapter', chapter.id]))
+        if (!target) throw new Error('找不到本次修订的影响对象，未保存。')
+        appendStoryImpactReport(aggregate, before, [{ target, action: 'update', fields: ['content'] }],
+          invalidateWrittenChapterReviews(aggregate), now, () => 'revision:' + revision.id + ':' + now, after)
+        const accepted: ChapterRevision = { ...revision, status: 'accepted', appliedAt: now, updatedAt: now }
+        queued.acceptedAt = now
+        return { kind: 'accepted', revision: accepted }
+      },
+      value => value.kind !== 'accepted',
+      undefined,
+      {
+        prepare: async () => {
+          // This read is intentionally after both per-story queues have started.
+          prepared.revision = await getChapterRevision(revisionId)
+          return prepared
+        },
+        revisionAcceptance: value => value.acceptedAt && value.revision
+          ? { expected: value.revision, acceptedAt: value.acceptedAt }
+          : undefined,
+      },
+    )
+    if (outcome.kind === 'stale' && outcome.revision) {
+      await updateChapterRevisionStatus(outcome.revision.id, 'stale', undefined, 'pending')
       throw new Error('The chapter changed after this proposal was created')
     }
-
-    const previous = {
-      content: chapter.content, status: chapter.status,
-      contentReviewSignature: chapter.contentReviewSignature,
-      contentReviewCoverage: chapter.contentReviewCoverage,
-      reviewRewriteBlockedSignature: chapter.reviewRewriteBlockedSignature,
-    }
-    updateChapter(novelId, chapterId, {
-      content: revision.proposedContent, status: 'writing',
-      contentReviewSignature: '', contentReviewCoverage: undefined, reviewRewriteBlockedSignature: '',
-    })
-    try {
-      await saveNovelNow(novelId)
-    } catch (err) {
-      updateChapter(novelId, chapterId, previous)
-      throw err
-    }
-    await updateChapterRevisionStatus(revision.id, 'accepted', new Date().toISOString())
-    return { ...revision, status: 'accepted', appliedAt: new Date().toISOString() }
+    return outcome.revision
   }
 
   async function rejectChapterRevision(revisionId: string): Promise<void> {
     const revision = await getChapterRevision(revisionId)
-    if (revision?.status === 'pending') await updateChapterRevisionStatus(revisionId, 'rejected')
+    if (revision?.status === 'pending') await updateChapterRevisionStatus(revisionId, 'rejected', undefined, 'pending')
   }
 
   async function getChapterRevisions(chapterId: string, limit = 50): Promise<ChapterRevision[]> {
@@ -518,102 +665,145 @@ export const useNovelStore = defineStore('novel', () => {
     }
   }
 
-  // 删除单个章节
-  function deleteChapter(novelId: string, chapterId: string) {
-    const novel = novels.value.find(n => n.id === novelId)
-    if (!novel) return
-    const idx = novel.chapters.findIndex(c => c.id === chapterId)
-    if (idx === -1) return
-    if (novel.chapters[idx].status === 'locked') return
-    novel.chapters.splice(idx, 1)
-    novel.chapters.forEach((c, i) => c.chapterIndex = i)
-    novel.currentWordCount = novel.chapters.reduce((sum, c) => sum + c.wordCount, 0)
-    touchNovel(novel, new Date().toISOString())
+  function deletionWorkspaceBaseline(novelId: string): string {
+    const workspace = useReconstructionWorkspaceStore()
+    return JSON.stringify([workspace.getCreationDraft(novelId), workspace.getCandidates(novelId), workspace.getReviewFindings(novelId),
+      workspace.getChapterReviews(novelId), workspace.getCanonMutations(novelId), workspace.getStoryMemories(novelId),
+      workspace.getAiRuns(novelId), workspace.getImpactReports(novelId)])
   }
 
-  // 清空全部章节
-  function clearChapters(novelId: string) {
-    const novel = novels.value.find(n => n.id === novelId)
-    if (!novel) return
-    if (novel.chapters.some(chapter => chapter.status === 'locked')) return
-    novel.chapters = []
-    novel.currentWordCount = 0
-    touchNovel(novel, new Date().toISOString())
+  /** Capture when opening a confirmation dialog, not after the author confirms. */
+  function captureChapterDeletionBaseline(novelId: string, chapterId?: string): ChapterDeletionBaseline {
+    const novel = getNovel(novelId)
+    if (!novel) throw new Error('作品已不存在，请重新打开。')
+    return captureDeletionBaseline(novel, chapterId, deletionWorkspaceBaseline(novelId))
   }
 
-  // 角色库方法
-  function addCharacter(novelId: string, charData: Partial<Character>): Character | null {
-    const novel = novels.value.find(n => n.id === novelId)
-    if (!novel) return null
-    if (!novel.characters) novel.characters = []
-
-    const name = cleanCharacterName(charData.name || '') || '未命名'
-    const normalizedName = normalizeCharacterName(name)
-    const existing = novel.characters.find(c => normalizeCharacterName(c.name) === normalizedName)
-    if (existing) {
-      existing.name = cleanCharacterName(existing.name) || name
-      if (!existing.identity && charData.identity) existing.identity = cleanMarkdownText(charData.identity)
-      if (!existing.personality && charData.personality) existing.personality = cleanMarkdownText(charData.personality)
-      if (!existing.powerLevel && charData.powerLevel) existing.powerLevel = cleanMarkdownText(charData.powerLevel)
-      if (!existing.faction && charData.faction) existing.faction = cleanMarkdownText(charData.faction)
-      if (!existing.description && charData.description) existing.description = cleanMarkdownText(charData.description)
-      if (Array.isArray(charData.relationships) && charData.relationships.length) {
-        const known = new Set(existing.relationships.map(item =>
-          `${item.targetId || item.targetName}|${item.relation}`,
-        ))
-        for (const relation of charData.relationships) {
-          if (!relation?.targetName || !relation.relation) continue
-          const key = `${relation.targetId || relation.targetName}|${relation.relation}`
-          if (known.has(key)) continue
-          existing.relationships.push({
-            targetId: relation.targetId || '',
-            targetName: relation.targetName,
-            relation: cleanMarkdownText(relation.relation),
-          })
-          known.add(key)
+  async function commitChapterDeletion(novelId: string, chapterId: string | undefined, opening?: ChapterDeletionBaseline): Promise<boolean> {
+    const current = getNovel(novelId)
+    if (!current || !current.chapters.some(chapter => chapterId === undefined || chapter.id === chapterId)) return false
+    // Copy before the first await: a caller cannot retarget an enqueued request.
+    const baseline = { ...(opening ?? captureChapterDeletionBaseline(novelId, chapterId)) }
+    let ownsGuard = false
+    try {
+      return await useReconstructionWorkspaceStore().transactStory(novelId, aggregate => {
+        if (!aggregate.novel.chapters.some(chapter => chapterId === undefined || chapter.id === chapterId)) return false
+        const live = getNovel(novelId)
+        if (!live) throw new Error('作品已不存在。')
+        assertChapterDeletionBaseline(live, chapterId, baseline)
+        if (deletionWorkspaceBaseline(novelId) !== baseline.workspace) throw new Error('审核或故事决定已经变化，请重新打开删除确认。')
+        const changed = deleteChaptersWithImpact(aggregate, chapterId, baseline, new Date().toISOString(), generateId, useKnowledgeStore().knowledgeBases)
+        if (changed) {
+          deletingChapters.add(novelId); ownsGuard = true
         }
-      }
-      touchNovel(novel, new Date().toISOString())
-      return existing
+        return changed
+      }, changed => !changed, () => {
+        const live = getNovel(novelId)
+        if (!live) throw new Error('作品已不存在。')
+        assertChapterDeletionBaseline(live, chapterId, baseline)
+        if (deletionWorkspaceBaseline(novelId) !== baseline.workspace) throw new Error('审核或故事决定已经变化，删除未保存。')
+      })
+    } finally {
+      if (ownsGuard) deletingChapters.delete(novelId)
     }
-
-    const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9']
-    const char: Character = {
-      id: generateId(),
-      name,
-      aliases: charData.aliases || [],
-      identity: cleanMarkdownText(charData.identity || ''),
-      personality: cleanMarkdownText(charData.personality || ''),
-      powerLevel: cleanMarkdownText(charData.powerLevel || ''),
-      faction: cleanMarkdownText(charData.faction || ''),
-      status: charData.status || '活跃',
-      firstAppearChapter: charData.firstAppearChapter || 0,
-      description: cleanMarkdownText(charData.description || ''),
-      relationships: charData.relationships || [],
-      events: charData.events || [],
-      avatarColor: colors[novel.characters.length % colors.length],
-      ...(charData.avatarId ? { avatarId: charData.avatarId } : {}),
-    }
-    novel.characters.push(char)
-    touchNovel(novel, new Date().toISOString())
-    return char
   }
 
-  function updateCharacter(novelId: string, charId: string, updates: Partial<Character>) {
-    const novel = novels.value.find(n => n.id === novelId)
-    if (!novel) return
-    const char = novel.characters?.find(c => c.id === charId)
-    if (!char) return
-    Object.assign(char, updates)
-    touchNovel(novel, new Date().toISOString())
+  function deleteChapter(novelId: string, chapterId: string, baseline?: ChapterDeletionBaseline): Promise<boolean> {
+    return commitChapterDeletion(novelId, chapterId, baseline)
   }
 
-  function deleteCharacter(novelId: string, charId: string) {
-    const novel = novels.value.find(n => n.id === novelId)
-    if (!novel?.characters) return
-    const idx = novel.characters.findIndex(c => c.id === charId)
-    if (idx !== -1) novel.characters.splice(idx, 1)
-    touchNovel(novel, new Date().toISOString())
+  function clearChapters(novelId: string, baseline?: ChapterDeletionBaseline): Promise<boolean> {
+    return commitChapterDeletion(novelId, undefined, baseline)
+  }
+
+  // Author definitions share the same durable transaction as review and Canon records.
+  function captureDefinition<T>(value: T): T {
+    if (Array.isArray(value)) return value.map(item => captureDefinition(item)) as T
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, captureDefinition(item)])) as T
+    return value
+  }
+  async function commitEntityDefinitions(novelId: string, input: EntityDefinitionEdit[]) {
+    const edits = captureDefinition(input)
+    return useReconstructionWorkspaceStore().transactStory(novelId, aggregate =>
+      editDefinitionsWithImpact(aggregate, edits, new Date().toISOString(), generateId))
+  }
+
+  async function commitStoryContext(novelId: string, updates: Parameters<typeof editNovelContextWithImpact>[1]['updates'], fields: StoryContextField[], baseline?: string) {
+    const current = getNovel(novelId)
+    if (!current) throw new Error('作品不存在，请重新打开。')
+    const expectedBaseline = baseline ?? captureStoryContextBaseline(current)
+    const captured = JSON.parse(JSON.stringify(updates)) as typeof updates
+    return useReconstructionWorkspaceStore().transactStory(novelId, aggregate =>
+      editNovelContextWithImpact(aggregate, { updates: captured, fields, expectedBaseline }, new Date().toISOString(), generateId), changed => !changed)
+  }
+
+  async function updateOutlineWithImpact(novelId: string, outline: string, baseline?: string) {
+    return commitStoryContext(novelId, { outline }, ['outline'], baseline)
+  }
+
+  async function updateTitleWithImpact(novelId: string, title: string) {
+    return commitStoryContext(novelId, { title }, ['title'])
+  }
+
+  function capturePlanningEditBaseline(novelId: string, volumeId?: string) {
+    const novel = getNovel(novelId), volume = novel?.volumes.find(item => item.id === volumeId)
+    if (!novel || (volumeId && !volume)) throw new Error('作品或分卷不存在，请重新打开。')
+    return { context: captureStoryContextBaseline(novel), volumes: JSON.stringify(novel.volumes),
+      volume: volume ? JSON.stringify(volume) : undefined, knowledge: buildBoundKnowledgeSignature(novel) }
+  }
+  function assertPlanningEditBaseline(novel: Novel, baseline: ReturnType<typeof capturePlanningEditBaseline>) {
+    if (captureStoryContextBaseline(novel) !== baseline.context || buildBoundKnowledgeSignature(novel) !== baseline.knowledge) {
+      throw new Error('分卷规划、作品设定或参考资料已经变化，请重新核对后再保存。')
+    }
+  }
+
+  async function setVolumesWithImpact(novelId: string, volumes: Volume[], baseline = capturePlanningEditBaseline(novelId)) {
+    const novel = getNovel(novelId)
+    if (!novel) throw new Error('作品不存在，请重新打开。')
+    const expected = { ...baseline }, captured = JSON.parse(JSON.stringify(volumes)) as Volume[]
+    return useReconstructionWorkspaceStore().transactStory(novelId, aggregate => {
+      assertPlanningEditBaseline(aggregate.novel, expected)
+      return editVolumeCollectionWithImpact(aggregate, captured, expected.volumes, new Date().toISOString(), generateId)
+    }, changed => !changed)
+  }
+
+  async function updateVolumeWithImpact(novelId: string, volumeId: string, updates: Partial<Volume>, baseline = capturePlanningEditBaseline(novelId, volumeId)) {
+    const novel = getNovel(novelId), current = novel?.volumes.find(volume => volume.id === volumeId)
+    if (!novel || !current) throw new Error('分卷不存在，请刷新后重试。')
+    const expected = { ...baseline }, captured = JSON.parse(JSON.stringify(updates)) as Partial<Volume>
+    return useReconstructionWorkspaceStore().transactStory(novelId, aggregate => {
+      assertPlanningEditBaseline(aggregate.novel, expected)
+      return editVolumeWithImpact(aggregate, volumeId, expected.volume, captured, new Date().toISOString(), generateId)
+    }, changed => !changed)
+  }
+
+  async function deleteVolumeWithImpact(novelId: string, volumeId: string, baseline?: ReturnType<typeof capturePlanningEditBaseline>) {
+    const novel = getNovel(novelId)
+    if (!novel || !novel.volumes.some(volume => volume.id === volumeId)) return false
+    const volumes = novel.volumes.filter(volume => volume.id !== volumeId).map((volume, index) => ({ ...volume, volumeIndex: index }))
+    return setVolumesWithImpact(novelId, volumes, baseline)
+  }
+
+  async function addCharacter(novelId: string, data: Partial<Character>): Promise<Character> {
+    const [result] = await commitEntityDefinitions(novelId, [{ action: 'create', kind: 'character', data }])
+    return getNovel(novelId)!.characters.find(character => character.id === result.entity!.id)!
+  }
+
+  async function updateCharacter(novelId: string, charId: string, updates: Partial<Character>): Promise<void> {
+    const current = getNovel(novelId)?.characters.find(character => character.id === charId)
+    if (!current) throw new Error('角色已删除，请重新打开列表。')
+    await saveEntityDefinition(novelId, 'character', charId, JSON.stringify(current), updates)
+  }
+
+  async function deleteCharacter(novelId: string, charId: string, expectedEntity?: string): Promise<void> {
+    const current = getNovel(novelId)?.characters.find(character => character.id === charId)
+    if (!current) throw new Error('角色已删除，请重新打开列表。')
+    await commitEntityDefinitions(novelId, [{ action: 'delete', kind: 'character', entityId: charId, expectedEntity: expectedEntity ?? JSON.stringify(current) }])
+  }
+
+  async function saveEntityDefinition(novelId: string, kind: 'character' | 'event', entityId: string, expectedEntity: string,
+    updates: Partial<Character> | Partial<EventLogEntry>): Promise<void> {
+    await commitEntityDefinitions(novelId, [{ action: 'update', kind, entityId, expectedEntity, updates }])
   }
 
   // 创建前的灵感讨论独立归档，不能被书内聊天清空或截断。
@@ -670,149 +860,57 @@ export const useNovelStore = defineStore('novel', () => {
     }
   }
 
-  // 事件表管理
-  function addEvent(novelId: string, event: Omit<EventLogEntry, 'id' | 'timestamp'>) {
-    const novel = getNovel(novelId)
-    if (!novel) return null
-    if (!novel.eventLog) novel.eventLog = []
-    const title = event.title.trim()
-    const exists = novel.eventLog.some(e =>
-      e.chapterIndex === event.chapterIndex &&
-      e.type === event.type &&
-      e.title.trim() === title
-    )
-    if (exists) return null
-    const now = new Date().toISOString()
-    const created: EventLogEntry = {
-      ...event,
-      title,
-      id: generateId(),
-      importance: event.importance || 3,
-      source: event.source || 'user',
-      timestamp: now,
-      updatedAt: now,
-    }
-    novel.eventLog.push(created)
-    touchNovel(novel, now)
-    return created
+  // Event definitions use the author decision transaction, including status-only edits.
+  async function addEvent(novelId: string, data: Omit<EventLogEntry, 'id' | 'timestamp'>): Promise<EventLogEntry> {
+    const [result] = await commitEntityDefinitions(novelId, [{ action: 'create', kind: 'event', data }])
+    return getNovel(novelId)!.eventLog.find(event => event.id === result.entity!.id)!
   }
 
-  function deleteEvent(novelId: string, eventId: string) {
-    const novel = getNovel(novelId)
-    if (!novel || !novel.eventLog) return
-    novel.eventLog = novel.eventLog.filter(e => e.id !== eventId)
-    touchNovel(novel, new Date().toISOString())
+  async function deleteEvent(novelId: string, eventId: string, expectedEntity?: string): Promise<void> {
+    const current = getNovel(novelId)?.eventLog.find(event => event.id === eventId)
+    if (!current) throw new Error('事件已删除，请重新打开列表。')
+    await commitEntityDefinitions(novelId, [{ action: 'delete', kind: 'event', entityId: eventId, expectedEntity: expectedEntity ?? JSON.stringify(current) }])
   }
 
-  function updateEvent(novelId: string, eventId: string, updates: Partial<Omit<EventLogEntry, 'id' | 'timestamp'>>) {
-    const novel = getNovel(novelId)
-    const event = novel?.eventLog?.find(item => item.id === eventId)
-    if (!novel || !event) return
-    const now = new Date().toISOString()
-    Object.assign(event, updates, { updatedAt: now })
-    touchNovel(novel, now)
+  async function updateEvent(novelId: string, eventId: string, updates: Partial<Omit<EventLogEntry, 'id' | 'timestamp'>>): Promise<void> {
+    const current = getNovel(novelId)?.eventLog.find(event => event.id === eventId)
+    if (!current) throw new Error('事件已删除，请重新打开列表。')
+    await saveEntityDefinition(novelId, 'event', eventId, JSON.stringify(current), updates)
   }
 
-  function updateEventStatus(
-    novelId: string,
-    eventId: string,
-    status: 'planted' | 'developing' | 'resolved' | 'abandoned',
-    hintCount?: number,
-  ) {
-    const novel = getNovel(novelId)
-    const event = novel?.eventLog?.find(item => item.id === eventId)
-    if (!novel || !event) return
-    event.status = status
-    if (hintCount !== undefined) event.hintCount = hintCount
-    event.updatedAt = new Date().toISOString()
-    touchNovel(novel, event.updatedAt)
+  async function updateEventStatus(novelId: string, eventId: string, status: 'planted' | 'developing' | 'resolved' | 'abandoned', hintCount?: number): Promise<void> {
+    await updateEvent(novelId, eventId, hintCount === undefined ? { status } : { status, hintCount })
   }
 
-  // 故事弧线管理
-  function addStoryArc(novelId: string, data: Partial<Omit<StoryArc, 'id' | 'createdAt' | 'updatedAt'>>): StoryArc | null {
-    const novel = getNovel(novelId)
-    if (!novel) return null
-    if (!novel.storyArcs) novel.storyArcs = []
-    const now = new Date().toISOString()
-    const arc: StoryArc = {
-      id: generateId(),
-      title: data.title?.trim() || '未命名弧线',
-      description: data.description?.trim() || '',
-      type: data.type || 'sub',
-      importance: data.importance || 3,
-      status: data.status || 'active',
-      reactivateAt: data.reactivateAt?.trim() || '',
-      characterIds: data.characterIds || [],
-      nodes: data.nodes || [],
-      createdAt: now,
-      updatedAt: now,
-    }
-    novel.storyArcs.push(arc)
-    touchNovel(novel, now)
-    return arc
+  // Arc edits are published only after the aggregate commits.
+  async function commitStoryArcEdit(novelId: string, input: StoryArcEdit): Promise<ArcEditImpact> {
+    const edit = JSON.parse(JSON.stringify(input)) as StoryArcEdit
+    return useReconstructionWorkspaceStore().transactStory(novelId, aggregate =>
+      editStoryArcWithImpact(aggregate, edit, new Date().toISOString(), generateId))
   }
 
-  function updateStoryArc(novelId: string, arcId: string, updates: Partial<Omit<StoryArc, 'id' | 'createdAt'>>) {
-    const novel = getNovel(novelId)
-    const arc = novel?.storyArcs?.find(item => item.id === arcId)
-    if (!novel || !arc) return
-    const now = new Date().toISOString()
-    Object.assign(arc, updates, { updatedAt: now })
-    touchNovel(novel, now)
+  async function commitChapterPlanEdit(novelId: string, input: ChapterPlanEdit) {
+    const edit = JSON.parse(JSON.stringify(input)) as ChapterPlanEdit
+    const result = await useReconstructionWorkspaceStore().transactStory(novelId, aggregate =>
+      applyChapterPlanEdit(aggregate, edit, new Date().toISOString(), generateId), value => !value.changed)
+    return result.created || null
   }
 
-  function deleteStoryArc(novelId: string, arcId: string) {
-    const novel = getNovel(novelId)
-    if (!novel?.storyArcs) return
-    novel.storyArcs = novel.storyArcs.filter(item => item.id !== arcId)
-    touchNovel(novel, new Date().toISOString())
+  async function addChapterPlanWithImpact(novelId: string, data: ChapterPlanInput): Promise<ChapterPlan | null> {
+    return commitChapterPlanEdit(novelId, { action: 'create', data })
   }
 
-  function addStoryArcNode(
-    novelId: string,
-    arcId: string,
-    data: Pick<StoryArcNode, 'title' | 'description' | 'targetChapter'>,
-  ): StoryArcNode | null {
-    const novel = getNovel(novelId)
-    const arc = novel?.storyArcs?.find(item => item.id === arcId)
-    if (!novel || !arc) return null
-    const now = new Date().toISOString()
-    const node: StoryArcNode = {
-      id: generateId(),
-      title: data.title.trim(),
-      description: data.description.trim(),
-      targetChapter: Math.max(0, data.targetChapter),
-      status: 'pending',
-      createdAt: now,
-      updatedAt: now,
-    }
-    arc.nodes.push(node)
-    arc.nodes.sort((a, b) => a.targetChapter - b.targetChapter || a.createdAt.localeCompare(b.createdAt))
-    arc.updatedAt = now
-    touchNovel(novel, now)
-    return node
+  async function updateChapterPlanWithImpact(novelId: string, planId: string, updates: Partial<Omit<ChapterPlan, 'id' | 'createdAt'>>) {
+    const plan = getNovel(novelId)?.chapterPlans?.find(item => item.id === planId)
+    if (!plan) throw new Error('章节计划已删除，请重新打开。')
+    await commitChapterPlanEdit(novelId, { action: 'update', planId, expectedPlan: JSON.stringify(plan), updates })
   }
 
-  function updateStoryArcNode(novelId: string, arcId: string, nodeId: string, updates: Partial<Omit<StoryArcNode, 'id' | 'createdAt'>>) {
-    const novel = getNovel(novelId)
-    const arc = novel?.storyArcs?.find(item => item.id === arcId)
-    const node = arc?.nodes.find(item => item.id === nodeId)
-    if (!novel || !arc || !node) return
-    const now = new Date().toISOString()
-    Object.assign(node, updates, { updatedAt: now })
-    arc.nodes.sort((a, b) => a.targetChapter - b.targetChapter || a.createdAt.localeCompare(b.createdAt))
-    arc.updatedAt = now
-    touchNovel(novel, now)
-  }
-
-  function deleteStoryArcNode(novelId: string, arcId: string, nodeId: string) {
-    const novel = getNovel(novelId)
-    const arc = novel?.storyArcs?.find(item => item.id === arcId)
-    if (!novel || !arc) return
-    const now = new Date().toISOString()
-    arc.nodes = arc.nodes.filter(item => item.id !== nodeId)
-    arc.updatedAt = now
-    touchNovel(novel, now)
+  async function deleteChapterPlanWithImpact(novelId: string, planId: string): Promise<boolean> {
+    const plan = getNovel(novelId)?.chapterPlans?.find(item => item.id === planId)
+    if (!plan) return false
+    await commitChapterPlanEdit(novelId, { action: 'delete', planId, expectedPlan: JSON.stringify(plan) })
+    return true
   }
 
   function addChapterPlan(
@@ -966,364 +1064,261 @@ export const useNovelStore = defineStore('novel', () => {
     return proposal
   }
 
-  function applyStoryStateProposal(novelId: string, proposalId: string): boolean {
-    const novel = getNovel(novelId)
+  async function applyStoryStateProposal(novelId: string, proposalId: string): Promise<boolean> {
+    return useReconstructionWorkspaceStore().transactStory(novelId, aggregate => {
+    const { novel, workspace } = aggregate
+    const unchanged = () => false
     const proposal = novel?.storyStateProposals?.find(item => item.id === proposalId)
-    if (!novel || !proposal || proposal.status !== 'pending') return false
+    if (!proposal || proposal.status !== 'pending') return unchanged()
     const chapter = novel.chapters.find(item => item.chapterIndex === proposal.chapterIndex)
-    if (proposal.source === 'ai' && (!chapter || !proposal.evidence?.trim()
-      || !chapter.content.replace(/\s+/g, ' ').includes(proposal.evidence.replace(/\s+/g, ' ').trim()))) return false
+    if (!storyProposalSourceIsCurrent(novel, proposal)) return unchanged()
+    if (proposal.source === 'ai' && (!chapter || !storyStateProposalTargetAllowed(novel, chapter, proposal))) return unchanged()
+    const now = new Date().toISOString()
+    const before = captureStoryImpact(novel, workspace)
 
     let applied = false
+    let impactKind: StoryImpactKind
+    let impactId = proposal.targetId
+    let impactAction: StoryImpactChange['action'] = 'update'
+    let impactFields: string[] = [proposal.field]
     if (proposal.targetType === 'story_arc') {
+      impactKind = 'arc'
       const target = novel.storyArcs?.find(item => item.id === proposal.targetId)
       if (target && proposal.field === 'status' && target.status === proposal.oldValue && ['active', 'paused', 'completed', 'abandoned'].includes(proposal.newValue)) {
+        const before = copyEntity(target)
         target.status = proposal.newValue as StoryArc['status']
+        appendEntityRevision(target, captureEntityRevision('arc', before, target, proposal.source === 'ai' ? proposal.chapterSource! : { kind: 'author' }, now, 'proposal-entity:' + proposal.id, ['status']))
         target.updatedAt = new Date().toISOString()
+        impactAction = 'confirm'; impactFields = ['status']
         applied = true
       }
     } else if (proposal.targetType === 'arc_node') {
+      impactKind = 'node'
       const arc = novel.storyArcs?.find(item => item.id === proposal.parentId || item.nodes.some(node => node.id === proposal.targetId))
       const target = arc?.nodes.find(item => item.id === proposal.targetId)
       if (arc && target && proposal.field === 'status' && target.status === proposal.oldValue && ['pending', 'completed', 'abandoned'].includes(proposal.newValue)) {
-        target.status = proposal.newValue as StoryArcNode['status']
-        if (target.status === 'completed') target.actualChapter = proposal.chapterIndex
-        target.updatedAt = new Date().toISOString()
-        arc.updatedAt = target.updatedAt
+        if (proposal.newValue === 'completed' && !proposal.chapterSource) return unchanged()
+        applyStoryArcEdit(novel, { action: 'node_status', arcId: arc.id, nodeId: target.id, expectedArc: JSON.stringify(arc),
+          status: proposal.newValue as 'pending' | 'completed' | 'abandoned', source: proposal.chapterSource }, now, generateId)
+        impactAction = 'confirm'; impactFields = ['status', 'actualChapter']
         applied = true
       } else if (arc && target && proposal.field === 'targetChapter' && String(target.targetChapter) === proposal.oldValue && Number.isFinite(Number(proposal.newValue))) {
+        const before = copyEntity(target)
         target.targetChapter = Math.max(0, Math.round(Number(proposal.newValue)))
+        appendEntityRevision(target, captureEntityRevision('arc_node', before, target, proposal.source === 'ai' ? proposal.chapterSource! : { kind: 'author' }, now, 'proposal-entity:' + proposal.id, ['targetChapter']))
         target.updatedAt = new Date().toISOString()
         arc.updatedAt = target.updatedAt
+        impactFields = ['targetChapter']
         applied = true
       }
     } else if (proposal.targetType === 'event') {
+      impactKind = 'event'
       const target = novel.eventLog.find(item => item.id === proposal.targetId)
+      const before = target ? copyEntity(target) : undefined
+      let updated = target
       if (proposal.field === 'create' && proposal.eventDraft && chapter
         && !novel.eventLog.some(item => item.type === '伏笔' && item.status !== 'abandoned'
           && item.title.trim().toLocaleLowerCase() === proposal.eventDraft?.title.trim().toLocaleLowerCase())) {
         const draft = proposal.eventDraft
-        applied = Boolean(addEvent(novelId, {
+        updated = {
+          id: generateId(), timestamp: now, updatedAt: now,
           chapterIndex: proposal.chapterIndex, title: draft.title, description: draft.description,
           characters: draft.characters, type: '伏笔', scope: 'global', status: 'planted',
-          targetChapter: draft.targetChapter, importance: 3, source: 'ai',
+          targetChapter: draft.targetChapter, importance: 3, source: proposal.source,
           relatedArcIds: draft.relatedArcIds.filter(id => novel.storyArcs?.some(arc => arc.id === id)),
-          evidence: draft.evidence, lastProgressChapterIndex: proposal.chapterIndex,
+          evidence: proposal.evidence, lastProgressChapterIndex: proposal.chapterIndex,
           hintCount: 1,
-        }))
+        }
+        novel.eventLog.push(updated)
+        impactId = updated.id; impactAction = 'create'; impactFields = ['$exists']
+        applied = true
       } else if (target && proposal.field === 'status' && (target.status || 'developing') === proposal.oldValue && ['planted', 'developing', 'resolved', 'abandoned'].includes(proposal.newValue)) {
         target.status = proposal.newValue as EventLogEntry['status']
         target.lastProgressChapterIndex = proposal.chapterIndex
         if (target.status === 'resolved') target.resolvedChapterIndex = proposal.chapterIndex
         target.updatedAt = new Date().toISOString()
+        impactAction = 'confirm'; impactFields = ['status', 'lastProgressChapterIndex', ...(target.status === 'resolved' ? ['resolvedChapterIndex'] : [])]
         applied = true
       } else if (target && proposal.field === 'targetChapter' && String(target.targetChapter ?? target.chapterIndex) === proposal.oldValue && Number.isFinite(Number(proposal.newValue))) {
         target.targetChapter = Math.max(0, Math.round(Number(proposal.newValue)))
         target.updatedAt = new Date().toISOString()
+        impactFields = ['targetChapter']
         applied = true
+      }
+      if (applied && updated) {
+        const fields = proposal.field === 'status' ? ['status', 'lastProgressChapterIndex', ...(updated.status === 'resolved' ? ['resolvedChapterIndex'] : [])]
+          : proposal.field === 'targetChapter' ? ['targetChapter'] : undefined
+        appendEntityRevision(updated, captureEntityRevision('event', before, updated,
+          proposal.source === 'ai' ? proposal.chapterSource! : { kind: 'author' }, now, 'proposal-entity:' + proposal.id, fields))
       }
     } else if (proposal.targetType === 'chapter_plan') {
+      impactKind = 'plan'
       const target = novel.chapterPlans?.find(item => item.id === proposal.targetId)
-      if (target && proposal.field === 'status' && target.status === proposal.oldValue && ['planned', 'active', 'completed', 'archived'].includes(proposal.newValue)) {
+      if (target && proposal.field === 'status' && target.status === proposal.oldValue && ['planned', 'active', 'awaiting_review', 'completed', 'archived'].includes(proposal.newValue)) {
         target.status = proposal.newValue as ChapterPlan['status']
         target.updatedAt = new Date().toISOString()
+        impactAction = 'confirm'; impactFields = ['status']
         applied = true
       }
     }
 
-    if (!applied) return false
+    if (!applied) return unchanged()
+    const reviewChapterIds = invalidateWrittenChapterReviews(aggregate)
     proposal.status = 'accepted'
-    proposal.updatedAt = new Date().toISOString()
-    touchNovel(novel, proposal.updatedAt)
+    proposal.updatedAt = now
+    novel.updatedAt = now
+    const after = captureStoryImpact(novel, workspace)
+    const targetKey = JSON.stringify([impactKind!, impactId])
+    const target = after.refs.get(targetKey) || before.refs.get(targetKey)
+    if (!target) throw new Error('找不到本次状态提案对应的剧情对象，未保存。')
+    appendStoryImpactReport(aggregate, before, [{ target, action: impactAction, fields: impactFields }], reviewChapterIds,
+      now, generateId, after)
     return true
+    }, value => value === false)
   }
 
-  function rejectStoryStateProposal(novelId: string, proposalId: string) {
-    const novel = getNovel(novelId)
-    const proposal = novel?.storyStateProposals?.find(item => item.id === proposalId)
-    if (!novel || !proposal || proposal.status !== 'pending') return
-    proposal.status = 'rejected'
-    proposal.updatedAt = new Date().toISOString()
-    touchNovel(novel, proposal.updatedAt)
-  }
-
-  // 数据面板管理
-  function addDataPanelItem(novelId: string, itemData: Omit<Partial<DataPanelItem>, 'id' | 'createdAt' | 'updatedAt'>): DataPanelItem | null {
-    const novel = getNovel(novelId)
-    if (!novel) return null
-    if (!novel.dataPanels) novel.dataPanels = []
-    const now = new Date().toISOString()
-    const item: DataPanelItem = {
-      id: generateId(),
-      category: itemData.category || '自定义',
-      name: itemData.name || '未命名数据',
-      fields: itemData.fields || [],
-      relatedKeywords: itemData.relatedKeywords || [],
-      ownerItemId: itemData.ownerItemId,
-      equipmentState: itemData.equipmentState,
-      lastMentionChapterIndex: itemData.lastMentionChapterIndex,
-      createdAt: now,
-      updatedAt: now,
-    }
-    calculateDataPanelFields(item)
-    initializeElapsedRuleBaselines([item], novel.storyClock?.currentDay ?? 0)
-    novel.dataPanels.push(item)
-    touchNovel(novel, now)
-    return item
-  }
-
-  function updateDataPanelItem(novelId: string, itemId: string, updates: Partial<DataPanelItem>) {
-    const novel = getNovel(novelId)
-    if (!novel?.dataPanels) return
-    const item = novel.dataPanels.find(i => i.id === itemId)
-    if (!item) return
-    const before = dataPanelSnapshot(item)
-    const after = dataPanelSnapshot({ ...item, ...updates } as DataPanelItem)
-    if (before !== after) item.versions = appendSnapshot<DataPanelVersion>(item.versions, before, '编辑前版本')
-    Object.assign(item, updates, { updatedAt: new Date().toISOString() })
-    calculateDataPanelFields(item)
-    initializeElapsedRuleBaselines([item], novel.storyClock?.currentDay ?? 0)
-    touchNovel(novel, new Date().toISOString())
-  }
-
-  function restoreDataPanelVersion(novelId: string, itemId: string, versionId: string): boolean {
-    const novel = getNovel(novelId)
-    const item = novel?.dataPanels?.find(candidate => candidate.id === itemId)
-    const version = item?.versions?.find(candidate => candidate.id === versionId)
-    if (!novel || !item || !version) return false
-    try {
-      const snapshot = JSON.parse(version.snapshot) as Partial<DataPanelItem>
-      updateDataPanelItem(novelId, itemId, {
-        category: snapshot.category as DataPanelItem['category'], name: String(snapshot.name || item.name),
-        fields: Array.isArray(snapshot.fields) ? snapshot.fields as DataPanelItem['fields'] : item.fields,
-        relatedKeywords: Array.isArray(snapshot.relatedKeywords) ? snapshot.relatedKeywords.map(String) : item.relatedKeywords,
-        ownerItemId: snapshot.ownerItemId,
-        equipmentState: snapshot.equipmentState,
-        lastMentionChapterIndex: snapshot.lastMentionChapterIndex,
-      })
+  async function rejectStoryStateProposal(novelId: string, proposalId: string): Promise<boolean> {
+    return useReconstructionWorkspaceStore().transactStory(novelId, ({ novel }) => {
+      const proposal = novel.storyStateProposals?.find(item => item.id === proposalId)
+      if (!proposal || proposal.status !== 'pending') return false
+      proposal.status = 'rejected'
+      proposal.updatedAt = new Date().toISOString()
+      novel.updatedAt = proposal.updatedAt
       return true
-    } catch { return false }
+    }, changed => !changed)
   }
 
-  function deleteDataPanelItem(novelId: string, itemId: string) {
+  // Data operations publish only after the aggregate has been saved.
+  function captureDataPanelEditBaseline(novelId: string, itemId = ''): string {
     const novel = getNovel(novelId)
-    if (!novel?.dataPanels) return
-    novel.dataPanels = novel.dataPanels.filter(i => i.id !== itemId)
-    for (const item of novel.dataPanels) {
-      if (item.ownerItemId === itemId) {
-        delete item.ownerItemId
-        item.equipmentState = 'stored'
-      }
-    }
-    if (novel.dataPanelChanges) {
-      novel.dataPanelChanges = novel.dataPanelChanges.filter(c => c.itemId !== itemId)
-    }
-    touchNovel(novel, new Date().toISOString())
+    return novel ? captureDataPanelBaseline(novel, itemId) : ''
   }
-
-  function addDataPanelChange(novelId: string, change: Omit<DataPanelChange, 'id' | 'createdAt' | 'status'>): DataPanelChange | null {
+  function captureDataClockBaseline(novelId: string): string {
     const novel = getNovel(novelId)
-    if (!novel) return null
-    if (!novel.dataPanelChanges) novel.dataPanelChanges = []
-    const exists = novel.dataPanelChanges.some(c =>
-      change.mutation?.kind === 'create' && c.mutation?.kind === 'create'
-        ? c.itemName === change.itemName && (c.status === 'pending' || c.chapterIndex === change.chapterIndex)
-        : c.itemId === change.itemId && c.fieldId === change.fieldId && c.chapterIndex === change.chapterIndex
-    )
-    if (exists) return null
-    const entry: DataPanelChange = {
-      ...change,
-      id: generateId(),
-      confidence: change.confidence || 'clear',
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-    }
-    novel.dataPanelChanges.unshift(entry)
-    touchNovel(novel, new Date().toISOString())
-    return entry
+    return novel ? captureClockBaseline(novel) : ''
   }
+  const copyDataUpdates = (value: Partial<DataPanelItem>): Partial<DataPanelItem> => Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, entry === undefined ? undefined : JSON.parse(JSON.stringify(entry))]))
 
-  function applyDataPanelChange(novelId: string, changeId: string, newValue?: string): boolean {
-    const novel = getNovel(novelId)
-    if (!novel?.dataPanelChanges || !novel.dataPanels) return false
-    const change = novel.dataPanelChanges.find(c => c.id === changeId)
-    if (!change || change.status !== 'pending') return false
-    if (change.mutation) {
-      const mutation = change.mutation
-      const now = new Date().toISOString()
-      const resolveOwner = (name: string): string | undefined => {
-        if (!name.trim()) return undefined
-        const candidates = novel.dataPanels.filter(item => item.category === '角色' && item.name === name)
-        if (candidates.length === 1) return candidates[0].id
-        if (candidates.length > 1) return undefined
-        return addDataPanelItem(novelId, { name, category: '角色', fields: [], relatedKeywords: [name] })?.id
-      }
-      if (mutation.kind === 'create') {
-        const draft = mutation.item
-        if (novel.dataPanels.some(item => item.name === draft.name && item.category === draft.category)) return false
-        const created = addDataPanelItem(novelId, {
-          ...JSON.parse(JSON.stringify(draft)),
-          ownerItemId: resolveOwner(draft.ownerItemName || ''),
-          lastMentionChapterIndex: change.chapterIndex,
-        })
-        if (!created) return false
-        change.itemId = created.id
-      } else {
-        const item = novel.dataPanels.find(candidate => candidate.id === change.itemId)
-        if (!item) return false
-        if (mutation.kind === 'equipment') {
-          if (equipmentSnapshot(item, novel.dataPanels) !== change.oldValue) return false
-          if ((item.lastMentionChapterIndex ?? -1) > change.chapterIndex) return false
-          item.versions = appendSnapshot<DataPanelVersion>(item.versions, dataPanelSnapshot(item), '装备状态变更前')
-          item.ownerItemId = resolveOwner(mutation.ownerItemName)
-          item.equipmentState = mutation.state
-        } else {
-          if (item.fields.some(field => field.name === mutation.field.name)) return false
-          item.fields.push(JSON.parse(JSON.stringify(mutation.field)))
-          calculateDataPanelFields(item)
-        }
-        item.lastMentionChapterIndex = change.chapterIndex
-        item.updatedAt = now
-      }
-      change.status = 'accepted'
-      touchNovel(novel, now)
-      return true
-    }
-    const item = novel.dataPanels.find(i => i.id === change.itemId)
-    const field = item?.fields.find(f => f.id === change.fieldId || f.name === change.fieldName)
-    if (!field || !item) return false
-    if (String(field.value) !== String(change.oldValue)) return false
-    const value = newValue?.trim() || change.newValue
-    if (!value.trim()) return false
-    field.value = value
-    change.newValue = value
-    calculateDataPanelFields(item)
-    settleDataPanelAutomationRules(item, change, novel.storyClock?.currentDay)
-    item.lastMentionChapterIndex = change.chapterIndex
-    item.updatedAt = new Date().toISOString()
-    change.status = 'accepted'
-    touchNovel(novel, new Date().toISOString())
-    return true
+  async function addDataPanelItem(novelId: string, itemData: Omit<Partial<DataPanelItem>, 'id' | 'createdAt' | 'updatedAt'>, expectedBaseline = captureDataPanelEditBaseline(novelId)): Promise<DataPanelItem | null> {
+    if (!getNovel(novelId)) return null
+    const baseline = expectedBaseline, item = copyDataUpdates(itemData)
+    const outcome = await useReconstructionWorkspaceStore().transactStory(novelId, aggregate =>
+      editDataPanel(aggregate, { action: 'create', item }, baseline, new Date().toISOString(), generateId), result => !result.changed)
+    const saved = outcome.item
+    return saved ? getNovel(novelId)?.dataPanels.find(row => row.id === saved.id) || null : null
   }
-
-  function rejectDataPanelChange(novelId: string, changeId: string) {
-    const novel = getNovel(novelId)
-    if (!novel?.dataPanelChanges) return
-    const change = novel.dataPanelChanges.find(c => c.id === changeId)
-    if (!change || change.status !== 'pending') return
-    const item = novel.dataPanels?.find(candidate => candidate.id === change.itemId)
-    if (item && !change.mutation) settleDataPanelAutomationRules(item, change, novel.storyClock?.currentDay)
-    change.status = 'rejected'
-    touchNovel(novel, new Date().toISOString())
+  async function updateDataPanelItem(novelId: string, itemId: string, updates: Partial<DataPanelItem>, expectedBaseline = captureDataPanelEditBaseline(novelId, itemId)): Promise<boolean> {
+    if (!getNovel(novelId)) return false
+    const item = copyDataUpdates(updates)
+    const outcome = await useReconstructionWorkspaceStore().transactStory(novelId, aggregate =>
+      editDataPanel(aggregate, { action: 'update', itemId, item }, expectedBaseline, new Date().toISOString(), generateId), result => !result.changed)
+    return Boolean(outcome.item)
   }
-
-  function applyDataPanelChanges(novelId: string, changeIds: string[], drafts: Record<string, string> = {}): number {
-    const novel = getNovel(novelId)
-    if (!novel?.dataPanelChanges) return 0
-    let applied = 0
-    const selected = changeIds
-      .map(changeId => novel.dataPanelChanges!.find(item => item.id === changeId))
-      .filter((change): change is DataPanelChange => !!change && change.status === 'pending')
-      .sort((a, b) => a.chapterIndex - b.chapterIndex
-        || Number(!(a.mutation?.kind === 'create' && a.mutation.item.category === '角色'))
-          - Number(!(b.mutation?.kind === 'create' && b.mutation.item.category === '角色'))
-        || a.createdAt.localeCompare(b.createdAt))
-    for (const change of selected) {
-      const changeId = change.id
-      if (applyDataPanelChange(novelId, changeId, drafts[changeId])) applied++
-    }
-    return applied
+  async function restoreDataPanelVersion(novelId: string, itemId: string, versionId: string, expectedBaseline = captureDataPanelEditBaseline(novelId, itemId)): Promise<boolean> {
+    if (!getNovel(novelId)) return false
+    const outcome = await useReconstructionWorkspaceStore().transactStory(novelId, aggregate =>
+      editDataPanel(aggregate, { action: 'restore', itemId, versionId }, expectedBaseline, new Date().toISOString(), generateId), result => !result.changed)
+    return Boolean(outcome.item)
   }
-
-  function rejectDataPanelChanges(novelId: string, changeIds: string[]): number {
-    const novel = getNovel(novelId)
-    if (!novel?.dataPanelChanges) return 0
-    let rejected = 0
-    for (const changeId of changeIds) {
-      const change = novel.dataPanelChanges.find(item => item.id === changeId)
-      if (!change || change.status !== 'pending') continue
-      rejectDataPanelChange(novelId, changeId)
-      rejected++
-    }
-    return rejected
+  async function deleteDataPanelItem(novelId: string, itemId: string, expectedBaseline = captureDataPanelEditBaseline(novelId, itemId)): Promise<boolean> {
+    if (!getNovel(novelId)) return false
+    const outcome = await useReconstructionWorkspaceStore().transactStory(novelId, aggregate =>
+      editDataPanel(aggregate, { action: 'delete', itemId }, expectedBaseline, new Date().toISOString(), generateId), result => !result.changed)
+    return Boolean(outcome.item)
   }
-
-  function cleanupDataPanelChanges(novelId: string, cleanup: DataPanelHistoryCleanup): number {
-    const novel = getNovel(novelId)
-    if (!novel?.dataPanelChanges) return 0
-    const result = pruneDataPanelChangeHistory(novel.dataPanelChanges, cleanup)
-    if (!result.removed) return 0
-    novel.dataPanelChanges = result.changes
-    touchNovel(novel, new Date().toISOString())
-    return result.removed
-  }
-
-  function queueAutomaticDataPanelChanges(novelId: string, chapterIndex: number, chapterText: string): number {
-    const novel = getNovel(novelId)
-    if (!novel?.dataPanels?.length) return 0
-    const currentStoryDay = novel.storyClock?.currentDay
-    const initialized = initializeElapsedRuleBaselines(novel.dataPanels, currentStoryDay)
-    const suggestions = buildDataPanelAutomationSuggestions(novel.dataPanels, chapterIndex, chapterText, currentStoryDay)
-    let added = 0
-    for (const suggestion of suggestions) {
-      const { rules, ...change } = suggestion
-      const entry = addDataPanelChange(novelId, { ...change, confidence: 'clear' })
-      if (!entry) continue
-      for (const rule of rules) rule.pendingChapterIndex = chapterIndex
-      added++
-    }
-    if (initialized || added) touchNovel(novel, new Date().toISOString())
-    return added
-  }
-
-  function advanceStoryClock(novelId: string, elapsedDays: number, chapterIndex?: number): StoryClock | null {
-    const novel = getNovel(novelId)
-    if (!novel) return null
-    const days = Math.max(0, Number(elapsedDays) || 0)
+  /** Explicit author-created suggestion; model results must use commitChapterAnalysis. */
+  async function addDataPanelChange(novelId: string, input: Omit<DataPanelChange, 'id' | 'createdAt' | 'status'>): Promise<DataPanelChange | null> {
+    const sourceNovel = getNovel(novelId)
+    if (!sourceNovel) return null
+    const change = JSON.parse(JSON.stringify(input)) as typeof input
     const now = new Date().toISOString()
-    const current = novel.storyClock || { currentDay: 0, label: '第 1 天', updatedAt: now }
-    initializeElapsedRuleBaselines(novel.dataPanels || [], current.currentDay)
-    novel.storyClock = {
-      currentDay: Math.round((current.currentDay + days) * 100) / 100,
-      label: `第 ${Math.round((current.currentDay + days) * 100) / 100 + 1} 天`,
-      lastChapterIndex: chapterIndex ?? current.lastChapterIndex,
-      updatedAt: now,
-    }
-    if (chapterIndex !== undefined) {
-      const chapter = novel.chapters.find(item => item.chapterIndex === chapterIndex)
-      if (chapter) {
-        chapter.storyDaysElapsed = days
-        chapter.storyDay = novel.storyClock.currentDay
-      }
-    }
-    touchNovel(novel, now)
-    return novel.storyClock
+    const entry: DataPanelChange = { ...change, id: generateId(), sourceBinding: bindAuthorDataPanelProposalSource(sourceNovel, change), confidence: change.confidence || 'clear', status: 'pending', createdAt: now }
+    const saved = await useReconstructionWorkspaceStore().transactStory(novelId, ({ novel }) => {
+      if (novel.dataPanelChanges.some(row => change.mutation?.kind === 'create' && row.mutation?.kind === 'create'
+        ? row.itemName === change.itemName && (row.status === 'pending' || row.chapterIndex === change.chapterIndex)
+        : row.itemId === change.itemId && row.fieldId === change.fieldId && row.chapterIndex === change.chapterIndex)) return null
+      if (!dataPanelProposalSourceIsCurrent(novel, entry)) throw new Error('数据提案的目标已变化，请重新核对后提交。')
+      novel.dataPanelChanges.unshift(entry); novel.updatedAt = now
+      return entry
+    }, result => !result)
+    return saved ? getNovel(novelId)?.dataPanelChanges.find(row => row.id === saved.id) || null : null
   }
-
-  function setStoryClock(novelId: string, currentDay: number, label?: string): StoryClock | null {
+  async function applyDataPanelChange(novelId: string, changeId: string, newValue?: string): Promise<boolean> {
+    return Boolean(await applyDataPanelChanges(novelId, [changeId], newValue === undefined ? {} : { [changeId]: newValue }))
+  }
+  async function rejectDataPanelChange(novelId: string, changeId: string): Promise<boolean> {
+    return Boolean(await rejectDataPanelChanges(novelId, [changeId]))
+  }
+  async function applyDataPanelChanges(novelId: string, changeIds: string[], drafts: Record<string, string> = {}): Promise<number> {
+    if (!getNovel(novelId)) return 0
+    const ids = [...changeIds], values = { ...drafts }
+    return useReconstructionWorkspaceStore().transactStory(novelId, aggregate =>
+      decideDataPanelProposals(aggregate, ids, 'accept', values, new Date().toISOString(), generateId), count => !count)
+  }
+  async function rejectDataPanelChanges(novelId: string, changeIds: string[]): Promise<number> {
+    if (!getNovel(novelId)) return 0
+    const ids = [...changeIds]
+    return useReconstructionWorkspaceStore().transactStory(novelId, aggregate =>
+      decideDataPanelProposals(aggregate, ids, 'reject', {}, new Date().toISOString(), generateId), count => !count)
+  }
+  async function cleanupDataPanelChanges(novelId: string, cleanup: DataPanelHistoryCleanup): Promise<number> {
+    if (!getNovel(novelId)) return 0
+    const captured = { ...cleanup }
+    return useReconstructionWorkspaceStore().transactStory(novelId, ({ novel }) => {
+      const result = pruneDataPanelChangeHistory(novel.dataPanelChanges, captured)
+      if (result.removed) {
+        preserveDataPanelReferenceHistory(novel)
+        novel.dataPanelChanges = result.changes; novel.updatedAt = new Date().toISOString()
+      }
+      return result.removed
+    }, count => !count)
+  }
+  async function queueAutomaticDataPanelChanges(novelId: string, chapterIndex: number, expectedContent: string): Promise<number> {
+    const sourceNovel = getNovel(novelId)
+    if (!sourceNovel) return 0
+    const sourceChapterId = sourceNovel.chapters.find(chapter => chapter.chapterIndex === chapterIndex)?.id
+    const result = await useReconstructionWorkspaceStore().transactStory(novelId, ({ novel }) => {
+      if (!sourceChapterId || !novel.chapters.some(chapter => chapter.id === sourceChapterId && chapter.chapterIndex === chapterIndex)) {
+        throw new Error('自动推算所依据的章节已变化，请重新核对。')
+      }
+      return queueDataPanelAutomation(novel, chapterIndex, expectedContent, new Date().toISOString(), generateId)
+    }, result => !result.changed)
+    return result.added
+  }
+  async function advanceStoryClock(novelId: string, elapsedDays: number, chapterIndex?: number): Promise<StoryClock | null> {
     const novel = getNovel(novelId)
     if (!novel) return null
-    const now = new Date().toISOString()
-    const day = Math.max(0, Math.round((Number(currentDay) || 0) * 100) / 100)
-    const current = novel.storyClock || { currentDay: 0, label: '第 1 天', updatedAt: now }
-    initializeElapsedRuleBaselines(novel.dataPanels || [], current.currentDay)
-    novel.storyClock = {
-      ...current,
-      currentDay: day,
-      label: label?.trim() || `第 ${day + 1} 天`,
-      updatedAt: now,
-    }
-    touchNovel(novel, now)
-    return novel.storyClock
+    if (!Number.isFinite(elapsedDays) || elapsedDays < 0) throw new Error('经过天数必须是有效的非负数字。')
+    const chapter = novel.chapters.find(row => row.chapterIndex === chapterIndex)
+    if (!chapter) throw new Error('相对推进必须明确指定章节。')
+    const baseline = captureClockBaseline(novel), chapterId = chapter.id
+    const outcome = await useReconstructionWorkspaceStore().transactStory(novelId, aggregate =>
+      confirmStoryTimeRelative(aggregate, chapterId, elapsedDays, baseline, new Date().toISOString(), generateId), result => !result.changed)
+    return outcome.clock
+  }
+  async function confirmChapterStoryTime(novelId: string, input: Omit<StoryTimeConfirmation, 'source'>, baseline: string): Promise<StoryClock | null> {
+    if (!getNovel(novelId)) return null
+    const outcome = await useReconstructionWorkspaceStore().transactStory(novelId, aggregate =>
+      confirmDataChapterTime(aggregate, { ...input, source: 'author' }, baseline, new Date().toISOString(), generateId), result => !result.changed)
+    return outcome.clock
+  }
+  async function setStoryClock(novelId: string, currentDay: number, label?: string, expectedBaseline = captureDataClockBaseline(novelId)): Promise<StoryClock | null> {
+    if (!getNovel(novelId)) return null
+    const outcome = await useReconstructionWorkspaceStore().transactStory(novelId, aggregate =>
+      editDataStoryClock(aggregate, currentDay, label, expectedBaseline, new Date().toISOString(), generateId), result => !result.changed)
+    return outcome.clock
   }
 
   return {
+    capturePlanningEditBaseline,
     novels,
     activeNovels,
     archivedNovels,
     trashedNovels,
     addNovel,
     getNovel,
+    publishCreatedNovel,
     deleteNovel,
     purgeNovel,
     restoreNovel,
@@ -1331,11 +1326,16 @@ export const useNovelStore = defineStore('novel', () => {
     unarchiveNovel,
     updateTitle,
     updateOutline,
+    updateTitleWithImpact,
+    updateOutlineWithImpact,
     setWritingMode,
+    setCover,
     setChapterLengthPolicy,
+    saveChapterLengthPolicy,
     setStatus,
     addChapter,
     updateChapter,
+    saveChapterSummary,
     addSceneNote,
     restoreChapterVersion,
     proposeChapterRevision,
@@ -1343,14 +1343,20 @@ export const useNovelStore = defineStore('novel', () => {
     rejectChapterRevision,
     getChapterRevisions,
     setVolumes,
+    setVolumesWithImpact,
     setChapterPlanConfirmed,
     updateVolume,
+    updateVolumeWithImpact,
     restoreVolumeVersion,
     deleteVolume,
+    deleteVolumeWithImpact,
     deleteChapter,
+    captureChapterDeletionBaseline,
     clearChapters,
     addCharacter,
     updateCharacter,
+    saveEntityDefinition,
+    commitEntityDefinitions,
     deleteCharacter,
     addChatMessage,
     setInspirationHistory,
@@ -1362,12 +1368,11 @@ export const useNovelStore = defineStore('novel', () => {
     deleteEvent,
     updateEvent,
     updateEventStatus,
-    addStoryArc,
-    updateStoryArc,
-    deleteStoryArc,
-    addStoryArcNode,
-    updateStoryArcNode,
-    deleteStoryArcNode,
+    commitStoryArcEdit,
+    commitChapterPlanEdit,
+    addChapterPlanWithImpact,
+    updateChapterPlanWithImpact,
+    deleteChapterPlanWithImpact,
     addChapterPlan,
     updateChapterPlan,
     restoreChapterPlanVersion,
@@ -1379,6 +1384,8 @@ export const useNovelStore = defineStore('novel', () => {
     addStoryStateProposal,
     applyStoryStateProposal,
     rejectStoryStateProposal,
+    captureDataPanelEditBaseline,
+    captureDataClockBaseline,
     addDataPanelItem,
     updateDataPanelItem,
     restoreDataPanelVersion,
@@ -1391,11 +1398,13 @@ export const useNovelStore = defineStore('novel', () => {
     cleanupDataPanelChanges,
     queueAutomaticDataPanelChanges,
     advanceStoryClock,
+    confirmChapterStoryTime,
     setStoryClock,
     defaultWritingStyle,
     defaultSettings,
     initStore,
     saveNovelNow,
+    transactNovel,
     flushPendingSaves,
     isInitialized,
   }

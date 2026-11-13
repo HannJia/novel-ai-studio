@@ -1,31 +1,25 @@
 import { computed, onScopeDispose, reactive, ref, watch, type Ref } from 'vue'
 import { useConfigStore, type EmbeddingConfig } from '@/stores/config'
 import { useKnowledgeStore } from '@/stores/knowledge'
+import { useReconstructionWorkspaceStore } from '@/stores/reconstructionWorkspace'
+import { writingAdviceReferenceVersion, writingAdviceContentSignature } from '@/services/writingAdviceSource'
 import type { Chapter, Novel } from '@/types/novel'
 import {
   extractWritingFocus,
   requestWritingAdvice,
   type WritingAdviceMode,
   type WritingAdviceResult,
+  type WritingAdviceSuggestion,
 } from '@/services/writingAdvisor'
 
 interface UseWritingAdvisorOptions {
   currentNovel: Ref<Novel | null | undefined>
   currentChapter: Ref<Chapter | null | undefined>
   currentContent: Ref<string>
-  textarea: Ref<HTMLTextAreaElement | null>
+  textarea: Ref<{ selectionStart: number | null; selectionEnd: number | null } | null>
   embeddingConfig?: EmbeddingConfig
   onInfo?: (message: string) => void
   onWarning?: (message: string) => void
-}
-
-function contentSignature(text: string): string {
-  let hash = 2166136261
-  for (let index = 0; index < text.length; index++) {
-    hash ^= text.charCodeAt(index)
-    hash = Math.imul(hash, 16777619)
-  }
-  return `${text.length}:${hash >>> 0}`
 }
 
 const modes: WritingAdviceMode[] = ['paragraph', 'scene', 'chapter']
@@ -36,6 +30,7 @@ function emptyAdviceState() {
 export function useWritingAdvisor(options: UseWritingAdvisorOptions) {
   const configStore = useConfigStore()
   const knowledgeStore = useKnowledgeStore()
+  const workspace = useReconstructionWorkspaceStore()
   const open = ref(false)
   const lastMode = ref<WritingAdviceMode>('scene')
   const states = reactive({
@@ -48,21 +43,10 @@ export function useWritingAdvisor(options: UseWritingAdvisorOptions) {
     const novel = options.currentNovel.value
     const chapter = options.currentChapter.value
     if (!novel || !chapter) return ''
-    return contentSignature(JSON.stringify({
-      novel: [novel.id, novel.title, novel.genre, novel.subGenre, novel.settings, novel.writingStyle, novel.outline],
-      chapter: [chapter.id, chapter.title, chapter.chapterIndex, chapter.volumeIndex],
-      volumes: novel.volumes.map(({ versions: _versions, ...volume }) => volume),
-      previous: novel.chapters.filter(item => item.chapterIndex < chapter.chapterIndex)
-        .map(item => [item.id, item.title, item.summary, contentSignature(item.content)]),
-      characters: novel.characters,
-      plans: novel.chapterPlans?.map(({ versions: _versions, ...plan }) => plan),
-      events: novel.eventLog, arcs: novel.storyArcs,
-      panels: novel.dataPanels.map(({ versions: _versions, ...panel }) => panel),
-      knowledge: knowledgeStore.knowledgeBases.filter(base => novel.knowledgeBaseIds.includes(base.id)),
-      knowledgeIds: novel.knowledgeBaseIds,
-    }))
+    return writingAdviceReferenceVersion(novel, chapter, workspace.getCreationDraft(novel.id),
+      workspace.getCanonMutations(novel.id), workspace.getStoryMemories(novel.id), knowledgeStore.knowledgeBases)
   })
-  const inputSignature = computed(() => `${referenceSignature.value}:${contentSignature(options.currentContent.value)}`)
+  const inputSignature = computed(() => `${referenceSignature.value}:${writingAdviceContentSignature(options.currentContent.value)}`)
   const current = computed(() => states[lastMode.value])
   const analyzing = computed(() => current.value.analyzing)
   const error = computed(() => current.value.error)
@@ -79,6 +63,11 @@ export function useWritingAdvisor(options: UseWritingAdvisorOptions) {
 
   function close() {
     open.value = false
+  }
+
+  function getSuggestionSourceVersion(suggestion: WritingAdviceSuggestion): string | undefined {
+    return modes.some(mode => !states[mode].rejectedStale && states[mode].signature === inputSignature.value
+      && states[mode].result?.suggestions.includes(suggestion)) ? inputSignature.value : undefined
   }
 
   function stop(mode: WritingAdviceMode = lastMode.value) {
@@ -115,6 +104,10 @@ export function useWritingAdvisor(options: UseWritingAdvisorOptions) {
     state.rejectedStale = false
     try {
       const advice = await requestWritingAdvice({
+        creationDraft: workspace.getCreationDraft(novel.id),
+        canonMutations: workspace.getCanonMutations(novel.id),
+        storyMemories: workspace.getStoryMemories(novel.id),
+        readStoryMemories: () => workspace.getStoryMemories(novel.id),
         model: { ...model },
         novel,
         chapter,
@@ -180,6 +173,7 @@ export function useWritingAdvisor(options: UseWritingAdvisorOptions) {
     lastMode,
     analyzingModes,
     hasAdvice,
+    getSuggestionSourceVersion,
     selectMode,
     analyze,
     analyzeAll,

@@ -1,0 +1,64 @@
+import type { EventCausalityRevision } from '@/types/eventCausality'
+import type { CanonMutationRecord, CandidateChange } from '@/types/reconstruction'
+
+export const eventCausalityLabels = { causes: '导致', enables: '使能（提供必要条件）', blocks: '阻碍', motivates: '动机（促使行动）' } as const
+
+/** Model/import proposal data only. Unknown authorization flags are never consumed. */
+export function assertEventCausalityPayload(value: unknown): asserts value is {
+  fromEventId: string; toEventId: string; relation: EventCausalityRevision['relation']; explanation: string
+} {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('因果候选必须是结构化对象。')
+  const row = value as Record<string, unknown>
+  if (typeof row.fromEventId !== 'string' || !row.fromEventId.trim() || row.fromEventId !== row.fromEventId.trim()
+    || typeof row.toEventId !== 'string' || !row.toEventId.trim() || row.toEventId !== row.toEventId.trim()
+    || row.fromEventId === row.toEventId || typeof row.relation !== 'string'
+    || !Object.prototype.hasOwnProperty.call(eventCausalityLabels,row.relation)
+    || typeof row.explanation !== 'string' || !row.explanation.trim()) throw new Error('因果候选缺少有效事件ID、明确类型或说明，或包含自环。')
+}
+
+/** Cross-record validation for SQL/kernel/backup. Deleted references remain inert history. */
+export function assertEventCausalityHistory(records: CanonMutationRecord[], candidates: CandidateChange[], novelId: string): void {
+  for (const record of records) {
+    if (record.type !== 'event_causality') {
+      if (record.eventCausality !== undefined) throw new Error('非因果 Canon 不允许携带因果决定。')
+      continue
+    }
+    assertEventCausalityRevision(record.eventCausality)
+    const r = record.eventCausality
+    const candidate = candidates.find(c => c.id === record.candidateId)
+    if (record.novelId !== novelId || record.targetId !== r.edgeId || record.chapterId !== r.effectiveChapterId
+      || !candidate || candidate.type !== 'event_causality' || !['accepted','edited'].includes(candidate.status)
+      || candidate.targetId !== r.edgeId || candidate.chapterId !== r.effectiveChapterId
+      || candidate.sourceVersionId !== r.evidence.sourceVersionId) throw new Error('因果作者决定与候选记录不一致。')
+    let payload: unknown
+    try { payload = JSON.parse(candidate.proposedValue) } catch { throw new Error('因果候选JSON无效。') }
+    assertEventCausalityPayload(payload)
+    if (payload.fromEventId !== r.fromEventId || payload.toEventId !== r.toEventId || payload.relation !== r.relation
+      || payload.explanation !== r.explanation || !candidate.evidence.some(e => e.sourceType === 'chapter'
+        && e.sourceId === r.evidence.chapterId && e.sourceVersionId === r.evidence.sourceVersionId
+        && e.quote === r.evidence.quote && e.startOffset === r.evidence.startOffset && e.endOffset === r.evidence.endOffset)) throw new Error('因果决定证据与候选不一致。')
+  }
+}
+/** Shape validation retains deleted/stale historical references on backup restore. */
+export function assertEventCausalityRevision(value: unknown): asserts value is EventCausalityRevision {
+  const r = value as EventCausalityRevision | null
+  const id = (v: unknown) => typeof v === 'string' && !!v.trim()
+  const index = (v: unknown) => Number.isSafeInteger(v) && Number(v) >= 0
+  if (!r || !id(r.edgeId) || !id(r.fromEventId) || !id(r.toEventId) || r.fromEventId === r.toEventId
+    || !Object.prototype.hasOwnProperty.call(eventCausalityLabels, r.relation) || typeof r.explanation !== 'string' || !r.explanation.trim()
+    || !['confirm','revoke'].includes(r.action) || r.authorDecision !== 'confirmed'
+    || !id(r.effectiveChapterId) || !index(r.effectiveChapterIndex) || !Array.isArray(r.chapterOrder)
+    || !r.chapterOrder.length || !r.chapterOrder.every(id) || new Set(r.chapterOrder).size !== r.chapterOrder.length
+    || r.chapterOrder.slice(-1)[0] !== r.effectiveChapterId) throw new Error('事件因果记录格式无效。')
+  const e = r.evidence
+  if (!e || e.chapterId !== r.effectiveChapterId || e.chapterIndex !== r.effectiveChapterIndex
+    || !id(e.sourceVersionId) || !id(e.quote) || !index(e.startOffset) || !index(e.endOffset)
+    || e.endOffset - e.startOffset !== e.quote.length) throw new Error('事件因果证据格式无效。')
+  if (!Array.isArray(r.endpoints) || r.endpoints.length !== 2) throw new Error('事件因果端点格式无效。')
+  r.endpoints.forEach((b,i) => {
+    if (!b || b.eventId !== [r.fromEventId,r.toEventId][i] || !id(b.chapterId) || !index(b.chapterIndex)
+      || b.chapterIndex > r.effectiveChapterIndex || !id(b.sourceVersionId) || !id(b.eventSnapshot)) throw new Error('事件因果端点绑定无效。')
+    try { const snapshot = JSON.parse(b.eventSnapshot); if (snapshot.id !== b.eventId || snapshot.chapterIndex !== b.chapterIndex) throw new Error() }
+    catch { throw new Error('事件因果端点快照无效。') }
+  })
+}

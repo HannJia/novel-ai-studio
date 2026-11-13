@@ -30,7 +30,7 @@
           <span class="nav-link-label">{{ item.label }}</span>
           <span class="nav-badge" v-if="item.badge">{{ item.badge }}</span>
         </router-link>
-        <ol v-if="item.path === 'chapters' && isEditorRoute" class="sidebar-chapters" aria-label="附近章节"><li v-for="chapter in nearbyChapters" :key="chapter.id"><router-link :to="`/workspace/${novelId}/editor/${chapter.id}`" :aria-current="route.params.chapterId === chapter.id ? 'page' : undefined">第 {{ chapter.chapterIndex + 1 }} 章 <span>{{ chapter.title || '未命名' }}</span></router-link></li></ol>
+        <ol v-if="item.path === 'chapters' && isEditorRoute" class="sidebar-chapters" aria-label="附近章节"><li v-for="chapter in nearbyChapters" :key="chapter.id"><router-link :to="`/workspace/${novelId}/editor/${chapter.id}`" :aria-current="route.params.chapterId === chapter.id ? 'page' : undefined">第 {{ chapter.chapterIndex + 1 }} 章 <span>{{ chapterTitleForDisplay(chapter.title, chapter.chapterIndex, '未命名') }}</span></router-link></li></ol>
         </template>
 
         <div class="nav-divider"></div>
@@ -65,6 +65,7 @@
                 {{ aiActivityState(activity) === 'running' ? '进行中' : aiActivityState(activity) === 'completed' ? '已完成' : '失败' }}
               </span>
             </button>
+            <p v-if="activity.error" class="ai-task-error" role="status">{{ activityError(activity.error) }}</p>
             <details v-if="childActivitiesOf(activity.id).length" class="ai-task-children" :open="aiActivityState(activity) === 'running'">
               <summary>执行步骤（{{ childActivitiesOf(activity.id).length }}）</summary>
               <div v-for="child in childActivitiesOf(activity.id)" :key="child.id" class="ai-task-child">
@@ -77,6 +78,7 @@
                 <span class="ai-task-state">
                   {{ child.status === 'running' ? '进行中' : child.status === 'completed' ? '已完成' : '失败' }}
                 </span>
+                <p v-if="child.error" class="ai-task-error" role="status">{{ activityError(child.error) }}</p>
               </div>
             </details>
           </template>
@@ -143,14 +145,19 @@ import {
   TrendingUpOutline, StatsChartOutline, BulbOutline, ShareOutline,
 } from '@vicons/ionicons5'
 import { useNovelStore } from '@/stores/novel'
+import { chapterTitleForDisplay } from '@/v3/write/chapterNumber'
 import { exportToTXT, exportToWordHtml, exportToEpub } from '@/services/export'
 import AiChatAssistant from '@/components/AiChatAssistant.vue'
 import { editorAssistantHostKey } from '@/services/editorAssistantHost'
 import { formatWordCount } from '@/utils/format'
 import { openAiActivity, useAiActivities } from '@/services/aiActivity'
+import { safeAiErrorMessage } from '@/services/aiDiagnostics'
+import { useConfigStore } from '@/stores/config'
 
 const route = useRoute()
 const novelStore = useNovelStore()
+const configStore = useConfigStore()
+const activityError = (error: string) => safeAiErrorMessage(error, configStore.models.map(model => model.apiKey))
 const msg = useMessage()
 const showRenameModal = ref(false)
 const renameTitle = ref('')
@@ -220,13 +227,15 @@ function openRename() {
   showRenameModal.value = true
 }
 
-function confirmRename() {
+async function confirmRename() {
   if (!novel.value) return
   const title = renameTitle.value.trim().replace(/[《》]/g, '')
   if (!title) return
-  novelStore.updateTitle(novel.value.id, title)
-  showRenameModal.value = false
-  msg.success('书名已修改')
+  try {
+    await novelStore.updateTitleWithImpact(novel.value.id, title)
+    showRenameModal.value = false
+    msg.success('书名已修改')
+  } catch (error) { msg.error(error instanceof Error ? error.message : '书名保存失败') }
 }
 
 function handleRenameKeydown(event: KeyboardEvent) {
@@ -479,6 +488,16 @@ const getProgress = computed(() => {
   padding: 3px 12px 3px 27px;
   color: var(--text-color-tertiary);
   font-size: 11px;
+}
+
+.ai-task-error {
+  grid-column: 1 / -1;
+  margin: 2px 12px 8px;
+  color: var(--color-accent);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .ai-task-children {

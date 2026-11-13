@@ -1,10 +1,93 @@
 import { describe, expect, it, vi } from 'vitest'
 import { contentReviewVerdict } from './contentReview'
-import { ChapterReviewCoverageError, requestChapterReviewWithCoverage, splitReviewChunks, type ReviewCoverage } from './chapterReviewCoverage'
+import { ChapterReviewCoverageError, requestChapterReviewWithCoverage, splitReviewChunks, type ReviewCoverage, type ReviewCheckpoint } from './chapterReviewCoverage'
 const pass = '## 结论\n总体判断：可通过\n必改数量：0\n## 必改问题\n无。'
 const partPass = pass + '\n## 本段事实摘要\n角色进入小镇，随后获得回复。'
 
 describe('review coverage', () => {
+  it('waits for a durable checkpoint before requesting another segment', async () => {
+    let release!: () => void, entered!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const started = new Promise<void>(resolve => { entered = resolve })
+    const review = vi.fn(async (_part, kind) => kind === 'global' ? pass : partPass)
+    const work = requestChapterReviewWithCoverage('甲'.repeat(5000), review, undefined, { binding: 'write-barrier',
+      onCheckpoint: async coverage => { if (coverage.completedChunks === 1) { entered(); await gate } },
+    })
+    await started
+    expect(review).toHaveBeenCalledOnce()
+    release()
+    await work
+    expect(review).toHaveBeenCalledTimes(3)
+  })
+  it('resumes a persisted prefix without losing its earlier finding', async () => {
+    let saved: ReviewCoverage | undefined
+    const recovery = { binding: 'same-input', onCheckpoint: async (value: ReviewCoverage) => { saved = JSON.parse(JSON.stringify(value)) } }
+    const first = vi.fn(async (part) => {
+      if (part.index === 1) throw new Error('第二段断网')
+      return partPass.replace('可通过', '必须修改').replace('必改数量：0', '必改数量：1')
+    })
+    await expect(requestChapterReviewWithCoverage('甲'.repeat(6500), first, undefined, recovery)).rejects.toThrow('第二段断网')
+    expect(saved?.checkpoint?.chunks).toHaveLength(1)
+    const resumed = vi.fn(async (_part, kind) => kind === 'global' ? pass : partPass)
+    const result = await requestChapterReviewWithCoverage('甲'.repeat(6500), resumed, undefined, { ...recovery, checkpoint: saved!.checkpoint })
+    expect(resumed.mock.calls.map(([part, kind]) => kind === 'global' ? 'global' : part.index)).toEqual([1, 2, 'global'])
+    expect(contentReviewVerdict(result)).toBe('changes-required')
+    expect(saved?.status).toBe('complete')
+    const repeated = vi.fn()
+    expect(await requestChapterReviewWithCoverage('甲'.repeat(6500), repeated, undefined, { ...recovery, checkpoint: saved!.checkpoint })).toBe(result)
+    expect(repeated).not.toHaveBeenCalled()
+  })
+
+  it('retries only the global relation check after all chunks were saved', async () => {
+    let saved: ReviewCheckpoint | undefined
+    const recovery = { binding: 'global-input', onCheckpoint: async (value: ReviewCoverage) => { saved = value.checkpoint } }
+    await expect(requestChapterReviewWithCoverage('甲'.repeat(5000), async (_part, kind) => {
+      if (kind === 'global') throw new Error('全章失败')
+      return partPass
+    }, undefined, recovery)).rejects.toThrow('全章失败')
+    const retry = vi.fn(async (_part, _kind) => pass)
+    await requestChapterReviewWithCoverage('甲'.repeat(5000), retry, undefined, { ...recovery, checkpoint: saved })
+    expect(retry).toHaveBeenCalledOnce()
+    expect(retry.mock.calls[0][1]).toBe('global')
+  })
+
+  it('stops after a failed checkpoint write and can save the received report before resuming', async () => {
+    const first = vi.fn(async () => partPass)
+    let retained: ReviewCheckpoint | undefined
+    await expect(requestChapterReviewWithCoverage('甲'.repeat(5000), first, value => { retained = value.checkpoint }, {
+      binding: 'durable', onCheckpoint: async () => { throw new Error('磁盘失败') },
+    })).rejects.toThrow('磁盘失败')
+    expect(first).toHaveBeenCalledOnce()
+    expect(retained?.chunks).toHaveLength(1)
+    const blocked = vi.fn()
+    await expect(requestChapterReviewWithCoverage('甲'.repeat(5000), blocked, undefined, {
+      binding: 'durable', checkpoint: retained, onCheckpoint: async () => { throw new Error('仍未保存') },
+    })).rejects.toThrow('仍未保存')
+    expect(blocked).not.toHaveBeenCalled()
+    const retry = vi.fn(async (_part, kind) => kind === 'global' ? pass : partPass)
+    await requestChapterReviewWithCoverage('甲'.repeat(5000), retry, undefined, { binding: 'durable', checkpoint: retained, onCheckpoint: async () => undefined })
+    expect(retry.mock.calls.map(([part, kind]) => kind === 'global' ? 'global' : part.index)).toEqual([1, 'global'])
+  })
+
+  it.each(['source', 'binding'])('does not reuse a checkpoint after its %s changes', async changed => {
+    let saved: ReviewCheckpoint | undefined
+    await requestChapterReviewWithCoverage('原稿', async () => pass, undefined, { binding: 'v1', onCheckpoint: async value => { saved = value.checkpoint } })
+    const review = vi.fn(async () => pass)
+    await requestChapterReviewWithCoverage(changed === 'source' ? '改稿' : '原稿', review, undefined, {
+      binding: changed === 'binding' ? 'v2' : 'v1', checkpoint: saved, onCheckpoint: async () => undefined,
+    })
+    expect(review).toHaveBeenCalledOnce()
+  })
+
+  it('refuses corrupt checkpoint ranges before sending any request', async () => {
+    let saved: ReviewCheckpoint | undefined
+    await requestChapterReviewWithCoverage('原稿', async () => pass, undefined, { binding: 'v1', onCheckpoint: async value => { saved = value.checkpoint } })
+    saved!.chunks[0].start = 1
+    const review = vi.fn()
+    await expect(requestChapterReviewWithCoverage('原稿', review, undefined, { binding: 'v1', checkpoint: saved, onCheckpoint: async () => undefined })).rejects.toThrow('断点损坏')
+    expect(review).not.toHaveBeenCalled()
+  })
+
   it('keeps short chapter review to a single request', async () => {
     const review = vi.fn().mockResolvedValue(pass)
     const result = await requestChapterReviewWithCoverage('甲'.repeat(2400), review)

@@ -1,5 +1,8 @@
 import type { Novel } from '@/types/novel'
 import { useKnowledgeStore, type KBEntry } from '@/stores/knowledge'
+import type { KnowledgeBase } from '@/types/knowledge'
+import { getCurrentBaseSummary } from './knowledgeSources'
+import { knowledgeReferenceInput } from './knowledgeSelection'
 
 function splitKeywords(text: string): string[] {
   return Array.from(new Set(
@@ -32,8 +35,11 @@ export function buildBoundKnowledgeContext(
     const store = useKnowledgeStore()
     const boundIds = new Set(novel.knowledgeBaseIds || [])
     const summaries = store.knowledgeBases
-      .filter(base => boundIds.has(base.id) && base.summary?.trim())
-      .map(base => `• ${base.name}：${base.summary!.slice(0, Math.max(entryLimit * 2, 1200))}`)
+      .filter(base => boundIds.has(base.id))
+      .flatMap(base => {
+        const summary = getCurrentBaseSummary(base)
+        return summary ? ['• ' + base.name + '：' + summary.slice(0, Math.max(entryLimit * 2, 1200))] : []
+      })
     return [
       '【当前小说已挂载知识库（仅供本书参考）】',
       summaries.length ? `知识库摘要：\n${summaries.join('\n')}` : '',
@@ -46,18 +52,11 @@ export function buildBoundKnowledgeContext(
 }
 
 // Include entry content so editing a bound entry invalidates cached AI context.
-export function buildBoundKnowledgeSignature(novel: Novel): string {
+export function buildBoundKnowledgeSignature(novel: Novel, snapshot?: KnowledgeBase[]): string {
   if (!novel.knowledgeBaseIds?.length) return ''
+  if (snapshot !== undefined) return JSON.stringify(knowledgeReferenceInput(snapshot, novel.knowledgeBaseIds))
   try {
-    const store = useKnowledgeStore()
-    const boundIds = new Set(novel.knowledgeBaseIds)
-    return store.knowledgeBases
-      .filter(base => boundIds.has(base.id))
-      .flatMap(base => base.entries.map(entry => [
-        base.id, entry.id, entry.title, entry.category, entry.updatedAt,
-        entry.content, entry.summary, entry.tags.join(','),
-      ].join('\u0001')))
-      .join('\u0002')
+    return JSON.stringify(knowledgeReferenceInput(useKnowledgeStore().knowledgeBases, novel.knowledgeBaseIds))
   } catch {
     return ''
   }

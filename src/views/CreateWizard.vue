@@ -1,5 +1,5 @@
 <template>
-  <div class="wizard-layout" id="create-wizard-page">
+  <div class="wizard-layout" :class="{ 'choosing-options': choosingCreationOptions }" id="create-wizard-page">
     <!-- 顶部固定区 -->
     <div class="wizard-top">
       <!-- 向导头部 -->
@@ -9,10 +9,11 @@
           <span>{{ choosingCreationOptions && previousCreationState ? '返回' : '返回书架' }}</span>
         </button>
         <h1 class="page-title">创建新书</h1>
-        <span v-if="!choosingCreationOptions" class="creation-combination" role="status">{{ form.writingMode === 'ai' ? 'AI 模式' : '写作辅助' }} · {{ setupMethod === 'inspiration' ? '灵感模式' : '自选设定' }}</span>
+        <span v-if="!choosingCreationOptions && setupMethod" class="creation-combination" role="status">{{ form.writingMode === 'ai' ? 'AI 模式' : '作者主笔' }} · {{ creationSetupLabels[setupMethod] }}</span>
         <n-button v-if="!choosingCreationOptions" quaternary :disabled="creating" @click="openCreationOptions">更换搭配</n-button>
         <n-button v-if="!choosingCreationOptions && setupMethod === 'inspiration' && reviewingInspiration"
           quaternary :disabled="creating" @click="reviewingInspiration = false">返回灵感对话</n-button>
+        <n-button v-if="showInspiration" quaternary :disabled="creating" @click="discussingInspiration = false">保留讨论，返回创建输入</n-button>
       </div>
 
       <!-- 步骤指示器 -->
@@ -39,7 +40,42 @@
     <!-- 可滚动内容区 -->
     <creation-mode-picker v-if="choosingCreationOptions"
       v-model:writing-mode="form.writingMode" v-model:setup-method="setupMethod"
-      :disabled="creating" @start="startCreation" />
+      :disabled="creating" @start="startCreation">
+      <template v-if="appearance === 'v3' && setupMethod === 'inspiration'" #input>
+        <section class="origin-seed">
+          <label for="origin-idea">一句话灵感</label>
+          <textarea id="origin-idea" v-model="ideaSentence" :disabled="creating" maxlength="4000" rows="2" aria-label="起点灵感草稿" placeholder="一个人物、一个冲突或一个场景，就可以作为起点……" />
+          <p>先记下想法，下一步可继续编辑或展开对话。继续不会自动调用模型，也不会批准任何故事事实。</p>
+        </section>
+      </template>
+    </creation-mode-picker>
+    <div v-if="showEntry && !discussingInspiration" class="creation-entry-body">
+      <CreationEntrySource v-if="creationCheckpoint" :input="creationCheckpoint" />
+      <section class="paper-panel creation-entry-panel">
+        <h2>{{ setupMethod ? creationSetupLabels[setupMethod] : '' }}</h2>
+        <p>保存创建输入后，依次编辑作品契约、比较骨架候选并确认规划。此处不会生成正文或批准故事事实。</p>
+        <label>作品名称（可稍后填写）<n-input v-model:value="form.workingTitle" :disabled="creating || !!createdNovelId" placeholder="可在作品契约中继续修改" aria-label="新作品名称" /></label>
+        <template v-if="setupMethod === 'inspiration'">
+          <label>一句话灵感<n-input v-model:value="ideaSentence" type="textarea" :rows="4" :maxlength="4000" :disabled="creating || !!createdNovelId" aria-label="一句话灵感" placeholder="一个人物、一个冲突或一个场景，就可以作为起点" /></label>
+          <n-checkbox v-model:checked="includeInspirationHistory" :disabled="creating || !!createdNovelId || !inspirationHistory.length">一并保存当前灵感讨论（{{ inspirationHistory.length }} 条）</n-checkbox>
+          <n-button :disabled="creating || !!createdNovelId" @click="openInspirationDiscussion">继续已有讨论 / 展开灵感对话</n-button>
+          <p>一句话即可开始，不要求先调用模型整理设定。选用讨论时，创建会保存当前选择的讨论记录。</p>
+        </template>
+        <CreationOutlineInput v-if="setupMethod === 'outline'" v-model="outlineInput" :saved="outlineSaved"
+          :disabled="creating || !!createdNovelId" @save="saveOutlineInput" @reading="outlineReading = $event" />
+        <p v-if="setupMethod === 'blank'">创建空白作品契约：类型、主题、冲突和大纲保持未填写。无需配置模型，可先手工保存草稿。</p>
+        <section class="entry-origin">
+          <h3>故事时间起点（可暂不确定）</h3>
+          <label>起始故事日<n-input-number v-model:value="storyOriginDay" :min="0" :max="100000000" :step="0.01"
+            :disabled="creating || !!createdNovelId" aria-label="创建起始故事日" placeholder="留空表示未知；0 也须明确填写" /></label>
+          <label>起点名称（随起始日保存）<n-input v-model:value="storyOriginLabel" :disabled="creating || !!createdNovelId" /></label>
+          <p role="status">{{ storyOriginDay === null ? '未填写起始日：创建后保持未知，不自动确认故事日 0。' : `创建时确认作者填写的故事日 ${storyOriginDay}` }}</p>
+          <p v-if="storyOriginDay === null && storyOriginLabel.trim()" role="alert">请填写对应的起始日，或清除起点名称以保持未知。</p>
+        </section>
+        <n-button type="primary" size="large" :loading="creating" :disabled="creating || (!createdNovelId && (!canProceed || outlineReading))" @click="handleCreate" id="entry-create-btn">{{ createdNovelId ? '打开已创建的作品' : '保存输入并创建，进入作品契约' }}</n-button>
+        <p v-if="createdNovelId" role="status">作品和输入已保存；再次点击只会打开这部作品。</p>
+      </section>
+    </div>
     <inspiration-chat v-show="showInspiration"
       :active="showInspiration" :form="form" @apply="applyInspiration" @draft-change="updateInspirationDraft" @history-change="handleInspirationHistoryChange" />
     <div v-show="showSettings" class="wizard-body">
@@ -107,6 +143,7 @@
     <!-- 第一页：类型 + 字数 + 风格 -->
     <div v-if="currentStep === 0" class="wizard-page" id="wizard-page-1">
       <div class="form-sections">
+        <section class="form-section paper-panel"><h3 class="section-title">作品名称（可稍后填写）</h3><n-input v-model:value="form.workingTitle" :disabled="creating || !!createdNovelId" placeholder="在作品契约中继续确认" /></section>
         <!-- 小说类型 -->
         <section class="form-section paper-panel">
           <h3 class="section-title">小说类型</h3>
@@ -515,7 +552,22 @@
             </n-checkbox-group>
             <p v-else class="section-hint">书架还没有知识库，请先返回书架创建。</p>
           </div>
-        </section></aside>
+        </section>
+        <section class="form-section paper-panel">
+          <h3 class="section-title">故事时间起点</h3>
+          <p class="section-hint">故事日是本书的时间坐标。留空保持未知；只有明确填写后创建，才保存作者起点来源，之后可在数据面板纠正。</p>
+          <div class="form-item">
+            <label>起始故事日</label>
+            <n-input-number v-model:value="storyOriginDay" :min="0" :max="100000000" :step="0.01"
+              :disabled="creating || !!createdNovelId" aria-label="起始故事日" placeholder="明确填写，包括 0" />
+          </div>
+          <div class="form-item">
+            <label>起点名称（可选）</label>
+            <n-input v-model:value="storyOriginLabel" :disabled="creating || !!createdNovelId" placeholder="例如：玄历三年春，抵达当天" />
+          </div>
+          <p role="status">{{ storyOriginDay === null ? '未填写：起点保持未知，不补 0。若填写起点名称，也请填写对应故事日。' : `创建时将确认：故事日 ${storyOriginDay}${storyOriginLabel.trim() ? ` · ${storyOriginLabel.trim()}` : ''}` }}</p>
+        </section>
+      </aside>
     <!-- 底部操作栏 -->
     <div class="wizard-footer" id="wizard-footer">
       <n-button v-if="currentStep > 0" @click="currentStep--" size="large">
@@ -536,12 +588,12 @@
         v-else
         type="primary"
         size="large"
-        :disabled="!canProceed || creating"
+        :disabled="(!createdNovelId && !canProceed) || creating"
         :loading="creating"
         @click="handleCreate"
         id="wizard-create-btn"
       >
-        生成大纲
+        {{ createdNovelId ? '打开已创建的作品' : '保存输入并创建，进入作品契约' }}
       </n-button>
       </div><!-- /wizard-footer -->
     </div><!-- /wizard-body -->
@@ -559,14 +611,23 @@ import { genres, themeTags } from '@/data/genres'
 import { styleDimensions, personalityTags, payoffPatterns } from '@/data/styles'
 import { useNovelStore } from '@/stores/novel'
 import { useKnowledgeStore } from '@/stores/knowledge'
+import { useReconstructionWorkspaceStore } from '@/stores/reconstructionWorkspace'
+import { prepareStoryCreation } from '@/services/storyCreation'
 import type { CreateWizardForm } from '@/types/novel'
 import InspirationChat from '@/components/InspirationChat.vue'
 import CreationModePicker from '@/components/CreationModePicker.vue'
+import CreationOutlineInput from '@/components/CreationOutlineInput.vue'
+import CreationEntrySource from '@/components/CreationEntrySource.vue'
+import { creationSetupLabels, type CreationSetupMethod, type CreationOutlineInput as OutlineInput, type CreationEntryInput } from '@/types/creationEntry'
+import { assertCreationEntryInput, creationOutlineInputSignature } from '@/services/creationEntryInput'
 import type { InspirationMessage } from '@/services/inspiration'
+
+defineProps<{ appearance?: 'v3' }>()
 
 const router = useRouter()
 const novelStore = useNovelStore()
 const knowledgeStore = useKnowledgeStore()
+const reconstructionWorkspaceStore = useReconstructionWorkspaceStore()
 const message = useMessage()
 const dialog = useDialog()
 
@@ -576,16 +637,33 @@ const showImportModal = ref(false)
 const importJsonText = ref('')
 const previewData = ref<Record<string, any> | null>(null)
 const choosingCreationOptions = ref(true)
-const setupMethod = ref<'inspiration' | 'custom' | null>(null)
+const setupMethod = ref<CreationSetupMethod | null>(null)
 const reviewingInspiration = ref(false)
+const discussingInspiration = ref(false)
+const ideaSentence = ref(''), includeInspirationHistory = ref(false)
+const outlineInput = ref<OutlineInput>(), savedOutlineInput = ref<OutlineInput>(), outlineReading = ref(false)
+const outlineSaved = computed(() => !!savedOutlineInput.value && creationOutlineInputSignature(outlineInput.value) === creationOutlineInputSignature(savedOutlineInput.value))
+const creationCheckpoint = computed<CreationEntryInput | undefined>(() => {
+  if (!setupMethod.value) return undefined
+  if (setupMethod.value === 'outline') return savedOutlineInput.value ? { method: 'outline', outline: savedOutlineInput.value, savedAt: savedOutlineInput.value.savedAt || savedOutlineInput.value.capturedAt } : undefined
+  const savedAt = new Date().toISOString()
+  if (setupMethod.value === 'inspiration' && ideaSentence.value.trim()) return { method: 'inspiration', idea: ideaSentence.value, includeDiscussion: includeInspirationHistory.value, savedAt }
+  if (setupMethod.value === 'blank') return { method: 'blank', savedAt }
+  return undefined
+})
+const creationId = crypto.randomUUID()
+let committedCreation: ReturnType<typeof prepareStoryCreation> | undefined
 const creating = ref(false)
+const createdNovelId = ref('')
 const inspirationHistory = ref<InspirationMessage[]>([])
 const previousCreationState = ref<{
-  setupMethod: 'inspiration' | 'custom' | null
+  setupMethod: CreationSetupMethod | null
   reviewingInspiration: boolean
+  discussingInspiration: boolean
   currentStep: number
 } | null>(null)
-const showInspiration = computed(() => !choosingCreationOptions.value && setupMethod.value === 'inspiration' && !reviewingInspiration.value)
+const showEntry = computed(() => !choosingCreationOptions.value && !!setupMethod.value && setupMethod.value !== 'custom' && !reviewingInspiration.value)
+const showInspiration = computed(() => showEntry.value && setupMethod.value === 'inspiration' && discussingInspiration.value)
 const showSettings = computed(() => !choosingCreationOptions.value && (setupMethod.value === 'custom' || reviewingInspiration.value))
 const availableKnowledgeBases = computed(() => knowledgeStore.knowledgeBases)
 
@@ -594,6 +672,7 @@ function openCreationOptions() {
   previousCreationState.value = {
     setupMethod: setupMethod.value,
     reviewingInspiration: reviewingInspiration.value,
+    discussingInspiration: discussingInspiration.value,
     currentStep: currentStep.value,
   }
   choosingCreationOptions.value = true
@@ -604,8 +683,10 @@ function startCreation() {
   choosingCreationOptions.value = false
   previousCreationState.value = null
   currentStep.value = 0
-  if (setupMethod.value === 'inspiration') reviewingInspiration.value = false
+  reviewingInspiration.value = false; discussingInspiration.value = false
 }
+function openInspirationDiscussion() { discussingInspiration.value = true; includeInspirationHistory.value = true }
+function saveOutlineInput(value: OutlineInput) { savedOutlineInput.value = JSON.parse(JSON.stringify(value)) }
 
 function updateInspirationDraft(settings: CreateWizardForm) {
   if (!showInspiration.value || creating.value) return
@@ -618,6 +699,7 @@ function applyInspiration(settings: CreateWizardForm, history: InspirationMessag
   // current choice even if a response carries an older/different writing mode.
   Object.assign(form, settings, { writingMode: form.writingMode })
   inspirationHistory.value = history
+  includeInspirationHistory.value = true
   reviewingInspiration.value = true
   currentStep.value = 0
   message.success('设定已整理，请检查并确认')
@@ -627,9 +709,8 @@ function handleInspirationHistoryChange(history: InspirationMessage[]) {
   inspirationHistory.value = history
 }
 
-const hasInspirationDraft = computed(() =>
-  setupMethod.value === 'inspiration' && inspirationHistory.value.some(item => item.role === 'user'),
-)
+const hasCreationInput = computed(() => !createdNovelId.value && (!!outlineInput.value?.text.trim() || !!ideaSentence.value.trim()
+  || setupMethod.value === 'inspiration' && includeInspirationHistory.value && inspirationHistory.value.some(item => item.role === 'user')))
 
 function confirmLeave(): Promise<boolean> {
   return new Promise(resolve => {
@@ -641,7 +722,7 @@ function confirmLeave(): Promise<boolean> {
     }
     dialog.warning({
       title: '退出创建？',
-      content: '灵感对话已自动保存到历史会话。确定退出创建页面吗？',
+      content: '本页的创建输入尚未随作品保存。灵感对话可在历史会话中继续；本页填写或导入的大纲尚未创建入库。确定退出吗？',
       positiveText: '退出创建',
       negativeText: '继续编辑',
       onPositiveClick: () => finish(true),
@@ -652,7 +733,7 @@ function confirmLeave(): Promise<boolean> {
 }
 
 onBeforeRouteLeave(async () => {
-  if (creating.value || !hasInspirationDraft.value) return true
+  if (creating.value || !hasCreationInput.value) return true
   return confirmLeave()
 })
 
@@ -785,7 +866,12 @@ TXT 内容或任意片段摘录：
 资料可以不完整，请自动分析和推断。`
 
 // 表单数据
+// Author-owned inputs stay separate from AI/imported settings. They enter the
+// creation aggregate only when the author clicks the final create action.
+const storyOriginDay = ref<number | null>(null)
+const storyOriginLabel = ref('')
 const form = reactive<CreateWizardForm>({
+  workingTitle: '',
   writingMode: 'manual',
   knowledgeEnabled: false,
   knowledgeBaseIds: [],
@@ -812,6 +898,13 @@ const currentStyleSummary = computed(() => styleDimensions.map(dimension => dime
 // 是否可以进入下一步
 const canProceed = computed(() => {
   const genre = genres.find(item => item.value === form.genre)
+  const timeValid = storyOriginDay.value === null ? !storyOriginLabel.value.trim()
+    : typeof storyOriginDay.value === 'number' && Number.isFinite(storyOriginDay.value) && storyOriginDay.value >= 0 && storyOriginDay.value <= 100000000
+  if (!timeValid) return false
+  if (setupMethod.value === 'blank') return true
+  if (setupMethod.value === 'outline') return outlineSaved.value && !outlineReading.value
+  if (setupMethod.value === 'inspiration') return !!ideaSentence.value.trim()
+    || includeInspirationHistory.value && inspirationHistory.value.some(item => item.role === 'user' && item.content.trim())
   return Boolean(genre?.children.some(item => item.value === form.subGenre))
     && form.targetWordCountMin >= 1 && form.targetWordCountMax >= form.targetWordCountMin && form.targetWordCountMax <= 999
 })
@@ -1085,6 +1178,7 @@ function handleBack() {
     const previous = previousCreationState.value
     setupMethod.value = previous.setupMethod
     reviewingInspiration.value = previous.reviewingInspiration
+    discussingInspiration.value = previous.discussingInspiration
     currentStep.value = previous.currentStep
     choosingCreationOptions.value = false
     previousCreationState.value = null
@@ -1095,19 +1189,33 @@ function handleBack() {
 
 // 创建小说
 async function handleCreate() {
-  if (!showSettings.value || !canProceed.value || creating.value) return
+  if ((!showSettings.value && !showEntry.value) || !setupMethod.value || (!createdNovelId.value && !canProceed.value) || creating.value) return
   creating.value = true
   try {
-    const novel = novelStore.addNovel(form)
-    // Keep accepted inspiration as source material, not assistant chat turns.
-    novelStore.setInspirationHistory(novel.id, inspirationHistory.value.map((item, index) => ({
-      ...item, id: `inspiration-${novel.id}-${index}`, timestamp: new Date().toISOString(),
-    })))
-    await novelStore.saveNovelNow(novel.id)
-    message.success('小说已创建，正在跳转到大纲生成...')
-    await router.push(`/generate/${novel.id}`)
+    if (!createdNovelId.value) {
+      const now = new Date().toISOString()
+      const input: CreationEntryInput = { method: setupMethod.value, savedAt: now,
+        ...(setupMethod.value === 'inspiration' ? { idea: ideaSentence.value, includeDiscussion: includeInspirationHistory.value } : {}),
+        ...(setupMethod.value === 'outline' ? { outline: savedOutlineInput.value } : {}) }
+      assertCreationEntryInput(input)
+      const prepared = prepareStoryCreation({ ...form, creationInput: input,
+        storyTimeOrigin: storyOriginDay.value === null ? undefined : { day: storyOriginDay.value, label: storyOriginLabel.value.trim() } },
+        includeInspirationHistory.value ? inspirationHistory.value : [], setupMethod.value, now, creationId)
+      await reconstructionWorkspaceStore.persistInitialCreation(prepared.novel, prepared.workspace)
+      // Commit identity before publishing or navigating: a retry must reuse this saved novel.
+      committedCreation = prepared
+      createdNovelId.value = prepared.novel.id
+      message.success('小说已创建，请检查并确认作品契约')
+    }
+    if (committedCreation) {
+      novelStore.publishCreatedNovel(committedCreation.novel)
+      reconstructionWorkspaceStore.publishCreatedWorkspace(committedCreation.novel.id, committedCreation.workspace)
+    }
+    const failure = await router.push('/generate/' + createdNovelId.value)
+    if (failure) throw new Error('页面未能打开，请点击“打开已创建的作品”重试。')
   } catch (error) {
-    message.error(error instanceof Error ? error.message : '创建失败')
+    const detail = error instanceof Error ? error.message : '操作失败'
+    message.error(createdNovelId.value ? '作品已经保存，打开失败：' + detail : '创建失败：' + detail)
   } finally {
     creating.value = false
   }
@@ -1115,6 +1223,11 @@ async function handleCreate() {
 </script>
 
 <style scoped>
+.creation-entry-body { flex:1; min-height:0; overflow:auto; padding:0 32px 32px; }
+.creation-entry-panel { display:grid; gap:20px; max-width:1000px; margin:0 auto; padding:24px; box-sizing:border-box; }
+.creation-entry-panel h2,.creation-entry-panel h3,.creation-entry-panel p { margin:0; }
+.creation-entry-panel p { line-height:1.8; } .creation-entry-panel label,.entry-origin { display:grid; gap:10px; }
+@media(max-width:680px) { .creation-entry-body { padding:0 16px 20px; } .creation-entry-panel { padding:16px; } }
 .reference-import-panel {
   margin-bottom: var(--space-lg);
 }

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useNovelStore } from '@/stores/novel'
 import { useKnowledgeStore } from '@/stores/knowledge'
-import { createProjectBackup } from './projectBackup'
+import { createTestProjectBackup as createProjectBackup } from '@/test/projectBackupFixture'
 import { importProject, projectTransferBusy } from './projectTransfer'
 import { replaceProjectInDb } from './db/project'
 import { retainProjectRestorePoint } from './database'
@@ -11,6 +11,11 @@ vi.mock('./aiTaskQueue', () => ({ chapterBackgroundQueue: { pendingCount: 0 } })
 vi.mock('./db/project', () => ({ replaceProjectInDb: vi.fn() }))
 vi.mock('./database', () => ({ retainProjectRestorePoint: vi.fn() }))
 vi.mock('./db/chapterRevisions', () => ({ loadProjectChapterRevisions: vi.fn().mockResolvedValue([]) }))
+vi.mock('./db/inspirationSessions', () => ({ loadInspirationSessions: vi.fn().mockResolvedValue([]), saveInspirationSessions: vi.fn().mockResolvedValue(undefined) }))
+vi.mock('./db/reconstruction', () => ({
+  loadReconstructionWorkspace: vi.fn().mockResolvedValue({ candidates: [], reviewFindings: [], chapterReviews: [], aiRuns: [], canonMutations: [] }),
+  saveReconstructionWorkspace: vi.fn().mockResolvedValue(undefined),
+}))
 vi.mock('./db/novels', () => ({ saveNovelToDb: vi.fn().mockResolvedValue(undefined) }))
 vi.mock('./db/knowledge', () => ({ saveKnowledgeBaseToDb: vi.fn().mockResolvedValue(undefined) }))
 beforeEach(() => { setActivePinia(createPinia()); vi.clearAllMocks() })

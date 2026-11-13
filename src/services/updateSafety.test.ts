@@ -5,7 +5,8 @@ import { activeAiCount, acknowledgeAiActivity, startAiActivity, finishAiActivity
 import { projectTransferBusy } from './projectTransfer'
 
 const mocks = vi.hoisted(() => ({ novels: vi.fn(), knowledge: vi.fn(), config: vi.fn(), queue: { pendingCount: 0 } }))
-vi.mock('@/stores/novel', () => ({ useNovelStore: () => ({ flushPendingSaves: mocks.novels }) }))
+vi.mock('@/stores/novel', () => ({ useNovelStore: () => ({ novels: [], flushPendingSaves: mocks.novels }) }))
+vi.mock('@/stores/reconstructionWorkspace', () => ({ useReconstructionWorkspaceStore: () => ({ flushPendingSaves: async () => {} }) }))
 vi.mock('@/stores/knowledge', () => ({ useKnowledgeStore: () => ({ flushPendingSaves: mocks.knowledge }) }))
 vi.mock('@/stores/config', () => ({ useConfigStore: () => ({ saveConfig: mocks.config }) }))
 vi.mock('@/stores/inspirationSessions', () => ({ useInspirationSessionsStore: () => ({ flushPendingSaves: async () => {} }) }))

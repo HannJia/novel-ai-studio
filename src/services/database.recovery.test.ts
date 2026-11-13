@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { IDBFactory } from 'fake-indexeddb'
 
 const memory = new Map<string, string>()
 beforeEach(() => {
   vi.resetModules()
   memory.clear()
+  vi.stubGlobal('indexedDB', undefined)
   vi.stubGlobal('window', {})
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => memory.get(key) ?? null,
@@ -14,6 +16,72 @@ beforeEach(() => {
 const key = 'novel-writer-sqlite-db'
 
 describe('database recovery without destructive fallback', () => {
+  it('recovers an IndexedDB database from its backup without falling back to stale localStorage', async () => {
+    vi.stubGlobal('indexedDB', new IDBFactory())
+    let database = await import('./database'); await database.initDb()
+    await database.runTransaction(() => database.execute("INSERT INTO novels(id,title) VALUES ('kept','最新正文')"))
+    const current = memory.get(key)!
+    const storage = await import('./browserDatabaseStorage')
+    await storage.writeIndexedDatabase(btoa('damaged-indexed-main'), current, false)
+    vi.resetModules(); database = await import('./database')
+    await expect(database.initDb()).rejects.toMatchObject({ name: 'DatabaseRecoveryError', backupAvailable: true })
+    await database.recoverDatabase('backup')
+    expect(database.queryAll('SELECT title FROM novels')).toEqual([{ title: '最新正文' }])
+    vi.resetModules(); database = await import('./database'); await database.initDb()
+    expect(database.queryAll('SELECT title FROM novels')).toEqual([{ title: '最新正文' }])
+  })
+
+  it('saves and reopens through IndexedDB when localStorage is full, retaining the original blobs', async () => {
+    vi.stubGlobal('indexedDB', new IDBFactory())
+    let database = await import('./database'); await database.initDb()
+    await database.runTransaction(() => database.execute("INSERT INTO novels(id,title) VALUES ('kept','原稿')"))
+    const primary = memory.get(key), backup = memory.get(key + '.bak')
+    localStorage.setItem = () => { throw new DOMException('quota', 'QuotaExceededError') }
+    await database.runTransaction(() => database.execute("UPDATE novels SET title = '迁移后正文'"), { restoreOnWriteFailure: true })
+    expect(memory.get(key)).toBe(primary); expect(memory.get(key + '.bak')).toBe(backup)
+    vi.resetModules(); database = await import('./database'); await database.initDb()
+    expect(database.queryAll('SELECT title FROM novels')).toEqual([{ title: '迁移后正文' }])
+    await database.runTransaction(() => database.execute("UPDATE novels SET title = '继续保存'"), { restoreOnWriteFailure: true })
+    vi.resetModules(); database = await import('./database'); await database.initDb()
+    expect(database.queryAll('SELECT title FROM novels')).toEqual([{ title: '继续保存' }])
+  })
+
+  it('reclaims unused SQLite pages on quota failure while retaining the previous database as backup', async () => {
+    const database = await import('./database')
+    await database.initDb()
+    await database.runTransaction(() => {
+      database.execute("INSERT INTO novels(id,title) VALUES ('kept','重要正文')")
+      database.execute('CREATE TABLE compaction_fixture(value TEXT)')
+      database.execute('INSERT INTO compaction_fixture(value) VALUES (?)', ['x'.repeat(500000)])
+    })
+    const original = memory.get(key)!
+    const quota = [...memory.values()].reduce((sum, value) => sum + value.length, 0) + 16384
+    let quotaFailures = 0
+    localStorage.setItem = (name: string, value: string) => {
+      const total = [...memory.entries()].reduce((sum, [item, text]) => sum + (item === name ? 0 : text.length), 0) + value.length
+      if (total > quota) { quotaFailures++; throw new DOMException('quota', 'QuotaExceededError') }
+      memory.set(name, value)
+    }
+    await database.runTransaction(() => database.execute('DELETE FROM compaction_fixture'), { restoreOnWriteFailure: true })
+    expect(quotaFailures).toBeGreaterThan(0)
+    expect(memory.get(key)!.length).toBeLessThan(original.length / 2)
+    expect(memory.get(key + '.bak')).toBe(original)
+    expect(database.queryAll('SELECT title FROM novels')).toEqual([{ title: '重要正文' }])
+    vi.resetModules()
+    const reopened = await import('./database'); await reopened.initDb()
+    expect(reopened.queryAll('SELECT title FROM novels')).toEqual([{ title: '重要正文' }])
+  })
+
+  it('retains durable and in-memory data when quota remains exhausted without free pages', async () => {
+    const database = await import('./database'); await database.initDb()
+    await database.runTransaction(() => database.execute("INSERT INTO novels(id,title) VALUES ('kept','原稿')"))
+    const original = memory.get(key)
+    localStorage.setItem = () => { throw new DOMException('quota', 'QuotaExceededError') }
+    await expect(database.runTransaction(() => database.execute("UPDATE novels SET title = '未保存稿'"), { restoreOnWriteFailure: true })).rejects.toMatchObject({ name: 'QuotaExceededError' })
+    expect(memory.get(key)).toBe(original)
+    expect(database.queryAll('SELECT title FROM novels')).toEqual([{ title: '原稿' }])
+  })
+
   it('serializes simultaneous initialization and retains corrupt browser data until explicit recovery', async () => {
     let database = await import('./database')
     const [a, b] = await Promise.all([database.initDb(), database.initDb()])

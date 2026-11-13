@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { buildChapterAnalysisPrompt, buildChapterEndingCheckPrompt, buildChapterEndingContinuationPrompt, buildChapterPrompt, buildOutlinePrompt, buildVolumePlanningPrompt, buildChapterWritingPlanPrompt } from './prompts'
+import { buildChapterAnalysisPrompt, buildChapterEndingCheckPrompt, buildChapterEndingContinuationPrompt, buildChapterPrompt, buildOutlinePrompt, buildVolumePlanningPrompt, buildChapterWritingPlanPrompt, buildContentReviewPrompt } from './prompts'
+import { buildReviewContext } from './context'
 import type { ChapterEndingCheck } from './chapterEnding'
 import { createPinia, setActivePinia } from 'pinia'
 import { useNovelStore } from '@/stores/novel'
@@ -16,6 +17,36 @@ it('uses the same custom length policy in outline, volume, writing and beat plan
     expect(text).not.toContain('2000~2500')
     expect(text).not.toContain('2000~2200')
   }
+})
+
+it('reviews with the effective short-chapter policy and deterministic count', () => {
+  setActivePinia(createPinia())
+  const store = useNovelStore()
+  const book = store.addNovel({ genre: '', subGenre: '', tags: [], targetWordCountMin: 1, targetWordCountMax: 1, settings: store.defaultSettings(), writingStyle: store.defaultWritingStyle() })
+  book.chapterLengthPolicy = { minWords: 100, targetWords: 500, maxWords: 1000 }
+  const chapter = { id: 'test-chapter', chapterIndex: 0, volumeIndex: 0, title: '验收', content: '雨。\n'.repeat(243), summary: '', wordCount: 486, status: 'draft' as const, createdAt: '', updatedAt: '' }
+  const context = buildReviewContext(book, chapter, chapter.content)
+  expect(context.lengthPolicy).toEqual(book.chapterLengthPolicy)
+  expect(context.chapterWordCount).toBe(486)
+  const prompt = buildContentReviewPrompt(context, 0)[1].content
+  expect(prompt).toContain('目标长度：500 字')
+  expect(prompt).toContain('100~1000 字')
+  expect(prompt).toContain('确定性统计：486 字')
+  expect(prompt).toContain('不得用总字数除以章节数')
+  expect(prompt).toContain('接受范围内不得仅因低于目标而要求扩写')
+  expect(prompt).toContain('整份报告尽量控制在 1600 个中文字符以内')
+  expect(prompt).toContain('不要输出思考过程、推理草稿、分析草稿')
+  expect(prompt).toContain('正文却出现相反的持有/位置状态')
+  expect(prompt).toContain('必须列为严重问题')
+})
+
+it('requests the explicit fields displayed on volume cards', () => {
+  setActivePinia(createPinia())
+  const store = useNovelStore()
+  const book = store.addNovel({ genre: '', subGenre: '', tags: [], targetWordCountMin: 1, targetWordCountMax: 1,
+    settings: store.defaultSettings(), writingStyle: store.defaultWritingStyle() })
+  const prompt = buildVolumePlanningPrompt(book).map(message => message.content).join('\n')
+  for (const label of ['目标：', '冲突：', '收束：']) expect(prompt).toContain(label)
 })
 
 describe('章节结构化分析 Prompt', () => {

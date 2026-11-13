@@ -1,0 +1,171 @@
+export type SelectionRevisionMode = 'polish' | 'rewrite' | 'expand' | 'shorten' | 'continue'
+
+export interface SelectionSnapshot {
+  novelId: string
+  chapterId: string
+  baseContent: string
+  contextVersion: string
+  startOffset: number
+  endOffset: number
+  selectedText: string
+  mode: SelectionRevisionMode
+}
+
+const MAX_SELECTION_LENGTH = 12_000
+const MAX_REPLACEMENT_LENGTH = 24_000
+
+type SnapshotInput = Omit<SelectionSnapshot, 'selectedText'>
+
+const SELECTION_REVISION_MODES: ReadonlySet<SelectionRevisionMode> = new Set([
+  'polish',
+  'rewrite',
+  'expand',
+  'shorten',
+  'continue',
+])
+
+function assertString(value: unknown, name: string): asserts value is string {
+  if (typeof value !== 'string') {
+    throw new TypeError(`${name}必须是字符串`)
+  }
+}
+
+function assertPresent(value: unknown, name: string): asserts value is string {
+  assertString(value, name)
+  if (value.trim().length === 0) {
+    throw new Error(`${name}不能为空`)
+  }
+}
+
+function assertMode(value: unknown): asserts value is SelectionRevisionMode {
+  if (typeof value !== 'string' || !SELECTION_REVISION_MODES.has(value as SelectionRevisionMode)) {
+    throw new Error('不支持的选区修订模式')
+  }
+}
+
+function isHighSurrogate(codeUnit: number): boolean {
+  return codeUnit >= 0xd800 && codeUnit <= 0xdbff
+}
+
+function isLowSurrogate(codeUnit: number): boolean {
+  return codeUnit >= 0xdc00 && codeUnit <= 0xdfff
+}
+
+function assertOffsetNotInsideSurrogatePair(content: string, offset: number, name: string): void {
+  if (
+    offset > 0
+    && offset < content.length
+    && isHighSurrogate(content.charCodeAt(offset - 1))
+    && isLowSurrogate(content.charCodeAt(offset))
+  ) {
+    throw new RangeError(`${name}不能位于代理对中间`)
+  }
+}
+
+function assertSelectionInput(input: SnapshotInput): void {
+  if (!input || typeof input !== 'object') {
+    throw new TypeError('选区快照输入无效')
+  }
+
+  assertPresent(input.novelId, 'novelId')
+  assertPresent(input.chapterId, 'chapterId')
+  assertPresent(input.contextVersion, 'contextVersion')
+  assertString(input.baseContent, 'baseContent')
+  assertMode(input.mode)
+
+  if (!Number.isInteger(input.startOffset) || !Number.isInteger(input.endOffset)) {
+    throw new RangeError('选区偏移必须是整数')
+  }
+  if (
+    input.startOffset < 0
+    || input.endOffset < input.startOffset
+    || input.endOffset > input.baseContent.length
+  ) {
+    throw new RangeError('选区偏移超出正文范围')
+  }
+
+  assertOffsetNotInsideSurrogatePair(input.baseContent, input.startOffset, 'startOffset')
+  assertOffsetNotInsideSurrogatePair(input.baseContent, input.endOffset, 'endOffset')
+
+  const selectionLength = input.endOffset - input.startOffset
+  if (selectionLength > MAX_SELECTION_LENGTH) {
+    throw new RangeError(`选区不能超过${MAX_SELECTION_LENGTH}个字符`)
+  }
+
+  const selectedText = input.baseContent.slice(input.startOffset, input.endOffset)
+  if (input.mode !== 'continue' && selectedText.trim().length === 0) {
+    throw new Error('非续写模式的选区不能为空或纯空白')
+  }
+}
+
+function assertSnapshot(snapshot: SelectionSnapshot): void {
+  if (!snapshot || typeof snapshot !== 'object') {
+    throw new TypeError('选区快照无效')
+  }
+
+  assertSelectionInput(snapshot)
+  assertString(snapshot.selectedText, 'selectedText')
+  const expectedSelectedText = snapshot.baseContent.slice(snapshot.startOffset, snapshot.endOffset)
+  if (snapshot.selectedText !== expectedSelectedText) {
+    throw new Error('选区快照中的正文依据已变化')
+  }
+}
+
+export function captureSelectionSnapshot(input: SnapshotInput): SelectionSnapshot {
+  assertSelectionInput(input)
+
+  return {
+    novelId: input.novelId,
+    chapterId: input.chapterId,
+    baseContent: input.baseContent,
+    contextVersion: input.contextVersion,
+    startOffset: input.startOffset,
+    endOffset: input.endOffset,
+    selectedText: input.baseContent.slice(input.startOffset, input.endOffset),
+    mode: input.mode,
+  }
+}
+
+export function buildSelectionRevision(
+  snapshot: SelectionSnapshot,
+  replacement: string,
+  current: {
+    novelId: string
+    chapterId: string
+    content: string
+    contextVersion: string
+  },
+): string {
+  assertSnapshot(snapshot)
+
+  if (!current || typeof current !== 'object') {
+    throw new TypeError('当前章节无效')
+  }
+  if (
+    current.novelId !== snapshot.novelId
+    || current.chapterId !== snapshot.chapterId
+    || current.content !== snapshot.baseContent
+    || current.contextVersion !== snapshot.contextVersion
+  ) {
+    throw new Error('当前章节已变化或与选区快照不匹配')
+  }
+
+  assertString(replacement, 'replacement')
+  if (replacement.trim().length === 0) {
+    throw new Error('replacement不能为空或纯空白')
+  }
+  if (replacement.length > MAX_REPLACEMENT_LENGTH) {
+    throw new RangeError(`replacement不能超过${MAX_REPLACEMENT_LENGTH}个字符`)
+  }
+
+  const insertionPoint = snapshot.endOffset
+  if (snapshot.mode === 'continue') {
+    return snapshot.baseContent.slice(0, insertionPoint)
+      + replacement
+      + snapshot.baseContent.slice(insertionPoint)
+  }
+
+  return snapshot.baseContent.slice(0, snapshot.startOffset)
+    + replacement
+    + snapshot.baseContent.slice(snapshot.endOffset)
+}

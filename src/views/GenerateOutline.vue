@@ -1,71 +1,96 @@
 ﻿<template>
-  <div class="generate-page fade-in" :class="{ 'outline-ready': isDone }" id="generate-outline-page">
+  <div class="generate-page fade-in" :class="{ 'outline-ready': isDone && !showContractEditor, 'choosing-skeleton': choosingSkeleton }" id="generate-outline-page">
     <!-- 生成动画头部 -->
-    <div class="generate-header">
+    <div v-if="!showContractEditor" class="generate-header">
       <div class="generate-animation" :class="{ 'animation-done': isDone }">
         <div class="pulse-ring"></div>
         <div class="pulse-ring delay-1"></div>
         <div class="ai-icon seal">{{ isDone ? '成' : '墨' }}</div>
       </div>
-      <h2>{{ isDone ? '大纲生成完成！' : 'AI 正在构思大纲...' }}</h2>
+      <h2>{{ !contractConfirmed ? '先确认作品契约' : choosingSkeleton ? '先确认故事骨架' : isDone ? '检查大纲草稿' : generationBusy ? 'AI 正在构思...' : '准备故事规划' }}</h2>
       <p v-if="isDone" class="generate-ready-hint">先检查和调整，再继续规划。</p>
+      <p v-if="creationDraft" class="structured-plan-status" role="status">
+        结构化创作流程：{{ creationStageLabel }}<span v-if="creationDraft.skeletons.length"> · 已提取 {{ creationDraft.skeletons.length }} 个故事骨架候选</span>
+      </p>
       <ol v-if="isDone" class="generation-steps" aria-label="创作进度"><li class="done">✓ 生成大纲</li><li :class="{ active: !acceptingOutline }">2 检查确认</li><li :class="{ active: acceptingOutline }">3 分卷规划</li></ol>
-      <p v-if="!isDone && !hasError" class="generate-hint">
-        正在根据你的设定生成总大纲，这可能需要 30 秒 ~ 2 分钟
+      <p v-if="generationBusy && !hasError" class="generate-hint">
+        正在生成候选；已有方向、作者输入和输出记录会保留。
       </p>
       <p v-if="hasError" class="generate-error">{{ errorMessage }}</p>
     </div>
+    <p v-if="showContractEditor && hasError" class="generate-error" role="alert">{{ errorMessage }}</p>
+
+    <StoryContractEditor v-if="creationDraft && (!contractConfirmed || editingContract)" :contract="contractInput || creationDraft.contract"
+      :exploration="contractExploration" :flush="flushContractRecovery" :busy="initializing || contractBusy || generationBusy || acceptingOutline"
+      :cancelable="editingContract && contractConfirmed"
+      @change="changeContractInput" @exploring="setContractExploring" @save="saveContract" @confirm="confirmContract" @cancel="editingContract = false" />
+    <n-button v-else-if="contractConfirmed" :disabled="generationBusy || acceptingOutline || editingOutline" @click="openContractEditor">查看或修改作品契约</n-button>
+    <CreationEntrySource v-if="creationDraft?.initialInput && creationDraft.initialInput.method !== 'custom'" :input="creationDraft.initialInput" />
+
+    <StorySkeletonPicker v-if="choosingSkeleton && creationDraft"
+      :skeletons="skeletonOptions" :selected-id="selectedSkeletonId"
+      :confirmed-id="skeletonConfirmed ? creationDraft.selectedSkeletonId : undefined" :dirty="!!skeletonDraft"
+      :busy="generationBusy || contractBusy || acceptingOutline" :has-outline="isDone" @select="selectSkeleton" @edit="editSkeleton" @confirm="confirmSkeletonAndGenerate"
+      @save="saveSkeleton" @create="createSkeleton" @mix="mixSkeletons" @regenerate="requestSkeletonGeneration()" />
+    <StorySkeletonHistory v-if="creationDraft && !editingContract" :history="creationDraft.skeletonHistory || []" :attempts="creationDraft.skeletonAttempts || []"
+      :busy="generationBusy || contractBusy || acceptingOutline" @restore="restoreSkeleton" @recover="recoverSkeletonOutput"
+      @retry="id => requestSkeletonGeneration('retry', id)" @continue="id => requestSkeletonGeneration('continue', id)" />
+    <section v-if="creationDraft?.editorDrafts?.length" class="paper-panel recovery-panel" aria-label="暂存输入恢复">
+      <h3>作者暂存输入</h3><p>包含未保存为候选的修改与冲突草稿；恢复保留原打开基线。</p>
+      <button v-for="draft in creationDraft.editorDrafts" :key="draft.id" :disabled="generationBusy || contractBusy" @click="restoreEditorDraft(draft)">恢复 {{ draft.updatedAt }} 的输入（{{ draft.savedAt ? '已保存版本' : '未提交' }}）</button>
+      <n-button :disabled="generationBusy || contractBusy" @click="rebindEditorDraft">已核对当前设定，另存输入草稿</n-button>
+    </section>
+    <n-button v-if="contractConfirmed && !editingContract && !generationBusy && !isDone && !creationDraft?.skeletons.length"
+      :disabled="contractBusy" @click="requestSkeletonGeneration()">生成故事骨架候选</n-button>
+    <n-button v-if="generationBusy" @click="cancelGeneration">停止生成并保留输出</n-button>
+    <n-button v-if="skeletonConfirmed && !generationBusy && !isDone" @click="startGenerate">按已确认方向生成大纲</n-button>
+    <section v-if="contractConfirmed && !editingContract && !generationBusy && !isDone" class="manual-outline paper-panel" aria-label="手动准备大纲">
+      <h3>已有大纲或手动设计</h3>
+      <p>可以粘贴已有大纲，或直接写下故事前提、分卷方向和结局，再检查提取出的故事骨架。</p>
+      <n-input v-model:value="manualOutline" type="textarea" :rows="10" aria-label="手写或粘贴大纲" placeholder="例如：## 小说简介、## 第一卷、## 结局方向" />
+      <n-button :disabled="!manualOutline.trim() || contractBusy" @click="saveManualOutline">保存大纲并核对骨架</n-button>
+    </section>
 
     <!-- 流式输出内容 -->
-    <div class="output-container paper-panel" v-if="streamContent || isDone">
-      <div v-if="isDone" class="outline-edit-toolbar" role="toolbar" aria-label="大纲编辑操作">
+    <div class="output-container paper-panel" v-if="!showContractEditor && (streamContent || isDone || editingOutline)">
+      <div v-if="isDone || editingOutline" class="outline-edit-toolbar" role="toolbar" aria-label="大纲编辑操作">
         <h3>大纲草稿 <span>已生成</span></h3>
         <span v-if="acceptingOutline" class="outline-edit-status" role="status">正在规划分卷，完成后可在工作区编辑大纲</span>
-        <n-button v-if="!editingOutline" :disabled="acceptingOutline" @click="startOutlineEdit">
+        <n-button v-if="!editingOutline" :disabled="acceptingOutline || generationBusy || contractBusy" @click="startOutlineEdit">
           <template #icon><n-icon><create-outline /></n-icon></template>编辑大纲
         </n-button>
         <template v-else>
-          <n-button @click="editingOutline = false">取消修改</n-button>
-          <n-button type="primary" :disabled="!outlineDraft.trim()" @click="saveOutlineEdit">
+          <n-button :disabled="contractBusy" @click="editingOutline = false">取消修改</n-button>
+          <n-button type="primary" :loading="contractBusy" :disabled="contractBusy || generationBusy || !outlineDraft.trim()" @click="saveOutlineEdit">
             <template #icon><n-icon><save-outline /></n-icon></template>保存修改
           </n-button>
         </template>
       </div>
       <div class="outline-output-scroll" tabindex="0" aria-label="大纲正文">
-        <n-input v-if="editingOutline" v-model:value="outlineDraft" type="textarea" :rows="24" aria-label="编辑生成的大纲" />
+        <n-input v-if="editingOutline" v-model:value="outlineDraft" :disabled="contractBusy || generationBusy" type="textarea" :rows="24" aria-label="编辑生成的大纲" />
         <div v-else class="output-content" v-html="renderedContent"></div>
-        <div v-if="!isDone && !hasError" class="typing-cursor">▌</div>
+        <div v-if="generationBusy && !hasError" class="typing-cursor">▌</div>
       </div>
     </div>
 
-    <!-- 操作按钮 -->
-    <div class="generate-actions" v-if="isDone">
-      <div class="title-picker paper-panel">
-        <div class="title-picker-header">
-          <strong>选择书名</strong>
-          <span>可直接修改后确认</span>
-        </div>
-        <div class="title-options" v-if="titleCandidates.length">
-          <button
-            v-for="title in titleCandidates"
-            :key="title"
-            class="title-option"
-            :class="{ active: selectedTitle === title }"
-            @click="selectedTitle = title"
-          >
-            《{{ title }}》
-          </button>
-        </div>
-        <n-input v-model:value="selectedTitle" placeholder="输入最终书名" />
+    <section v-if="!showContractEditor && isDone && skeletonConfirmed && selectedSkeleton" class="skeleton-candidates paper-panel" aria-label="已确认故事骨架">
+      <div class="skeleton-candidates-header">
+        <div><h3>已确认方向：{{ selectedSkeleton.title }}</h3><p>{{ selectedSkeleton.logline }}</p></div>
       </div>
-      <n-button @click="regenerate" size="large" :disabled="acceptingOutline || editingOutline">重新生成</n-button>
-      <n-button type="primary" size="large" :loading="acceptingOutline" :disabled="acceptingOutline || editingOutline || !visibleOutlineContent" @click="acceptOutline">确认并规划分卷</n-button>
+    </section>
+
+    <!-- 操作按钮 -->
+    <div class="generate-actions" v-if="!showContractEditor && isDone">
+      <p>作品名称：{{ creationDraft?.contract.title }}（可在作品契约中修改）</p>
+      <n-button @click="regenerate" size="large" :disabled="acceptingOutline || editingOutline || editingContract || !skeletonConfirmed">重新生成</n-button>
+      <n-button type="primary" size="large" :loading="acceptingOutline" :disabled="acceptingOutline || generationBusy || contractBusy || editingOutline || editingContract || !skeletonConfirmed || !visibleOutlineContent || creationDraft?.outlineCandidate?.complete === false" @click="acceptOutline">确认并规划分卷</n-button>
     </div>
 
     <div class="generate-actions" v-if="hasError">
       <n-button @click="$router.push('/')" size="large">返回书架</n-button>
       <n-button @click="$router.push('/settings')" size="large">检查设置</n-button>
-      <n-button type="primary" @click="startGenerate" size="large">重试</n-button>
+      <n-button v-if="skeletonConfirmed" type="primary" @click="startGenerate" size="large" :disabled="generationBusy">重试大纲生成</n-button>
+      <n-button :disabled="generationBusy || contractBusy" @click="retryRecoverySaves">重试保存保留的输入与输出</n-button>
     </div>
 
     <!-- 未配置提示 -->
@@ -79,41 +104,260 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, onUnmounted } from 'vue'
+import { ref, watch, onMounted, computed, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NAlert, NInput, NIcon, useMessage } from 'naive-ui'
 import { CreateOutline, SaveOutline } from '@vicons/ionicons5'
 import { useNovelStore } from '@/stores/novel'
+import { useReconstructionWorkspaceStore } from '@/stores/reconstructionWorkspace'
 import { useConfigStore } from '@/stores/config'
-import { callAI } from '@/services/ai'
+import { callAI, applySkillInstructions } from '@/services/ai'
+import { startAiActivity, finishAiActivity, activeAiCount, type AiActivity } from '@/services/aiActivity'
+import { registerDraftSaver, type DraftFlushToken } from '@/services/appLifecycle'
+import { skeletonCompletionIssues } from '@/services/creationDraft'
+import { readShellPref } from '@/v3/shell'
 import { buildOutlinePrompt } from '@/services/prompts'
-import { generateStoryArcDrafts } from '@/services/storyPlanning'
 import { renderMd } from '@/utils/markdown'
-import { parseVolumesFromText } from '@/services/volumeParsing'
+import { buildConfirmedSkeletonConstraint, buildPlotSkeletonPrompt } from '@/services/reconstructionCreation'
+import type { CreationEdit } from '@/services/creationTransactions'
+import { safeAiErrorMessage, structuredOutputDiagnostic } from '@/services/aiDiagnostics'
+import { parsePlotSkeletonResponse, recoverPartialSkeletons } from '@/services/plotSkeletonResponse'
+import StorySkeletonPicker from '@/components/StorySkeletonPicker.vue'
+import StorySkeletonHistory from '@/components/StorySkeletonHistory.vue'
+import StoryContractEditor from '@/components/StoryContractEditor.vue'
+import CreationEntrySource from '@/components/CreationEntrySource.vue'
+import type { PlotSkeleton, StoryContract, ContractExploration, CreationEditorDraft, SkeletonGenerationAttempt, SkeletonSourceSelection } from '@/types/reconstruction'
 
 const route = useRoute()
+const emit = defineEmits<{ step: [value: number] }>()
 const router = useRouter()
 const novelStore = useNovelStore()
+const reconstructionWorkspaceStore = useReconstructionWorkspaceStore()
 const configStore = useConfigStore()
 const message = useMessage()
 
 const novelId = route.params.novelId as string
 const novel = computed(() => novelStore.getNovel(novelId))
+const creationDraft = computed(() => reconstructionWorkspaceStore.getCreationDraft(novelId))
+const skeletonDraft = ref<PlotSkeleton>()
+const selectedSkeletonId = computed(() => skeletonDraft.value?.id || creationDraft.value?.editingSkeletonId || creationDraft.value?.selectedSkeletonId)
+const skeletonOptions = computed(() => {
+  const pending = skeletonDraft.value
+  return creationDraft.value?.skeletons.map(item => pending && item.id === pending.id ? pending : item) || []
+})
+const selectedSkeleton = computed(() => creationDraft.value?.skeletons.find(item => item.id === creationDraft.value?.selectedSkeletonId))
+const editingContract = ref(false)
+const initializing = ref(true)
+const contractBusy = ref(false)
+const contractInput = ref<StoryContract>()
+const contractExploration = ref<ContractExploration>({ input: '', messages: [] })
+const contractExploring = ref(false)
+let contractBaseline = ''
+let contractSessionId: string = crypto.randomUUID()
+const contractConfirmed = computed(() => creationDraft.value?.approval.contract === 'approved' && creationDraft.value?.contract.approval === 'approved')
+const showContractEditor = computed(() => !!creationDraft.value && (!contractConfirmed.value || editingContract.value))
+const skeletonConfirmed = computed(() => contractConfirmed.value && creationDraft.value?.approval.skeleton === 'approved' && selectedSkeleton.value?.approval === 'approved')
+const choosingSkeleton = computed(() => contractConfirmed.value && !editingContract.value)
+const creationStageLabel = computed(() => ({
+  contract: '作品契约', skeleton: '故事骨架', 'volume-outline': '卷级大纲', 'chapter-outline': '章节大纲', 'scene-outline': '场景设计', ready: '可以开始写作',
+}[creationDraft.value?.stage || 'skeleton']))
+
+let pageBaseline = ''
+let skeletonEditBaseline = ''
+async function commitCreation(edit: CreationEdit, baseline = pageBaseline) {
+  const result = await reconstructionWorkspaceStore.commitCreationEdit(novelId, edit, baseline)
+  pageBaseline = result.baseline
+  return result
+}
+function openContractEditor() {
+  pageBaseline = reconstructionWorkspaceStore.captureCreationEditBaseline(novelId)
+  editingContract.value = true
+}
 
 const streamContent = ref('')
 const isDone = ref(false)
 const hasError = ref(false)
 const errorMessage = ref('')
-const selectedTitle = ref('')
 const acceptingOutline = ref(false)
 const editingOutline = ref(false)
 const outlineDraft = ref('')
+const generationBusy = ref(false)
+const manualOutline = ref('')
 let abortController: AbortController | null = null
+let disposed = false
+let editorReady = false
+let editorSessionId: string = crypto.randomUUID()
+let editorBaseline = ''
+let skeletonSessionId: string = crypto.randomUUID()
+let manualSessionId: string = crypto.randomUUID()
+let manualBaseline = ''
+let editorWrite: Promise<unknown> = Promise.resolve()
+const pendingEditors = new Map<string, CreationEditorDraft>()
+const pendingAttempts = new Map<string, SkeletonGenerationAttempt>()
+watch(() => showContractEditor.value ? 1 : isDone.value ? 3 : 2, value => emit('step', value), { immediate: true })
+function setContractExploring(value: boolean) {
+  contractExploring.value = value
+  if (disposed && !value && !generationBusy.value && !pendingEditors.size && !pendingAttempts.size) unregisterDraftSaver()
+}
+function changeContractInput(contract: StoryContract, exploration?: ContractExploration) {
+  if (initializing.value) return
+  contractInput.value = JSON.parse(JSON.stringify(contract))
+  if (exploration) contractExploration.value = JSON.parse(JSON.stringify(exploration))
+  contractBaseline ||= pageBaseline
+  void queueEditorDraft({ id: contractSessionId, surface: 'contract', baseline: contractBaseline, contract: contractInput.value,
+    exploration: contractExploration.value, manualOutline: '', outlineText: '', updatedAt: new Date().toISOString() }).catch(() => undefined)
+}
+async function flushContractRecovery() { await editorWrite }
+async function queueAttempt(attempt: SkeletonGenerationAttempt, token?: DraftFlushToken) {
+  const snapshot = JSON.parse(JSON.stringify(attempt)) as SkeletonGenerationAttempt
+  pendingAttempts.set(snapshot.id, snapshot)
+  await reconstructionWorkspaceStore.saveCreationRecovery(novelId, { kind: 'attempt', value: snapshot }, token)
+  if (pendingAttempts.get(snapshot.id) === snapshot) pendingAttempts.delete(snapshot.id)
+  if (disposed && !generationBusy.value && !contractExploring.value && !pendingEditors.size && !pendingAttempts.size) unregisterDraftSaver()
+}
+function queueEditorDraft(draft: CreationEditorDraft, token?: DraftFlushToken) {
+  pendingEditors.set(draft.id, draft)
+  editorWrite = reconstructionWorkspaceStore.saveCreationRecovery(novelId, { kind: 'editor', value: draft }, token).then(() => {
+    if (pendingEditors.get(draft.id) === draft) pendingEditors.delete(draft.id)
+    if (disposed && !generationBusy.value && !contractExploring.value && !pendingEditors.size && !pendingAttempts.size) unregisterDraftSaver()
+  }).catch(error => {
+    if (!disposed) { hasError.value = true; errorMessage.value = '输入暂存失败：' + safeAiErrorMessage(error) }
+    throw error
+  })
+  void editorWrite.catch(() => undefined)
+  return editorWrite
+}
+const unregisterDraftSaver = registerDraftSaver(async token => {
+  do {
+    await editorWrite.catch(() => undefined)
+    let failure: unknown
+    for (const [id, draft] of [...pendingEditors]) if (pendingEditors.get(id) === draft) {
+      try { await queueEditorDraft(draft, token) } catch (error) { failure ||= error }
+    }
+    for (const [id, attempt] of [...pendingAttempts]) if (pendingAttempts.get(id) === attempt) {
+      try { await queueAttempt(attempt, token) } catch (error) { failure ||= error }
+    }
+    if (failure) throw failure
+  } while (pendingEditors.size || pendingAttempts.size)
+  if (disposed && !generationBusy.value && !contractExploring.value) unregisterDraftSaver()
+})
+watch(skeletonDraft, () => {
+  if (!editorReady || disposed) return
+  if (skeletonDraft.value) void queueEditorDraft({ id: skeletonSessionId, surface: 'skeleton', baseline: skeletonEditBaseline,
+    skeleton: skeletonDraft.value, manualOutline: '', outlineText: '', updatedAt: new Date().toISOString() }).catch(() => undefined)
+}, { deep: true, flush: 'sync' })
+watch(manualOutline, () => {
+  if (!editorReady || disposed) return
+  manualBaseline ||= pageBaseline
+  void queueEditorDraft({ id: manualSessionId, surface: 'manual-outline', baseline: manualBaseline,
+    manualOutline: manualOutline.value, outlineText: '', updatedAt: new Date().toISOString() }).catch(() => undefined)
+}, { flush: 'sync' })
+watch(outlineDraft, () => {
+  if (!editorReady || disposed) return
+  editorBaseline ||= pageBaseline
+  void queueEditorDraft({ id: editorSessionId, surface: 'outline', baseline: editorBaseline,
+    manualOutline: '', outlineText: outlineDraft.value, updatedAt: new Date().toISOString() }).catch(() => undefined)
+}, { flush: 'sync' })
+async function markEditorSaved(id: string) {
+  const current = creationDraft.value?.editorDrafts?.find(item => item.id === id)
+  if (current) {
+    try { await queueEditorDraft({ ...current, savedAt: new Date().toISOString() }) }
+    catch { message.warning('候选版本已经保存；暂存记录的完成标记尚未落盘，可重试保存') }
+  }
+}
+function restoreEditorDraft(draft: CreationEditorDraft, fork = true) {
+  if (generationBusy.value || contractBusy.value || contractExploring.value) return
+  editorReady = false
+  if (draft.contract) {
+    contractSessionId = fork ? crypto.randomUUID() : draft.id; contractBaseline = draft.baseline
+    contractInput.value = JSON.parse(JSON.stringify(draft.contract))
+    contractExploration.value = JSON.parse(JSON.stringify(draft.exploration || { input: '', messages: [] }))
+    for (const item of contractExploration.value.messages) if (item.status === 'running') item.status = 'interrupted'
+    editingContract.value = true
+  }
+  if (draft.skeleton) {
+    skeletonSessionId = fork ? crypto.randomUUID() : draft.id; skeletonEditBaseline = draft.baseline
+    skeletonDraft.value = JSON.parse(JSON.stringify(draft.skeleton))
+  }
+  if (draft.surface === 'manual-outline' || draft.manualOutline) {
+    manualSessionId = fork ? crypto.randomUUID() : draft.id; manualBaseline = draft.baseline; manualOutline.value = draft.manualOutline
+  }
+  if (draft.surface === 'outline' || draft.outlineText) {
+    editorSessionId = fork ? crypto.randomUUID() : draft.id; editorBaseline = draft.baseline; outlineDraft.value = draft.outlineText
+    editingOutline.value = !!draft.outlineText
+  }
+  editorReady = true
+}
+async function rebindEditorDraft() {
+  if (generationBusy.value || contractBusy.value || contractExploring.value || acceptingOutline.value) return
+  await editorWrite.catch(() => undefined)
+  pageBaseline = reconstructionWorkspaceStore.captureCreationEditBaseline(novelId)
+  editorSessionId = crypto.randomUUID(); skeletonSessionId = crypto.randomUUID(); manualSessionId = crypto.randomUUID()
+  editorBaseline = pageBaseline; skeletonEditBaseline = pageBaseline; manualBaseline = pageBaseline
+  contractBaseline = pageBaseline; contractSessionId = crypto.randomUUID()
+  try {
+    if (contractInput.value) changeContractInput(contractInput.value)
+    await editorWrite
+    if (skeletonDraft.value) await queueEditorDraft({ id: skeletonSessionId, surface: 'skeleton', baseline: pageBaseline, skeleton: skeletonDraft.value, manualOutline: '', outlineText: '', updatedAt: new Date().toISOString() })
+    if (manualOutline.value) await queueEditorDraft({ id: manualSessionId, surface: 'manual-outline', baseline: pageBaseline, manualOutline: manualOutline.value, outlineText: '', updatedAt: new Date().toISOString() })
+    if (outlineDraft.value) await queueEditorDraft({ id: editorSessionId, surface: 'outline', baseline: pageBaseline, manualOutline: '', outlineText: outlineDraft.value, updatedAt: new Date().toISOString() })
+    hasError.value = false
+  }
+  catch (error) { message.error(safeAiErrorMessage(error)) }
+}
+async function retryRecoverySaves() {
+  if (generationBusy.value || contractBusy.value) return
+  try {
+    for (const draft of [...pendingEditors.values()]) await queueEditorDraft(draft)
+    for (const attempt of [...pendingAttempts.values()]) await queueAttempt(attempt)
+    hasError.value = false; message.success('保留的输入与输出已保存')
+  } catch (error) { message.error(safeAiErrorMessage(error)) }
+}
+function cancelGeneration() { abortController?.abort(new DOMException('作者停止生成', 'AbortError')) }
 
 // Markdown 渲染
 const visibleOutlineContent = computed(() => sanitizeOutlineContent(streamContent.value))
 const renderedContent = computed(() => renderMd(visibleOutlineContent.value))
-const titleCandidates = computed(() => extractTitleCandidates(visibleOutlineContent.value))
+
+async function storeContract(contract: StoryContract, confirm: boolean) {
+  if (initializing.value || !creationDraft.value || contractBusy.value || contractExploring.value || generationBusy.value || acceptingOutline.value) return
+  contractBusy.value = true
+  try {
+    await editorWrite
+    await commitCreation({ action: 'contract', contract, confirm }, contractBaseline || pageBaseline)
+    await markEditorSaved(contractSessionId)
+    contractInput.value = JSON.parse(JSON.stringify(creationDraft.value.contract))
+    contractBaseline = pageBaseline; contractSessionId = crypto.randomUUID()
+    if (confirm) {
+      editingContract.value = false
+      hasError.value = false
+    }
+    message.success(confirm ? '作品契约已确认' : '作品契约草稿已保存')
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '作品契约保存失败')
+  } finally {
+    contractBusy.value = false
+  }
+}
+function saveContract(contract: StoryContract) { return storeContract(contract, false) }
+function confirmContract(contract: StoryContract) { return storeContract(contract, true) }
+
+async function saveManualOutline() {
+  if (!novel.value || !creationDraft.value || !contractConfirmed.value || contractBusy.value || generationBusy.value || !manualOutline.value.trim()) return
+  contractBusy.value = true
+  try {
+    const text = sanitizeOutlineContent(manualOutline.value)
+    if (!text) throw new Error('请填写有效的大纲内容')
+    await editorWrite
+    await commitCreation({ action: 'outline-candidate', content: text, source: 'author', importSkeleton: true }, manualBaseline || pageBaseline)
+    await markEditorSaved(manualSessionId)
+    streamContent.value = text
+    isDone.value = true
+    hasError.value = false
+    message.success('大纲已保存，请核对故事骨架')
+  } catch (error) { message.error(error instanceof Error ? error.message : '大纲保存失败') }
+  finally { contractBusy.value = false }
+}
 
 function sanitizeOutlineContent(text: string): string {
   return text
@@ -145,53 +389,148 @@ function isOutlineComplete(text: string): boolean {
   return requiredPatterns.every(pattern => pattern.test(clean))
 }
 
-function buildOutlineContinueMessages(currentText: string) {
-  const clean = sanitizeOutlineContent(currentText)
-  return [
-    {
-      role: 'system' as const,
-      content: '你是一位资深网文策划师。请只续写小说总大纲缺失部分，不要重复已有内容，不要输出思考过程或 thinking 标签。',
-    },
-    {
-      role: 'user' as const,
-      content: `下面的大纲尚未完整生成。请从中断处自然续写，补齐缺失小节。
-
-【必须补齐的小节】
-- 主要角色表
-- 核心冲突与爽点设计
-- 分卷建议
-- 预估总字数分配
-- 全书伏笔线
-
-【续写规则】
-1. 不要重复已经写过的内容。
-2. 不要输出 <thinking>、analysis、reasoning、思考过程。
-3. 直接输出剩余 Markdown 大纲内容。
-4. 如果上一句明显中断，请先补完上一句，再继续后续小节。
-
-【当前已生成大纲末尾】
-${clean.slice(-5000)}`,
-    },
-  ]
+async function selectSkeleton(skeletonId: string) {
+  if (generationBusy.value || contractBusy.value) return
+  if (skeletonDraft.value) { message.warning('请先保存当前作者版本，输入也已留在暂存记录中'); return }
+  await actOnSkeleton({ action: 'skeleton', selectedId: skeletonId })
+}
+function editSkeleton(skeleton: PlotSkeleton) {
+  if (generationBusy.value || contractBusy.value) return
+  if (!skeletonDraft.value) { skeletonEditBaseline = pageBaseline; skeletonSessionId = crypto.randomUUID() }
+  skeletonDraft.value = JSON.parse(JSON.stringify(skeleton))
+}
+async function saveSkeleton() {
+  if (generationBusy.value || contractBusy.value) return
+  const pending = skeletonDraft.value || skeletonOptions.value.find(item => item.id === selectedSkeletonId.value)
+  if (!pending) return
+  contractBusy.value = true
+  try {
+    await editorWrite
+    const complete = skeletonCompletionIssues({ ...pending, complete: true }).length === 0
+    await commitCreation({ action: 'skeleton', selectedId: pending.id, skeleton: { ...pending, complete }, authorComplete: complete }, skeletonDraft.value ? skeletonEditBaseline : pageBaseline)
+    await markEditorSaved(skeletonSessionId)
+    skeletonEditBaseline = pageBaseline; skeletonDraft.value = undefined
+    hasError.value = false; message.success(complete ? '作者版本已保存，可以确认故事方向' : '未完成的作者版本已保存，补齐后才能确认')
+  } catch (error) { hasError.value = true; errorMessage.value = safeAiErrorMessage(error); message.error(errorMessage.value) }
+  finally { contractBusy.value = false }
+}
+async function actOnSkeleton(edit: CreationEdit) {
+  if (generationBusy.value || contractBusy.value || acceptingOutline.value) return
+  if (skeletonDraft.value) { message.warning('请先保存当前作者版本，再切换或添加候选'); return }
+  contractBusy.value = true
+  try { await editorWrite; await commitCreation(edit); hasError.value = false }
+  catch (error) { hasError.value = true; errorMessage.value = safeAiErrorMessage(error); message.error(errorMessage.value) }
+  finally { contractBusy.value = false }
+}
+function createSkeleton() { return actOnSkeleton({ action: 'new-skeleton' }) }
+function mixSkeletons(sources: SkeletonSourceSelection[]) { return actOnSkeleton({ action: 'mix-skeleton', sources }) }
+function restoreSkeleton(revisionId: string) { return actOnSkeleton({ action: 'restore-skeleton', revisionId }) }
+function recoverSkeletonOutput(attemptId: string) { return actOnSkeleton({ action: 'recover-skeleton-output', attemptId }) }
+async function confirmSkeletonAndGenerate() {
+  if (!creationDraft.value || generationBusy.value || contractBusy.value) return
+  if (skeletonDraft.value) { message.warning('请先明确保存作者版本'); return }
+  contractBusy.value = true
+  try {
+    await editorWrite
+    await commitCreation({ action: 'confirm-skeleton' })
+    message.success('正式故事方向已确认；需要 AI 展开时请点击生成大纲')
+  } catch (error) { message.error(safeAiErrorMessage(error, configStore.models.map(model => model.apiKey))) }
+  finally { contractBusy.value = false }
 }
 
-function extractTitleCandidates(text: string): string[] {
-  const candidates: string[] = []
-  const titleSection = text.match(/##\s*推荐书名([\s\S]+?)(?=##\s|$)/)
-  const source = titleSection?.[1] || text
-  const regex = /《([^《》\n]{2,24})》/g
-  let match: RegExpExecArray | null
-  while ((match = regex.exec(source))) {
-    const title = match[1].trim()
-    if (title && !candidates.includes(title)) candidates.push(title)
+
+async function requestSkeletonGeneration(mode: SkeletonGenerationAttempt['mode'] = 'generate', parentId?: string) {
+  if (disposed || generationBusy.value || contractBusy.value || acceptingOutline.value) return
+  if (!novel.value || !creationDraft.value || !contractConfirmed.value || editingContract.value) { message.warning('请先确认作品契约'); return }
+  const configured = configStore.getModelForTask('outline')
+  const model = configured ? { ...configured } : undefined
+  if (!model) { message.warning('请先配置大纲模型；手写与混合方案无需模型'); return }
+  let activity: AiActivity | undefined, attempt: SkeletonGenerationAttempt | undefined
+  let checkpoint: Promise<void> = Promise.resolve(), checkpointError: unknown
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let committed = false
+  const controller = new AbortController(); abortController = controller
+  const persistAttempt = () => {
+    if (!attempt) return Promise.resolve()
+    attempt.updatedAt = new Date().toISOString()
+    checkpoint = queueAttempt(attempt)
+    void checkpoint.catch(error => { checkpointError = error; controller.abort(new DOMException('输出暂存失败，已停止生成', 'AbortError')) })
+    return checkpoint
   }
-  return candidates.slice(0, 8)
+  try {
+    activity = startAiActivity('骨架生成与恢复保存')
+    generationBusy.value = true; hasError.value = false
+    await editorWrite
+    if (pageBaseline !== reconstructionWorkspaceStore.captureCreationEditBaseline(novelId)) throw new Error('作品设定或候选已变化，请核对当前设定后再发起请求；暂存输入仍保留')
+    const parent = parentId ? creationDraft.value.skeletonAttempts?.find(item => item.id === parentId) : undefined
+    if (mode !== 'generate' && !parent) throw new Error('原请求不存在')
+    const messages = applySkillInstructions([
+      { role: 'system', content: '你是长篇小说结构编辑，只输出严格 JSON。所有结果都是待作者确认的候选。' },
+      { role: 'user', content: buildPlotSkeletonPrompt(creationDraft.value.contract) },
+    ], configStore.getSkillPrompt('planning'))
+    if (parent && mode === 'continue') messages.push({ role: 'user', content: '下面是上次保留的部分输出。请参考已有方向补齐，重新输出完整可解析的 skeletons JSON 对象（包含所有字段和关键节点）。原输出仅作参考，仍须遵守本次作品契约。\n' + parent.output })
+    const now = new Date().toISOString()
+    attempt = { id: crypto.randomUUID(), parentAttemptId: parent?.id, mode, status: 'queued', baseline: pageBaseline, modelId: model.id,
+      modelSettings: { modelName: model.modelName, maxTokens: model.maxTokens, temperature: model.temperature, topP: model.topP },
+      messages, output: '', candidateIds: [], createdAt: now, updatedAt: now }
+    await persistAttempt()
+    controller.signal.throwIfAborted()
+    if (attempt.baseline !== reconstructionWorkspaceStore.captureCreationEditBaseline(novelId)) throw new Error('请求准备期间设定变化，未发送请求')
+    attempt.status = 'running'; await persistAttempt()
+    controller.signal.throwIfAborted()
+    if (attempt.baseline !== reconstructionWorkspaceStore.captureCreationEditBaseline(novelId)) throw new Error('请求发出前设定变化，未发送请求')
+    const response = await callAI({ model: { ...model }, messages: attempt.messages, taskName: '生成故事骨架候选', activityParentId: activity.id,
+      noAutomaticRetry: true, stream: true, signal: controller.signal, onChunk: chunk => {
+        attempt!.output += chunk
+        if (!timer) timer = setTimeout(() => { timer = undefined; void persistAttempt().catch(() => undefined) }, 350)
+      } })
+    clearTimeout(timer); timer = undefined; await checkpoint
+    if (checkpointError) throw checkpointError
+    if (!attempt.output) attempt.output = response.content
+    attempt.finishReason = response.finishReason
+    let candidates: PlotSkeleton[]
+    try { candidates = parsePlotSkeletonResponse(novel.value!, { ...response, content: attempt.output }, new Date().toISOString()) }
+    catch (error) { attempt.error = safeAiErrorMessage(error); candidates = recoverPartialSkeletons(novel.value!, attempt.output, new Date().toISOString()) }
+    const complete = candidates.length > 0 && candidates.every(item => item.complete !== false) && (!response.finishReason || response.finishReason === 'stop')
+    attempt.status = complete ? 'completed' : 'partial'
+    await persistAttempt()
+    controller.signal.throwIfAborted()
+    if (disposed) throw new DOMException('页面已离开', 'AbortError')
+    candidates = candidates.map((item, index) => ({ ...item, id: 'skeleton:' + attempt!.id + ':' + index,
+      beats: item.beats.map((beat, beatIndex) => ({ ...beat, id: 'beat:' + attempt!.id + ':' + index + ':' + beatIndex })), complete: complete && item.complete !== false }))
+    if (candidates.length) {
+      try { await commitCreation({ action: 'skeleton-candidates', candidates, attemptId: attempt.id }, attempt.baseline); committed = true }
+      catch (error) { attempt.status = 'conflict'; throw error }
+    }
+    if (!complete) { hasError.value = true; errorMessage.value = '部分输出已保留；可明确续作、重试，或恢复后手工补齐并保存。' }
+  } catch (error) {
+    if (attempt) {
+      if (attempt.status !== 'conflict') attempt.status = controller.signal.aborted ? (disposed ? 'interrupted' : 'cancelled') : 'failed'
+      attempt.error = safeAiErrorMessage(checkpointError || error, configStore.models.map(item => item.apiKey))
+    }
+    if (!disposed) { hasError.value = true; errorMessage.value = attempt?.error || safeAiErrorMessage(error) }
+  } finally {
+    clearTimeout(timer)
+    try {
+      await checkpoint.catch(() => undefined)
+      if (attempt && !committed) await persistAttempt()
+    } catch (error) { if (!disposed) { hasError.value = true; errorMessage.value = '输出保存未完成，请重试保存：' + safeAiErrorMessage(error) } }
+    if (activity) finishAiActivity(activity, checkpointError)
+    generationBusy.value = false
+    if (disposed && !pendingEditors.size && !pendingAttempts.size) unregisterDraftSaver()
+  }
 }
 
 async function startGenerate() {
-  if (acceptingOutline.value) return
+  if (disposed || acceptingOutline.value || generationBusy.value || contractBusy.value) return
+  if (!contractConfirmed.value || editingContract.value) { message.warning('请先确认作品契约'); return }
+  if (!skeletonConfirmed.value) { message.warning('请先保存并确认一个故事骨架；生成新骨架请使用候选区按钮'); return }
   if (!novel.value) {
     message.error('找不到小说数据')
+    return
+  }
+  if (pageBaseline !== reconstructionWorkspaceStore.captureCreationEditBaseline(novelId)) {
+    message.warning('作品契约、规划或相关设定已经变化，请重新打开核对后再生成')
     return
   }
 
@@ -204,55 +543,69 @@ async function startGenerate() {
 
   abortController?.abort()
   editingOutline.value = false
-  streamContent.value = ''
-  isDone.value = false
   hasError.value = false
   errorMessage.value = ''
   abortController = new AbortController()
+  generationBusy.value = true
+  let generated = ''
+  const outlineRequestDraftId = crypto.randomUUID()
+  const requestBaseline = pageBaseline
+  let outlineCheckpointTimer: ReturnType<typeof setTimeout> | undefined
+  let outlineAccepted = false
+  const saveOutlinePartial = () => queueEditorDraft({ id: outlineRequestDraftId, surface: 'outline', baseline: requestBaseline,
+    manualOutline: '', outlineText: generated, savedAt: outlineAccepted ? new Date().toISOString() : undefined, updatedAt: new Date().toISOString() })
+  let activity: AiActivity | undefined
 
   try {
+    activity = startAiActivity('大纲生成与草稿保存')
+    await editorWrite
+    abortController.signal.throwIfAborted()
+    if (disposed) return
+    if (!skeletonConfirmed.value) return
+    if (requestBaseline !== reconstructionWorkspaceStore.captureCreationEditBaseline(novelId)) throw new Error('生成前设定发生变化，请重新核对；原有输入已保留')
     const messages = buildOutlinePrompt(novel.value)
-    await callAI({
-      model,
-      skillTask: 'planning',
-      messages,
-      stream: true,
+    messages.push({ role: 'user', content: buildConfirmedSkeletonConstraint(creationDraft.value!) })
+    const response = await callAI({
+      model, skillTask: 'planning', messages, stream: true, noAutomaticRetry: true,
       signal: abortController.signal,
-      onChunk: (chunk) => {
-        streamContent.value += chunk
+      activityParentId: activity.id,
+      onChunk: chunk => {
+        generated += chunk
+        // Keep the existing candidate visible until a complete replacement is saved.
+        if (!outlineCheckpointTimer) outlineCheckpointTimer = setTimeout(() => {
+          outlineCheckpointTimer = undefined
+          void saveOutlinePartial().catch(() => abortController?.abort())
+        }, 350)
       },
     })
-    streamContent.value = sanitizeOutlineContent(streamContent.value)
-
-    let continueCount = 0
-    while (!isOutlineComplete(streamContent.value) && continueCount < 3 && !abortController.signal.aborted) {
-      continueCount += 1
-      message.info(`大纲未完整，正在自动补全第 ${continueCount} 次...`)
-      await callAI({
-        model,
-        skillTask: 'planning',
-        messages: buildOutlineContinueMessages(streamContent.value),
-        stream: true,
-        signal: abortController.signal,
-        onChunk: (chunk) => {
-          streamContent.value += chunk
-        },
-      })
-      streamContent.value = sanitizeOutlineContent(streamContent.value)
-    }
-    if (!isOutlineComplete(streamContent.value)) {
-      message.warning('大纲仍可能缺少部分小节，建议点击“重新生成”或手动补充后再确认')
-    }
-
+    abortController.signal.throwIfAborted()
+    if (disposed) return
+    const text = sanitizeOutlineContent(generated || response.content)
+    if (!text) throw new Error('大纲未返回可用正文（' + structuredOutputDiagnostic(response) + '）')
+    const complete = (!response.finishReason || response.finishReason === 'stop') && isOutlineComplete(text)
+    await commitCreation({ action: 'outline-candidate', content: text, source: 'model', complete }, requestBaseline)
+    outlineAccepted = complete
+    streamContent.value = text
     isDone.value = true
-    // 保存大纲到小说数据
-    novelStore.updateOutline(novelId, sanitizeOutlineContent(streamContent.value))
+    if (!complete) {
+      hasError.value = true
+      errorMessage.value = '大纲候选未完整生成，请编辑补齐后保存，或手动重新生成（' + structuredOutputDiagnostic(response) + '）'
+    }
 
-    selectedTitle.value = titleCandidates.value[0] || novel.value.title
+
   } catch (err: any) {
     if (err.name === 'AbortError') return
     hasError.value = true
-    errorMessage.value = err.message || '生成失败，请检查 API 配置'
+    errorMessage.value = safeAiErrorMessage(err, configStore.models.map(model => model.apiKey)) || '生成失败，请检查 API 配置'
+  } finally {
+    clearTimeout(outlineCheckpointTimer)
+    if (generated) {
+      try { await saveOutlinePartial() }
+      catch (error) { if (!disposed) { hasError.value = true; errorMessage.value = '大纲部分输出尚未落盘：' + safeAiErrorMessage(error) } }
+    }
+    if (activity) finishAiActivity(activity)
+    generationBusy.value = false
+    if (disposed && !pendingEditors.size && !pendingAttempts.size) unregisterDraftSaver()
   }
 }
 
@@ -261,163 +614,89 @@ function regenerate() {
 }
 
 function startOutlineEdit() {
-  if (acceptingOutline.value) return
-  outlineDraft.value = visibleOutlineContent.value
+  if (acceptingOutline.value || generationBusy.value || contractBusy.value) return
+  pageBaseline = reconstructionWorkspaceStore.captureCreationEditBaseline(novelId)
+  editorSessionId = crypto.randomUUID(); editorBaseline = pageBaseline
+  outlineDraft.value = creationDraft.value?.outlineCandidate?.content || novel.value?.outline || visibleOutlineContent.value
   editingOutline.value = true
 }
 
-function saveOutlineEdit() {
+async function saveOutlineEdit() {
+  if (contractBusy.value || acceptingOutline.value || generationBusy.value) return
   const text = sanitizeOutlineContent(outlineDraft.value)
   if (!text) return
-  streamContent.value = text
-  novelStore.updateOutline(novelId, text)
-  editingOutline.value = false
-  message.success('大纲已保存，分卷将使用修改后的内容')
-}
-
-function parseAndSaveOutline(outlineText: string, novelId: string) {
-  const volumes = parseVolumesFromText(outlineText)
-  if (volumes.length > 0) {
-    novelStore.setVolumes(novelId, volumes)
-  }
-
-  // ── 2. 解析全书规划 ──────────────────────────────────────────────
-  const globalPlanSection = outlineText.match(/#{2,4}\s*(?:全书)?伏笔(?:线|线索|设计|追踪|规划)?([\s\S]+?)(?=#{2,4}\s|$)/)
-  if (globalPlanSection) {
-    const lines = globalPlanSection[1].split('\n').filter(line => line.trim().startsWith('-'))
-    for (const line of lines) {
-      const cleaned = line
-        .trim()
-        .replace(/^-\s*/, '')
-        .replace(/\*\*/g, '')
-        .replace(/^伏笔\s*\d*[：:：]?\s*/, '')
-        .trim()
-      if (!cleaned) continue
-      const [rawName = '', ...rest] = cleaned.split(/\s*[—–-]\s*/)
-      const namePart = rawName.replace(/[《》「」“”]/g, '').trim()
-      novelStore.addEvent(novelId, {
-        chapterIndex: -1,
-        title: namePart || '未命名全书规划',
-        description: rest.join(' - ').trim() || cleaned,
-        characters: [],
-        type: '伏笔',
-        scope: 'global',
-        status: 'planted',
-        hintCount: 0,
-        importance: 4,
-        source: 'ai',
-      })
-    }
-  }
-
-  // ── 3. 解析主要角色表 ────────────────────────────────────────────
-  // 匹配 ## 主要角色表 下面的 Markdown 表格行
-  const charSection = outlineText.match(/##\s*主要角色表([\s\S]+?)(?=##|$)/)
-  if (charSection) {
-    const tableLines = charSection[1].split('\n').filter(l => l.trim().startsWith('|'))
-    for (const line of tableLines) {
-      // 跳过表头和分隔行
-      if (line.includes('---') || line.includes('姓名') || line.includes(':-:')) continue
-      const cols = line.split('|').map(c => c.trim()).filter(Boolean)
-      if (cols.length < 2) continue
-      const cleanCell = (value: string) => value.replace(/\*\*/g, '').replace(/\*/g, '').trim()
-      const name = cleanCell(cols[0])
-      const role = cleanCell(cols[1] || '')
-      const personality = cleanCell(cols[2] || '')
-      const background = cleanCell(cols[3] || '')
-      if (!name || name === '---') continue
-      novelStore.addCharacter(novelId, {
-        name,
-        identity: role || '主要角色',
-        personality,
-        description: background,
-        relationships: [],
-        aliases: [],
-        powerLevel: '',
-        faction: '',
-        status: '活跃' as const,
-        firstAppearChapter: 0,
-        events: [],
-        avatarColor: '',
-      })
-    }
-  }
+  contractBusy.value = true
+  try {
+    await editorWrite
+    await commitCreation({ action: 'outline-candidate', content: text, source: 'author' }, editorBaseline || pageBaseline)
+    await markEditorSaved(editorSessionId)
+    hasError.value = false
+    streamContent.value = text
+    editingOutline.value = false
+    message.success('大纲已保存，分卷将使用修改后的内容')
+  } catch (error) { message.error(error instanceof Error ? error.message : '大纲保存失败') }
+  finally { contractBusy.value = false }
 }
 
 async function acceptOutline() {
-  if (acceptingOutline.value || editingOutline.value || !visibleOutlineContent.value) return
+  if (acceptingOutline.value || generationBusy.value || contractBusy.value || editingOutline.value || editingContract.value || !visibleOutlineContent.value) return
   acceptingOutline.value = true
   try {
-    if (selectedTitle.value.trim()) {
-      novelStore.updateTitle(novelId, selectedTitle.value.trim().replace(/[《》]/g, ''))
-    }
-    novelStore.updateOutline(novelId, visibleOutlineContent.value)
-    parseAndSaveOutline(visibleOutlineContent.value, novelId)
-
-    const confirmedNovel = novelStore.getNovel(novelId)
-    const model = configStore.getModelForTask('outline')
-    if (confirmedNovel?.outline && model && !(confirmedNovel.storyArcs || []).length) {
-      message.info('大纲已确认，正在自动提取故事弧线...')
-      try {
-        const drafts = await generateStoryArcDrafts(confirmedNovel, model)
-        const existingTitles = new Set((confirmedNovel.storyArcs || []).map(arc => arc.title.trim().toLowerCase()))
-        let createdCount = 0
-        for (const draft of drafts) {
-          if (existingTitles.has(draft.title.toLowerCase())) continue
-          const characterIds = confirmedNovel.characters
-            .filter(character => draft.characterNames.some(name => name === character.name || character.aliases.includes(name)))
-            .map(character => character.id)
-          const arc = novelStore.addStoryArc(novelId, {
-            title: draft.title,
-            description: draft.description,
-            type: draft.type,
-            importance: draft.importance,
-            status: 'active',
-            characterIds,
-          })
-          if (!arc) continue
-          for (const node of draft.nodes) {
-            novelStore.addStoryArcNode(novelId, arc.id, {
-              title: node.title,
-              description: node.description,
-              targetChapter: node.targetChapter - 1,
-            })
-          }
-          existingTitles.add(draft.title.toLowerCase())
-          createdCount += 1
-        }
-        if (createdCount) message.success(`已自动提取 ${createdCount} 条故事弧线`)
-      } catch {
-        message.warning('故事弧线自动提取失败，可在剧情规划页手动重试')
-      }
-    }
-
-    novelStore.setStatus(novelId, 'writing')
-    await router.push({
-      path: `/workspace/${novelId}/planning`,
-      query: { tab: 'volumes', onboarding: '1' },
-    })
-  } finally {
-    acceptingOutline.value = false
-  }
+    await commitCreation({ action: 'accept-outline', content: visibleOutlineContent.value })
+    const target = readShellPref() === 'legacy'
+      ? { path: '/workspace/' + novelId + '/planning', query: { tab: 'volumes', onboarding: '1' } }
+      : { path: '/generate/' + novelId, query: { step: 'volumes' } }
+    await router.push(target)
+  } catch (error) { message.error(safeAiErrorMessage(error, configStore.models.map(model => model.apiKey))) }
+  finally { acceptingOutline.value = false }
 }
 
-onMounted(() => {
-  if (novel.value?.outline && route.query.regenerate !== '1') {
-    streamContent.value = novel.value.outline
-    selectedTitle.value = novel.value.title
-    isDone.value = true
-  } else if (configStore.isConfigured) {
-    startGenerate()
-  }
+onMounted(async () => {
+  try {
+    await reconstructionWorkspaceStore.hydrateFromPersistence(novelId)
+    pageBaseline = reconstructionWorkspaceStore.captureCreationEditBaseline(novelId)
+    await commitCreation({ action: 'initialize' })
+    if (!activeAiCount.value) for (const prior of creationDraft.value?.skeletonAttempts || []) {
+      if (prior.status === 'queued' || prior.status === 'running') await queueAttempt({ ...prior, status: 'interrupted',
+        error: '上次请求未完成，保留已存输出；由作者明确选择续作或重试。', updatedAt: new Date().toISOString() })
+    }
+    const saved = creationDraft.value?.outlineCandidate
+    const text = saved?.content || (route.query.regenerate !== '1' ? novel.value?.outline : '')
+    if (text) { streamContent.value = text; isDone.value = true }
+    if (saved?.complete === false) {
+      hasError.value = true
+      errorMessage.value = '已恢复未完整的大纲候选，请编辑补齐后保存，或手动重新生成'
+    }
+    // Reopening never starts a new paid request; use an explicit generation action.
+    const editors = creationDraft.value?.editorDrafts?.filter(item => !item.savedAt) || []
+    const contractEditor = creationDraft.value?.editorDrafts?.filter(item => item.surface === 'contract').slice(-1)[0]
+    if (contractEditor?.savedAt && contractEditor.exploration) contractExploration.value = JSON.parse(JSON.stringify(contractEditor.exploration))
+    if (contractEditor && !contractEditor.savedAt) restoreEditorDraft(contractEditor, false)
+    for (const surface of ['skeleton', 'manual-outline', 'outline'] as const) {
+      const editor = editors.filter(item => item.surface === surface || !item.surface).slice(-1)[0]
+      if (editor && (editor.skeleton || editor.manualOutline || editor.outlineText && editor.outlineText !== text)) restoreEditorDraft(editor, false)
+    }
+    // An imported outline only pre-fills the author's manual path; saving it is still an explicit candidate action.
+    const imported = creationDraft.value?.initialInput?.outline?.text
+    if (imported && !text && !manualOutline.value) manualOutline.value = imported
+    editorReady = true
+  } catch (error) { message.warning('创作草稿读取失败：' + safeAiErrorMessage(error, configStore.models.map(model => model.apiKey))) }
+  finally { initializing.value = false }
+})
+onUnmounted(() => {
+  disposed = true
+  abortController?.abort()
+  if (!pendingEditors.size && !pendingAttempts.size && !generationBusy.value && !contractExploring.value) unregisterDraftSaver()
 })
 
-onUnmounted(() => {
-  abortController?.abort()
-})
 </script>
 
 <style scoped>
+.recovery-panel { width:100%; max-width:1100px; padding:20px; box-sizing:border-box; }
+.recovery-panel button { margin:6px; }
+.manual-outline { width: 100%; max-width: 1000px; box-sizing: border-box; padding: 24px; }
+.manual-outline p { color: var(--text-color-secondary); line-height: 1.8; }
+.manual-outline .n-button { margin-top: 16px; }
 .generate-page {
   display: flex;
   flex-direction: column;
@@ -650,6 +929,17 @@ onUnmounted(() => {
   background: var(--color-primary-light);
 }
 
+.skeleton-candidates { width: 100%; max-width: none; padding: 18px 20px; text-align: left; }
+.skeleton-candidates-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.skeleton-candidates-header h3 { margin: 0; font: 600 20px var(--font-family-serif); }
+.skeleton-candidates-header p { margin: 6px 0 0; color: var(--text-color-tertiary); font-size: 12px; }
+.skeleton-candidates-header > span { color: var(--text-color-tertiary); font-size: 12px; }
+.skeleton-candidate-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 14px; }
+.skeleton-card { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--border-color-light); border-radius: var(--radius-md); background: var(--bg-color); color: var(--text-color-primary); text-align: left; cursor: pointer; }
+.skeleton-card:hover, .skeleton-card.active { border-color: var(--color-primary); background: var(--color-primary-light); }
+.skeleton-card strong { font: 600 16px var(--font-family-serif); }
+.skeleton-card span, .skeleton-card small { color: var(--text-color-secondary); line-height: 1.6; }
+
 .no-config-hint {
   width: 100%;
   max-width: 500px;
@@ -724,6 +1014,7 @@ onUnmounted(() => {
 .outline-ready .generate-animation { display: none; }
 .outline-ready .generate-header h2 { font: 700 38px var(--font-family-serif); margin: 0; }
 .generate-ready-hint { color: var(--text-color-secondary); margin-top: 12px; font-size: 15px; }
+.structured-plan-status { margin-top: 8px; padding: 7px 12px; border: 1px solid var(--border-color-light); border-radius: var(--radius-md); color: var(--text-color-secondary); background: var(--bg-color-secondary); font-size: 12px; }
 .generation-steps { grid-column: 2; grid-row: 1 / 3; align-self: center; display: flex; flex-wrap: wrap; list-style: none; gap: 24px; color: var(--text-color-tertiary); font-size: 14px; }
 .generation-steps .done { color: var(--color-accent); }
 .generation-steps .active { color: var(--color-primary); font-weight: 600; }

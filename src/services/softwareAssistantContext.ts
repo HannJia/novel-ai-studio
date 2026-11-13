@@ -1,5 +1,6 @@
 import type { KnowledgeBase, KBEntry } from '@/stores/knowledge'
 import type { ChatSearchRecord } from '@/types/chat'
+import { getCurrentBaseSummary, getCurrentEntrySummary } from './knowledgeSources'
 
 export function knowledgeDraftWithSources(content: string, search?: ChatSearchRecord): string {
   const sources = (search?.sources || []).flatMap(source => {
@@ -17,7 +18,7 @@ export function buildSoftwareAssistantContext(surface: 'inspiration' | 'editor' 
   return `【软件身份与实际能力】
 你是“墨笺”（AI 长篇小说写作软件，原名 AI Novel Writer）内置的助手，当前位于${location}，不是脱离软件的通用聊天窗口。
 作者提到“软件”“这里”“知识库”“上传”时，优先理解为本软件。遇到软件操作问题先回答操作问题，不强行转回小说构思。
-书架上的“知识库”可创建资料库、手动添加条目、导入资料、整理摘要并选择简略/标准/详细程度，摘要整理会自动分类。支持文本、Markdown、Word（DOCX）、电子书（EPUB）和 PDF，单个文件不超过 100 MB；提取文字最多 500 万字符，PDF 最多 1000 页。PDF 导入中可选择现有视觉模型，点击“开始读取”：默认提取文字层，没有文字的扫描页转为图片交给模型识别；文字层错误或不完整时可选择“全部页面使用视觉识别”。可暂停并继续，重新打开软件后选择同一文件和读取方式可复用本机已完成页。图片识别会向所选服务商发送页面并可能计费，结果需要人工核对。识别结束后仍需点击“确认导入”，导入失败或只选择文件不代表已保存到知识库。
+书架上的“知识库”可创建资料库、手动添加条目、导入资料、整理摘要并选择简略/标准/详细程度，摘要只在与当前资料匹配时用于写作和检索；资料修改后可核对、编辑并重新确认，原摘要保留供回看。支持文本、Markdown、Word（DOCX）、电子书（EPUB）和 PDF，单个文件不超过 100 MB；提取文字最多 500 万字符，PDF 最多 1000 页。PDF 导入中可选择现有视觉模型，点击“开始读取”：默认提取文字层，没有文字的扫描页转为图片交给模型识别；文字层错误或不完整时可选择“全部页面使用视觉识别”。可暂停并继续，重新打开软件后选择同一文件和读取方式可复用本机已完成页。图片识别会向所选服务商发送页面并可能计费，结果需要人工核对。识别结束后仍需点击“确认导入”，导入失败或只选择文件不代表已保存到知识库。
 灵感对话的“参考知识库”选择本次对话可读取的书架资料，默认全部，可清空；这不等于自动给新小说挂载知识库。创建小说确认设定时，通过“挂载知识库”开关选择本书资料。书内助手与写作使用本书已挂载的资料，在小说侧栏“知识库”中管理绑定，不读取其他小说的私有正文。
 下方每轮提供的知识库目录和相关摘要/原文片段是真实本地快照。可以据此回答、引用“库名 / 条目名”，不要笼统声称无法访问软件知识库；没有选中、没有条目或未提供的内容要明确说明，不能声称读过全部文件。
 PDF 导入可点击“读取已识别缓存”，只读取原电脑已有结果、不调用 AI；可查看有文字页、空白结果、缺失缓存和预计导入条数，并导出已读取文本。显示“已完成页数”不代表每页都有文字，也不代表已保存为知识条目。缺页或仅剩少量文字时必须核对，不能断言整本书只有一条资料。缓存不跨电脑同步。
@@ -40,10 +41,11 @@ function queryTerms(query: string): string[] {
 }
 
 const entryCache = new WeakMap<KBEntry, { content: string; summary: string; lowerContent: string; lowerSummary: string }>()
-function indexed(entry: KBEntry) {
+function indexed(kbId: string, entry: KBEntry) {
+  const summary = getCurrentEntrySummary(kbId, entry)
   const previous = entryCache.get(entry)
-  if (previous?.content === entry.content && previous.summary === entry.summary) return previous
-  const next = { content: entry.content, summary: entry.summary, lowerContent: entry.content.toLowerCase(), lowerSummary: entry.summary.toLowerCase() }
+  if (previous?.content === entry.content && previous.summary === summary) return previous
+  const next = { content: entry.content, summary, lowerContent: entry.content.toLowerCase(), lowerSummary: summary.toLowerCase() }
   entryCache.set(entry, next)
   return next
 }
@@ -61,7 +63,7 @@ export function buildChatKnowledgeContext(bases: KnowledgeBase[], ids: string[],
   if (!available.length) return '【本轮知识库】未选择参考知识库或所选知识库已不存在；没有读取任何知识库正文。'
   const terms = queryTerms(query)
   const ranked = available.flatMap(base => base.entries.map(entry => {
-    const cached = indexed(entry)
+    const cached = indexed(base.id, entry)
     const title = `${base.name} ${entry.title} ${entry.category} ${entry.tags.join(' ')}`.toLowerCase()
     let score = 0
     let position = -1
@@ -73,14 +75,14 @@ export function buildChatKnowledgeContext(bases: KnowledgeBase[], ids: string[],
       const contentMatch = cached.lowerContent.indexOf(term)
       if (contentMatch >= 0) { score += 1; if (position < 0) position = contentMatch }
     }
-    return { base, entry, score, position, summaryPosition }
+    return { base, entry, summary: cached.summary, score, position, summaryPosition }
   })).sort((a, b) => b.score - a.score)
 
   const catalog: object[] = []
   let remaining = 2600
   for (const base of available) {
     const item = { 知识库: base.name.slice(0, 100), 条目数: base.entries.length,
-      描述: base.description.slice(0, 160), 摘要: (base.summary || '').slice(0, 350) }
+      描述: base.description.slice(0, 160), 摘要: getCurrentBaseSummary(base).slice(0, 350) }
     const length = JSON.stringify(item).length
     if (length > remaining) break
     catalog.push(item)
@@ -88,10 +90,10 @@ export function buildChatKnowledgeContext(bases: KnowledgeBase[], ids: string[],
   }
   const snippets: object[] = []
   remaining = 8500
-  for (const { base, entry, position, summaryPosition } of ranked.slice(0, 8)) {
+  for (const { base, entry, summary, position, summaryPosition } of ranked.slice(0, 8)) {
     const item = { 知识库: base.name.slice(0, 100), 条目: entry.title.slice(0, 180), 分类: entry.category.slice(0, 40),
-      摘要: entry.summary ? excerpt(entry.summary, Math.max(0, summaryPosition), 550) : '',
-      原文片段: !entry.summary || position >= 0 ? excerpt(entry.content, Math.max(0, position), entry.summary ? 550 : 1000) : '' }
+      摘要: summary ? excerpt(summary, Math.max(0, summaryPosition), 550) : '',
+      原文片段: !summary || position >= 0 ? excerpt(entry.content, Math.max(0, position), summary ? 550 : 1000) : '' }
     const length = JSON.stringify(item).length
     if (length > remaining) continue
     snippets.push(item)

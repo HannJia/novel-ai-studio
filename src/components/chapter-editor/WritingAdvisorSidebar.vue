@@ -9,7 +9,7 @@
   </button>
 
   <transition name="slide-right">
-    <aside v-if="open || persistent" class="advisor-sidebar">
+    <aside v-if="open || persistent" class="advisor-sidebar" :class="{ embedded }">
       <header class="advisor-header">
         <div>
           <div class="advisor-title"><span class="advisor-icon seal">笺</span><strong>写作辅助</strong></div>
@@ -107,8 +107,8 @@
                   {{ selectedId === suggestion.id ? '当前方向' : '选为当前方向' }}
                 </n-button>
                 <n-button size="tiny" quaternary @click="emit('copy', suggestion)">复制思路</n-button>
-                <n-button size="tiny" quaternary @click="emit('promote-plan', suggestion)">转为章节计划</n-button>
-                <n-button size="tiny" quaternary @click="emit('save-note', suggestion)">保存为场景笔记</n-button>
+                <n-button size="tiny" quaternary :disabled="stale || saving" @click="emit('promote-plan', suggestion)">转为章节计划</n-button>
+                <n-button size="tiny" quaternary :disabled="stale || saving" @click="emit('save-note', suggestion)">保存为场景笔记</n-button>
               </div>
             </article>
           </section>
@@ -137,17 +137,19 @@ import { computed, shallowReactive } from 'vue'
 import { NButton } from 'naive-ui'
 import type { WritingAdviceKind, WritingAdviceMode, WritingAdviceResult, WritingAdviceSuggestion } from '@/services/writingAdvisor'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   open: boolean
   /** Keep the advisor visible while the author is in manual writing mode. */
   persistent?: boolean
+  embedded?: boolean
   analyzing: boolean
   error: string
   stale: boolean
+  saving?: boolean
   result: WritingAdviceResult | null
   lastMode: WritingAdviceMode
   analyzingModes?: WritingAdviceMode[]
-}>()
+}>(), { embedded: false })
 
 const emit = defineEmits<{
   open: []
@@ -191,6 +193,14 @@ function selectSuggestion(id: string) {
 .advisor-toggle-btn { position: fixed; right: 0; top: calc(50% - 90px); z-index: 111; display: flex; align-items: center; gap: 5px; min-height: 54px; padding: 8px 8px 8px 6px; border: 1px solid var(--border-color); border-right: 0; background: var(--bg-color-card); color: var(--text-color-secondary); cursor: pointer; box-shadow: var(--shadow-sm); writing-mode: vertical-rl; }
 .advisor-toggle-btn span { margin-top: 3px; font-size: 11px; }
 .advisor-sidebar { position: fixed; top: 104px; right: 0; z-index: 110; width: min(440px, 94vw); height: calc(100vh - 104px); display: flex; flex-direction: column; background: var(--bg-color-card); border-left: 1px solid var(--border-color); box-shadow: var(--shadow-lg); }
+.advisor-sidebar.embedded { position: static; inset: auto; z-index: auto; width: 100%; max-width: none; height: 100%; min-height: 0; flex: 1; border: 0; box-shadow: none;
+  --bg-color-card: var(--paper); --bg-color-secondary: var(--panel-2); --bg-color: var(--paper);
+  --text-color-primary: var(--ink); --text-color-secondary: var(--ink-2); --text-color-tertiary: var(--ink-3);
+  --border-color: var(--line); --border-color-light: var(--line); --border-color-hover: var(--line-2);
+  --color-primary: var(--zhu); --color-primary-light: var(--zhu-soft); --color-warning: var(--jin);
+  --color-error: var(--zhu); --color-error-light: var(--zhu-soft); --shadow-lg: none; --shadow-sm: var(--shadow-1);
+  --radius-sm: var(--r-s);
+}
 .advisor-header { flex-shrink: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-height: 68px; padding: 15px 16px 12px; border-bottom: 1px solid var(--border-color-light); }
 .advisor-title { display: flex; align-items: center; gap: 7px; font-size: 16px; }
 .advisor-icon { font-size: 18px; }
@@ -248,6 +258,7 @@ function selectSuggestion(id: string) {
 .advisor-footer { flex-shrink: 0; display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border-color-light); }
 .slide-right-enter-active, .slide-right-leave-active { transition: transform .2s ease, opacity .2s ease; }
 .slide-right-enter-from, .slide-right-leave-to { transform: translateX(100%); opacity: 0; }
+.advisor-sidebar.embedded.slide-right-enter-from, .advisor-sidebar.embedded.slide-right-leave-to { transform: none; opacity: 1; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 600px) {
   /* Leave the app header and chapter title bar reachable for mode switching. */

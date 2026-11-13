@@ -1,19 +1,23 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { reactive } from 'vue'
 import { NCheckbox, NRadioGroup, NSwitch } from 'naive-ui'
 import CloudSyncPanel from './CloudSyncPanel.vue'
+import { copyText } from '@/utils/clipboard'
 
 const holder = vi.hoisted(() => ({ store: null as any }))
 vi.mock('@/stores/cloudSync', () => ({ useCloudSyncStore: () => holder.store }))
+vi.mock('@/utils/clipboard', () => ({ copyText: vi.fn() }))
 vi.mock('naive-ui', async original => ({ ...await original<object>(), useDialog: () => ({ warning: vi.fn() }) }))
 beforeEach(() => {
+  vi.mocked(copyText).mockReset().mockResolvedValue('browser')
   holder.store = reactive({ session: null, error: '', busy: false, state: { binding: null, enabled: false }, endpoint: 'https://example.test',
     pendingUploads: [], setEnabled: vi.fn().mockResolvedValue(undefined), approveUploads: vi.fn().mockResolvedValue(undefined),
     conflicts: [], pendingConflicts: [], authenticate: vi.fn().mockResolvedValue(''), recover: vi.fn().mockResolvedValue({ recoveryCode: 'test-recovery' }),
     changePassword: vi.fn().mockImplementation(async () => { holder.store.session = null }) })
 })
+afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers() })
 function mountPanel() {
   return shallowMount(CloudSyncPanel, { global: { renderStubDefaultSlot: true, stubs: {
     Input: { props: ['value'], emits: ['update:value'], template: '<input :value="value" @input="$emit(\'update:value\', $event.target.value)" />' },
@@ -22,6 +26,55 @@ function mountPanel() {
   } } })
 }
 describe('cloud password forms', () => {
+  async function showRecovery() {
+    holder.store.authenticate.mockResolvedValue('RECOVERY-TEST-ONLY')
+    const wrapper = mountPanel()
+    await wrapper.get('input[aria-label="云同步账号"]').setValue('test-author')
+    await wrapper.get('input[aria-label="云同步密码"]').setValue('test-password')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    return wrapper
+  }
+  it('keeps copy errors visible inside the recovery dialog instead of behind its mask', async () => {
+    vi.mocked(copyText).mockRejectedValueOnce(new Error('denied'))
+    const wrapper = await showRecovery()
+    await wrapper.get('button[aria-label="复制恢复码"]').trigger('click')
+    await flushPromises()
+    expect(copyText).toHaveBeenCalledExactlyOnceWith('RECOVERY-TEST-ONLY')
+    expect(wrapper.get('.cloud-recovery-modal [role="status"]').text()).toContain('复制失败')
+    expect(wrapper.get('.cloud-recovery-modal [role="status"]').text()).not.toContain('RECOVERY-TEST-ONLY')
+    expect(wrapper.find('.cloud-panel > .cloud-feedback').exists()).toBe(false)
+    expect(wrapper.find('button[aria-label="复制恢复码"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+  it.each(['system', 'browser'] as const)('shows the actual copy destination (%s)', async channel => {
+    vi.mocked(copyText).mockResolvedValueOnce(channel)
+    const wrapper = await showRecovery()
+    await wrapper.get('button[aria-label="复制恢复码"]').trigger('click')
+    await flushPromises()
+    const message = wrapper.get('.cloud-recovery-modal [role="status"]').text()
+    expect(message).toContain(channel === 'system' ? '已复制到系统剪贴板' : '已请求浏览器复制，请粘贴确认')
+    if (channel === 'browser') expect(message).not.toContain('已复制到系统剪贴板')
+    wrapper.unmount()
+  })
+  it('announces the download request and keeps the blob alive until the browser can receive it', async () => {
+    vi.useFakeTimers()
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:recovery-test-only')
+    let clickedWhileAttached = false
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      clickedWhileAttached = this.isConnected && this.download === '云同步账号恢复码.txt'
+    })
+    const wrapper = await showRecovery()
+    await wrapper.findAll('button').find(button => button.text() === '下载恢复码')!.trigger('click')
+    expect(clickedWhileAttached).toBe(true)
+    expect(wrapper.get('.cloud-recovery-modal [role="status"]').text()).toContain('浏览器下载列表')
+    expect(wrapper.get('.cloud-recovery-modal a.cloud-download-fallback').text()).toContain('点此保存')
+    expect(revoke).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(revoke).toHaveBeenCalledExactlyOnceWith('blob:recovery-test-only')
+    wrapper.unmount()
+  })
   it('can start the first download without selecting or approving local uploads', async () => {
     holder.store.session = { user: { username: 'author', usedBytes: 0, quotaBytes: 100, role: 'user' } }
     const wrapper = mountPanel()

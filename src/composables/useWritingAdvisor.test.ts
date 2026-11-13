@@ -10,6 +10,24 @@ vi.mock('@/services/writingAdvisor', () => ({ extractWritingFocus: vi.fn(() => (
 beforeEach(() => { setActivePinia(createPinia()); vi.clearAllMocks() })
 
 describe('advisor mode switching', () => {
+  it('invalidates cached advice when an unchanged previous summary is confirmed', async () => {
+    const store = useNovelStore()
+    const created = store.addNovel({ genre: 'urban', subGenre: 'business', tags: [], targetWordCountMin: 20, targetWordCountMax: 30,
+      writingStyle: store.defaultWritingStyle(), settings: store.defaultSettings() })
+    const book = store.getNovel(created.id)!
+    const previous = store.addChapter(book.id, { content: '前章正文。' })!
+    store.updateChapter(book.id, previous.id, { summary: '待核对的前章总结。', summarySource: undefined })
+    const chapter = store.addChapter(book.id, { content: '本章正文。' })!
+    vi.spyOn(useConfigStore(), 'getModelForTask').mockReturnValue({ id: 'x', name: 'test', modelName: 'test', apiKey: '', baseUrl: '', maxTokens: 1000, temperature: 1, topP: 1 })
+    vi.mocked(requestWritingAdvice).mockResolvedValue({ mode: 'scene', suggestions: [] } as unknown as WritingAdviceResult)
+    const scope = effectScope()
+    const advisor = scope.run(() => useWritingAdvisor({ currentNovel: ref(book), currentChapter: ref(chapter), currentContent: ref(chapter.content), textarea: ref(null) }))!
+    await advisor.analyze('scene')
+    expect(advisor.stale.value).toBe(false)
+    store.updateChapter(book.id, previous.id, { summary: previous.summary })
+    expect(advisor.stale.value).toBe(true)
+    scope.stop()
+  })
   it('switches tabs without sending a request and keeps each mode cached', async () => {
     const store = useNovelStore()
     const book = store.addNovel({ genre: 'urban', subGenre: 'business', tags: [], targetWordCountMin: 20, targetWordCountMax: 30, writingStyle: store.defaultWritingStyle(), settings: store.defaultSettings() })

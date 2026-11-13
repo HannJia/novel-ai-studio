@@ -46,6 +46,13 @@ describe('WritingAdvisorSidebar', () => {
     expect(wrapper.find('.close-btn').exists()).toBe(false)
   })
 
+  it('嵌入模式给案头容器提供独立布局标记', () => {
+    const wrapper = shallowMount(WritingAdvisorSidebar, {
+      props: { ...baseProps, persistent: true, embedded: true },
+    })
+    expect(wrapper.find('.advisor-sidebar').classes()).toContain('embedded')
+  })
+
   it('普通模式关闭时显示唯一的侧栏入口', () => {
     const wrapper = shallowMount(WritingAdvisorSidebar, {
       props: { ...baseProps, open: false, persistent: false },

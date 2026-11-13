@@ -81,6 +81,8 @@ describe('explicit chat knowledge writes', () => {
     expect(base.entries).toHaveLength(1)
     expect(base.entries[0].title).toBe('县城税制')
     expect(base.entries[0].summary).toBe('县城每亩缴粮三升。')
+    expect(base.entries[0].summarySource).toMatchObject({ kind: 'entry', knowledgeBaseId: base.id, entryId: base.entries[0].id,
+      derivedValue: '县城每亩缴粮三升。', origin: 'author' })
     expect(base.entries[0].category).toBe('事件')
     expect(base.entries[0].tags).toEqual(['县城', '税制'])
     expect(wrapper.emitted('saved')).toHaveLength(1)

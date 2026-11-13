@@ -1,4 +1,7 @@
 node_modules/
+.npm-cache/
+.electron-cache/
+MoJian.electron-cache/
 dist/
 dist-electron/
 release/
@@ -25,4 +28,6 @@ resources/ocr/*.traineddata
 novel-writer-config.json
 novel-writer-cloud-session
 __pycache__/
+*.pyc
+.venv/
 .pytest_cache/

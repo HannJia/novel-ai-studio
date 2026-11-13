@@ -1,5 +1,6 @@
 import initSqlJs, { Database, SqlJsStatic, SqlValue } from 'sql.js'
 import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url'
+import { readIndexedDatabase, writeIndexedDatabase, archiveIndexedDatabase, retainIndexedProjectBackup } from './browserDatabaseStorage'
 
 const DB_STORAGE_KEY = 'novel-writer-sqlite-db'
 
@@ -7,6 +8,7 @@ let SQL: SqlJsStatic | null = null
 let db: Database | null = null
 let saveQueue: Promise<void> = Promise.resolve()
 let initialization: Promise<Database> | null = null
+let browserStorageBaseline: string | null = null
 const DB_BACKUP_KEY = `${DB_STORAGE_KEY}.bak`
 let transactionRows = 0
 let lastTransactionStats = { rowsWritten: 0, sqlMs: 0, persistMs: 0, bytes: 0 }
@@ -53,7 +55,8 @@ async function readBackup(): Promise<Database | null> {
       const bytes = await window.electronAPI?.dbReadBackup?.()
       return bytes ? checkedDatabase(new Uint8Array(bytes)) : null
     }
-    const encoded = localStorage.getItem(DB_BACKUP_KEY)
+    const indexed = await readIndexedDatabase()
+    const encoded = indexed ? indexed.backup : localStorage.getItem(DB_BACKUP_KEY)
     return encoded ? checkedDatabase(decodeStored(encoded)) : null
   } catch { return null }
 }
@@ -61,9 +64,16 @@ async function readBackup(): Promise<Database | null> {
 async function initializeDatabase(): Promise<Database> {
   if (!SQL) {
     SQL = await initSqlJs({
-      locateFile: () => typeof document === 'undefined' && sqlWasmUrl.startsWith('/')
-        ? `.${sqlWasmUrl}`
-        : sqlWasmUrl,
+      locateFile: () => {
+        const nodeProcess = (globalThis as typeof globalThis & {
+          process?: { cwd?: () => string; versions?: { node?: string } }
+        }).process
+        if (nodeProcess?.versions?.node && sqlWasmUrl.startsWith('/')) {
+          return (nodeProcess.cwd?.() || '.') + sqlWasmUrl
+        }
+        if (typeof document === 'undefined' && sqlWasmUrl.startsWith('/')) return '.' + sqlWasmUrl
+        return sqlWasmUrl
+      },
     })
   }
 
@@ -77,11 +87,13 @@ async function initializeDatabase(): Promise<Database> {
     }
     // Migration is allowed only for an absent file, never for a failed read.
     if (!candidate) {
-      const saved = localStorage.getItem(DB_STORAGE_KEY)
+      const indexed = hasElectronIPC() ? undefined : await readIndexedDatabase()
+      const saved = indexed ? indexed.main : localStorage.getItem(DB_STORAGE_KEY)
+      browserStorageBaseline = saved
       if (saved) {
         candidate = checkedDatabase(decodeStored(saved))
         migrating = hasElectronIPC()
-      } else if (!hasElectronIPC() && localStorage.getItem(DB_BACKUP_KEY)) {
+      } else if (!hasElectronIPC() && (indexed?.backup || localStorage.getItem(DB_BACKUP_KEY))) {
         throw new Error('主库缺失，存在备份')
       } else candidate = new SQL.Database()
     }
@@ -119,10 +131,13 @@ export async function recoverDatabase(mode: 'backup' | 'empty'): Promise<void> {
     } else {
       // Preserve both original blobs. If storage is full, fail instead of losing
       // either source; the user can export/copy browser data before recovery.
-      const suffix = `${Date.now()}-${crypto.randomUUID()}`
-      for (const key of [DB_STORAGE_KEY, DB_BACKUP_KEY]) {
-        const value = localStorage.getItem(key)
-        if (value) localStorage.setItem(`${key}.recovery-${suffix}`, value)
+      if (await readIndexedDatabase()) await archiveIndexedDatabase()
+      else {
+        const suffix = `${Date.now()}-${crypto.randomUUID()}`
+        for (const key of [DB_STORAGE_KEY, DB_BACKUP_KEY]) {
+          const value = localStorage.getItem(key)
+          if (value) localStorage.setItem(`${key}.recovery-${suffix}`, value)
+        }
       }
     }
     initializeSchema(candidate)
@@ -145,10 +160,58 @@ async function persistDatabase(preserveBackup = false): Promise<void> {
   } else {
     const parts: string[] = []
     for (let i = 0; i < data.length; i += 0x8000) parts.push(String.fromCharCode(...data.subarray(i, i + 0x8000)))
-    const encoded = btoa(parts.join(''))
-    const previous = localStorage.getItem(DB_STORAGE_KEY)
-    if (previous && !preserveBackup) localStorage.setItem(DB_BACKUP_KEY, previous)
-    localStorage.setItem(DB_STORAGE_KEY, encoded)
+    let encoded = btoa(parts.join(''))
+    const publish = () => {
+      const previous = localStorage.getItem(DB_STORAGE_KEY)
+      if (previous !== browserStorageBaseline) throw new Error('其他浏览器窗口已更新本地项目，已停止覆盖。请保留当前编辑并重新打开项目。')
+      if (previous && !preserveBackup && encoded.length < previous.length) {
+        // A compacted database frees space before rotating the backup. If the
+        // backup cannot be stored, restore the original main blob and fail.
+        localStorage.setItem(DB_STORAGE_KEY, encoded)
+        try { localStorage.setItem(DB_BACKUP_KEY, previous) }
+        catch (error) { localStorage.setItem(DB_STORAGE_KEY, previous); throw error }
+      } else {
+        if (previous && !preserveBackup) localStorage.setItem(DB_BACKUP_KEY, previous)
+        localStorage.setItem(DB_STORAGE_KEY, encoded)
+      }
+      browserStorageBaseline = encoded
+    }
+    const publishWithCompaction = () => {
+      try { publish() } catch (error) {
+        const freePages = db!.exec('PRAGMA freelist_count')[0]?.values[0]?.[0]
+        if (!(error instanceof Error) || error.name !== 'QuotaExceededError' || !Number(freePages)) throw error
+        // Reclaim unused SQLite pages only; retain every manuscript, history
+        // snapshot and ledger row. Never delete browser keys to make room.
+        db!.run('VACUUM')
+        const compacted = db!.export(), compactParts: string[] = []
+        for (let i = 0; i < compacted.length; i += 0x8000) compactParts.push(String.fromCharCode(...compacted.subarray(i, i + 0x8000)))
+        encoded = btoa(compactParts.join(''))
+        lastTransactionStats.bytes = compacted.byteLength
+        publish()
+      }
+    }
+    const persistBrowser = async () => {
+      if (await readIndexedDatabase()) await writeIndexedDatabase(encoded, browserStorageBaseline, preserveBackup)
+      else {
+        try { publishWithCompaction() } catch (error) {
+          if (!(error instanceof Error) || error.name !== 'QuotaExceededError') throw error
+          await writeIndexedDatabase(encoded, browserStorageBaseline, preserveBackup)
+        }
+      }
+      browserStorageBaseline = encoded
+    }
+    // The comparison and publication share an origin-wide lock across tabs.
+    if (typeof navigator !== 'undefined' && navigator.locks) {
+      let publishFailed = false
+      let publishError: unknown
+      await navigator.locks.request('mojian-local-database-write', async () => {
+        try { await persistBrowser() }
+        catch (error) { publishFailed = true; publishError = error }
+      })
+      if (publishFailed) throw publishError
+    } else {
+      await persistBrowser()
+    }
   }
 }
 
@@ -163,7 +226,14 @@ export async function retainProjectRestorePoint(serialized: string): Promise<voi
     if (!window.electronAPI?.dbRetainProjectBackup) throw new Error('请更新桌面程序后再使用安全导入')
     await window.electronAPI.dbRetainProjectBackup(serialized)
   } else {
-    localStorage.setItem('novel-writer-before-import', serialized)
+    if (await readIndexedDatabase()) await retainIndexedProjectBackup(serialized)
+    else {
+      try { localStorage.setItem('novel-writer-before-import', serialized) }
+      catch (error) {
+        if (!(error instanceof Error) || error.name !== 'QuotaExceededError') throw error
+        await retainIndexedProjectBackup(serialized)
+      }
+    }
   }
 }
 
@@ -171,6 +241,10 @@ export async function retainProjectRestorePoint(serialized: string): Promise<voi
 function initializeSchema(database: Database) {
   const versionBefore = database.exec('PRAGMA schema_version')[0]?.values[0][0]
   const schema = `
+    CREATE TABLE IF NOT EXISTS project_history (
+      revision TEXT PRIMARY KEY, created_at TEXT NOT NULL, label TEXT NOT NULL,
+      novel_id TEXT NOT NULL, source_revision TEXT, value TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS inspiration_sessions (id TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS local_migrations (id TEXT PRIMARY KEY);
     CREATE TABLE IF NOT EXISTS cloud_sync_state (
@@ -219,6 +293,7 @@ function initializeSchema(database: Database) {
       novel_id TEXT REFERENCES novels(id) ON DELETE CASCADE,
       volume_index INTEGER, chapter_index INTEGER,
       title TEXT, content TEXT, summary TEXT,
+      summary_source TEXT,
       banned_review TEXT DEFAULT '', content_review TEXT DEFAULT '',
       content_review_signature TEXT DEFAULT '',
       review_rewrite_blocked_signature TEXT DEFAULT '',
@@ -228,6 +303,7 @@ function initializeSchema(database: Database) {
       story_days_elapsed REAL DEFAULT 0,
       story_day REAL,
       status TEXT DEFAULT 'draft',
+      archived_at TEXT,
       created_at TEXT, updated_at TEXT
     );
 
@@ -244,7 +320,8 @@ function initializeSchema(database: Database) {
       status TEXT NOT NULL DEFAULT 'pending',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      applied_at TEXT
+      applied_at TEXT,
+      selection_json TEXT
     );
 
     -- 角色表
@@ -257,7 +334,7 @@ function initializeSchema(database: Database) {
       status TEXT DEFAULT '活跃',
       first_appear_chapter INTEGER,
       description TEXT, relationships TEXT, -- JSON
-      events TEXT, avatar_color TEXT, avatar_id TEXT
+      events TEXT, avatar_color TEXT, avatar_id TEXT, provenance TEXT
     );
 
     -- 剧情时间线事件
@@ -281,6 +358,7 @@ function initializeSchema(database: Database) {
       evidence TEXT DEFAULT '',
       last_progress_chapter INTEGER,
       resolved_chapter INTEGER,
+      provenance TEXT,
       created_at TEXT,
       updated_at TEXT
     );
@@ -296,7 +374,9 @@ function initializeSchema(database: Database) {
       status TEXT NOT NULL DEFAULT 'active',
       reactivate_at TEXT DEFAULT '',
       character_ids TEXT DEFAULT '[]',
+      design TEXT DEFAULT '{}',
       nodes TEXT DEFAULT '[]',
+      provenance TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -329,9 +409,11 @@ function initializeSchema(database: Database) {
       reason TEXT,
       confidence TEXT DEFAULT 'clear',
       mutation TEXT,
+      source_binding TEXT,
       chapter_index INTEGER,
       status TEXT,
-      created_at TEXT
+      created_at TEXT,
+      updated_at TEXT
     );
 
     -- AI 对话历史表
@@ -388,6 +470,102 @@ function initializeSchema(database: Database) {
       completed_at TEXT
     );
 
+    -- V2 创作工作区：与旧小说聚合解耦，保存创建草稿和作者确认边界。
+    CREATE TABLE IF NOT EXISTS reconstruction_editor_drafts (
+      novel_id TEXT NOT NULL,
+      id TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (novel_id, id)
+    );
+    -- Also covers legacy delete/replace-import paths that delete novels directly.
+    CREATE TRIGGER IF NOT EXISTS delete_novel_editor_drafts AFTER DELETE ON novels
+    BEGIN
+      DELETE FROM reconstruction_editor_drafts WHERE novel_id = OLD.id;
+    END;
+
+    CREATE TABLE IF NOT EXISTS reconstruction_creation_drafts (
+      id TEXT PRIMARY KEY,
+      novel_id TEXT NOT NULL,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS reconstruction_candidates (
+      id TEXT PRIMARY KEY,
+      novel_id TEXT NOT NULL,
+      chapter_id TEXT,
+      status TEXT NOT NULL,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS reconstruction_review_findings (
+      id TEXT PRIMARY KEY,
+      novel_id TEXT NOT NULL,
+      chapter_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS reconstruction_chapter_reviews (
+      id TEXT PRIMARY KEY,
+      novel_id TEXT NOT NULL,
+      chapter_id TEXT NOT NULL,
+      source_version_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS reconstruction_story_memories (
+      id TEXT NOT NULL,
+      novel_id TEXT NOT NULL,
+      value TEXT NOT NULL,
+      PRIMARY KEY (novel_id, id)
+    );
+
+    CREATE TABLE IF NOT EXISTS reconstruction_impact_reports (
+      id TEXT NOT NULL,
+      novel_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      value TEXT NOT NULL,
+      PRIMARY KEY (novel_id, id)
+    );
+
+    CREATE TABLE IF NOT EXISTS reconstruction_canon_mutations (
+      id TEXT PRIMARY KEY,
+      candidate_id TEXT NOT NULL UNIQUE,
+      novel_id TEXT NOT NULL,
+      value TEXT NOT NULL,
+      applied_at TEXT NOT NULL
+    );
+
+    -- V2 AI runs: one novel may have multiple runs, keyed by (novel_id, id).
+    -- The value column keeps the complete AiRun contract while the scalar
+    -- columns make the current state available for future queries.
+    CREATE TABLE IF NOT EXISTS reconstruction_ai_runs (
+      id TEXT NOT NULL,
+      novel_id TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      task_type TEXT NOT NULL,
+      target_id TEXT,
+      chapter_start INTEGER,
+      chapter_end INTEGER,
+      token_budget INTEGER,
+      used_tokens INTEGER,
+      status TEXT NOT NULL,
+      checkpoint TEXT,
+      error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      value TEXT NOT NULL,
+      PRIMARY KEY (novel_id, id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_novels_updated_at ON novels(updated_at);
     CREATE INDEX IF NOT EXISTS idx_chapters_novel_index ON chapters(novel_id, chapter_index);
     CREATE INDEX IF NOT EXISTS idx_story_events_novel_category_status ON story_events(novel_id, category, status);
@@ -397,13 +575,24 @@ function initializeSchema(database: Database) {
     CREATE INDEX IF NOT EXISTS idx_semantic_index_novel_source ON semantic_index(novel_id, source_type);
     CREATE INDEX IF NOT EXISTS idx_ai_tasks_status_created ON ai_tasks(status, created_at);
     CREATE INDEX IF NOT EXISTS idx_chapter_revisions_chapter_status ON chapter_revisions(chapter_id, status, created_at);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_reconstruction_creation_novel ON reconstruction_creation_drafts(novel_id);
+    CREATE INDEX IF NOT EXISTS idx_reconstruction_candidates_novel_chapter ON reconstruction_candidates(novel_id, chapter_id, status);
+    CREATE INDEX IF NOT EXISTS idx_reconstruction_findings_novel_chapter ON reconstruction_review_findings(novel_id, chapter_id, status);
+    CREATE INDEX IF NOT EXISTS idx_reconstruction_reviews_novel_chapter ON reconstruction_chapter_reviews(novel_id, chapter_id, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_reconstruction_mutations_novel_applied ON reconstruction_canon_mutations(novel_id, applied_at);
+    CREATE INDEX IF NOT EXISTS idx_reconstruction_ai_runs_novel_updated ON reconstruction_ai_runs(novel_id, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_reconstruction_impact_reports_novel_created ON reconstruction_impact_reports(novel_id, created_at, id);
   `
 
   database.exec(schema)
+  if (!database.exec('PRAGMA table_info(project_history)')[0].values.some(column => column[1] === 'project_ids')) {
+    database.run('ALTER TABLE project_history ADD COLUMN project_ids TEXT')
+  }
   // Existing local databases predate planning version snapshots.
   try { database.run("ALTER TABLE novels ADD COLUMN writing_mode TEXT") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE characters ADD COLUMN avatar_id TEXT") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE novels ADD COLUMN chapter_length_policy TEXT") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE novels ADD COLUMN cover_id TEXT") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE chapters ADD COLUMN content_review_coverage TEXT") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE knowledge_bases ADD COLUMN summary TEXT DEFAULT ''") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE knowledge_bases ADD COLUMN summary_level TEXT DEFAULT 'standard'") } catch { /* already migrated */ }
@@ -419,16 +608,30 @@ function initializeSchema(database: Database) {
   try { database.run("ALTER TABLE chapters ADD COLUMN scene_notes TEXT DEFAULT '[]'") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE chapters ADD COLUMN versions TEXT DEFAULT '[]'") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE chapters ADD COLUMN review_rewrite_blocked_signature TEXT DEFAULT ''") } catch { /* already migrated */ }
+  try { database.run('ALTER TABLE chapter_revisions ADD COLUMN selection_json TEXT') } catch { /* already migrated */ }
+  try { database.run('ALTER TABLE chapters ADD COLUMN summary_source TEXT') } catch { /* already migrated */ }
+  try { database.run('ALTER TABLE chapters ADD COLUMN archived_at TEXT') } catch { /* already migrated */ }
+  try { database.run('ALTER TABLE characters ADD COLUMN provenance TEXT') } catch { /* already migrated */ }
+  try { database.run('ALTER TABLE story_events ADD COLUMN provenance TEXT') } catch { /* already migrated */ }
+  try { database.run('ALTER TABLE knowledge_entries ADD COLUMN summary_source TEXT') } catch { /* already present */ }
+  try { database.run('ALTER TABLE knowledge_entries ADD COLUMN summary_history TEXT') } catch { /* already present */ }
+  try { database.run('ALTER TABLE knowledge_bases ADD COLUMN summary_source TEXT') } catch { /* already present */ }
+  try { database.run('ALTER TABLE knowledge_bases ADD COLUMN summary_history TEXT') } catch { /* already present */ }
   try { database.run("ALTER TABLE chapters ADD COLUMN story_days_elapsed REAL DEFAULT 0") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE chapters ADD COLUMN story_day REAL") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE story_events ADD COLUMN related_arc_ids TEXT DEFAULT '[]'") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE story_events ADD COLUMN evidence TEXT DEFAULT ''") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE story_events ADD COLUMN last_progress_chapter INTEGER") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE story_events ADD COLUMN resolved_chapter INTEGER") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE story_arcs ADD COLUMN design TEXT DEFAULT '{}'") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE story_arcs ADD COLUMN provenance TEXT") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE data_panels ADD COLUMN versions TEXT DEFAULT '[]'") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE data_panels ADD COLUMN owner_item_id TEXT") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE data_panels ADD COLUMN reference_history TEXT") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE data_panels ADD COLUMN equipment_state TEXT DEFAULT 'stored'") } catch { /* already migrated */ }
   try { database.run("ALTER TABLE data_panel_changes ADD COLUMN mutation TEXT") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE data_panel_changes ADD COLUMN source_binding TEXT") } catch { /* already migrated */ }
+  try { database.run("ALTER TABLE data_panel_changes ADD COLUMN updated_at TEXT") } catch { /* already migrated */ }
   // One-time separation of explicitly tagged inspiration messages in existing
   // test books. Move complete records atomically; never infer from message text.
   const novelColumns = database.exec('PRAGMA table_info(novels)')[0].values

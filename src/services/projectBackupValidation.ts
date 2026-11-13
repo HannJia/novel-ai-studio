@@ -1,12 +1,23 @@
-// Version-one backups are untrusted files. Validate the entire public structure
+// Project backups are untrusted files. Validate the entire public structure
 // before any write; do not coerce malformed values into plausible project data.
 import { parseInspirationSession } from './inspirationSessions'
+import { assertStoredRelationshipDimensions } from './characterMemoryValidation'
+import { validateReconstructionWorkspaces } from './reconstructionBackupValidation'
+import { validateSelectionRevision } from './selectionRevisionMetadata'
+import { validateEntityHistories } from './entityProvenanceValidation'
+import { isKnowledgeSummaryCoverage } from './knowledgeSummaryCoverage'
+import { validateStoryArcGraph } from './storyArcValidation'
+import { normalizeStoredReviewCoverage } from './chapterReviewAcceptance'
+import { storyTimeRecordWellFormed, storyTimeOriginWellFormed, storyTimePointWellFormed } from '../types/storyTime'
 type Check = (value: unknown, path: string) => void
 const fail = (path: string): never => { throw new Error(`备份数据不完整或无效：${path}`) }
 const text: Check = (value, path) => { if (typeof value !== 'string' || value.length > 5_000_000) fail(path) }
+const nonemptyText: Check = (value, path) => { text(value, path); if (!(value as string).trim()) fail(path) }
 const id: Check = (value, path) => { text(value, path); if (!(value as string).trim() || (value as string).length > 200) fail(path) }
 const number: Check = (value, path) => { if (typeof value !== 'number' || !Number.isFinite(value)) fail(path) }
 const integer: Check = (value, path) => { number(value, path); if (!Number.isInteger(value) || (value as number) < 0) fail(path) }
+// -1 is the explicit "未分卷" chapter assignment; actual volumes remain nonnegative.
+const chapterVolumeIndex: Check = (value, path) => { if (value !== -1) integer(value, path) }
 const boolean: Check = (value, path) => { if (typeof value !== 'boolean') fail(path) }
 const date: Check = (value, path) => { text(value, path); if (!Number.isFinite(Date.parse(value as string))) fail(path) }
 const optional = (check: Check): Check => (value, path) => { if (value !== undefined) check(value, path) }
@@ -51,19 +62,110 @@ const version = object({ id, label: text, savedAt: date, snapshot: (value, path)
 } })
 const versions = optional(list(version, 20))
 const source = oneOf('user', 'ai')
+const chapterSource = object({ chapterId: id, sourceVersionId: id, derivedValue: nonemptyText, createdAt: date, origin: oneOf('ai', 'author') })
+const dataTimePoint: Check = (value, path) => {
+  object({ recordId: id, boundary: oneOf('start', 'end'), day: number })(value, path)
+  if (!storyTimePointWellFormed(value)) fail(path)
+}
+const dataTimeCursor: Check = (value, path) => {
+  object({ value: number, sources: list(dataTimePoint, 100_000) })(value, path)
+  const cursor = value as { value: number; sources: Array<{ recordId: string; boundary: string }> }
+  if (cursor.value < 0 || !cursor.sources.length
+    || new Set(cursor.sources.map(point => point.recordId + ':' + point.boundary)).size !== cursor.sources.length) fail(path)
+}
+const dataAutomationTime: Check = (value, path) => {
+  object({ end: dataTimePoint, cursors: list(object({ ruleId: id, cursor: dataTimeCursor }), 100) })(value, path)
+  const time = value as { end: { boundary: string }; cursors: Array<{ ruleId: string }> }
+  if (time.end.boundary !== 'end' || !time.cursors.length || new Set(time.cursors.map(row => row.ruleId)).size !== time.cursors.length) fail(path)
+}
+const dataProposalSource: Check = (value, path) => {
+  object({ kind: oneOf('author', 'chapter', 'automation'), ownerTarget: optional(object({ name: nonemptyText,
+    itemId: (value, path) => { if (value !== null) id(value, path) } })) })(value, path)
+  const source = value as Record<string, unknown>
+  object({ novelId: id, referenceVersion: id })(value, path)
+  if (source.kind !== 'author') object({ chapterId: id, sourceVersionId: id })(value, path)
+  if (source.kind === 'chapter') object({ quote: nonemptyText })(value, path)
+  if (source.kind === 'automation') {
+    object({ ruleSteps: list(object({ ruleId: id, steps: (value, path) => { integer(value, path); if (!Number.isSafeInteger(value) || (value as number) < 1) fail(path) } }), 100),
+      time: optional(dataAutomationTime) })(value, path)
+    const steps = source.ruleSteps as Array<{ ruleId: string }>
+    if (!steps.length || new Set(steps.map(row => row.ruleId)).size !== steps.length) fail(path + '.ruleSteps')
+    if (source.time && (source.time as { cursors: Array<{ ruleId: string }> }).cursors.some(row => !steps.some(step => step.ruleId === row.ruleId))) fail(path + '.time.cursors')
+  } else if (source.time !== undefined) fail(path + '.time')
+}
+const summaryDate: Check = (value, path) => {
+  date(value, path)
+  const iso = value as string
+  if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.test(iso)
+    || new Date(iso.slice(0, 10) + 'T00:00:00Z').toISOString().slice(0, 10) !== iso.slice(0, 10)) fail(path)
+}
+const knowledgeSummarySource = object({ kind: oneOf('entry', 'base'), knowledgeBaseId: id, entryId: optional(id),
+  sourceVersionId: id, derivedValue: nonemptyText, origin: oneOf('ai', 'author'), createdAt: summaryDate,
+  coverage: optional((value, path) => { if (!isKnowledgeSummaryCoverage(value)) fail(path) }) })
+const summaryLevel = oneOf('brief', 'standard', 'detailed')
+const knowledgeSummaryFields = {
+  summarySource: optional(knowledgeSummarySource),
+  summaryHistory: optional(list(object({ id, summary: text, summarySource: optional(knowledgeSummarySource),
+    summaryLevel: optional(summaryLevel), savedAt: summaryDate }), 20)),
+}
+const dataAutomationRule: Check = (value, path) => {
+  object({ id, trigger: oneOf('per_chapter', 'on_mention', 'elapsed_days'), amount: number, interval: number, enabled: boolean,
+    schedule: optional(list(number, 1000)), sourceFieldName: optional(text),
+    lastEvaluatedChapterIndex: optional(number), lastSourceValue: optional(number), appliedCount: optional(integer), pendingChapterIndex: optional(number),
+    storyTimeCursor: optional(dataTimeCursor), storyTimeCursorPending: optional(boolean),
+  })(value, path)
+  const rule = value as { trigger: string; sourceFieldName?: string; lastSourceValue?: number; storyTimeCursor?: { value: number }; storyTimeCursorPending?: boolean }
+  if (rule.storyTimeCursor && (rule.trigger !== 'elapsed_days' || rule.sourceFieldName !== '__story_clock__'
+    || rule.lastSourceValue !== rule.storyTimeCursor.value)) fail(path + '.storyTimeCursor')
+  if (rule.storyTimeCursorPending && (rule.trigger !== 'elapsed_days' || rule.sourceFieldName !== '__story_clock__'
+    || rule.storyTimeCursor !== undefined || rule.lastSourceValue !== undefined)) fail(path + '.storyTimeCursorPending')
+}
 const field = object({
   id, ...strings('name value unit note'),
   type: optional(oneOf('text', 'number', 'percent', 'days', 'countdown', 'formula')),
   formula: optional(text), calculationError: optional(text), autoCalculate: optional(boolean),
   modifier: optional(object({ attribute: text, operation: oneOf('flat', 'percent') })),
-  automationRules: optional(list(object({
-    id, trigger: oneOf('per_chapter', 'on_mention', 'elapsed_days'), amount: number, interval: number, enabled: boolean,
-    schedule: optional(list(number, 1000)), sourceFieldName: optional(text),
-    lastEvaluatedChapterIndex: optional(number), lastSourceValue: optional(number), appliedCount: optional(integer), pendingChapterIndex: optional(number),
-  }), 100)),
+  automationRules: optional(list(dataAutomationRule, 100)),
 })
 const equipmentState = oneOf('stored', 'equipped', 'consumed', 'lost')
 const dataCategory = oneOf('角色', '作物', '资源', '建筑', '任务', '装备', '道具', '自定义')
+function dataReferenceValue(key: string, value: unknown, path: string) {
+  if (key.startsWith('field:')) {
+    field(value, path)
+    if ((value as { id: string }).id !== key.slice(6)) fail(path + '.id')
+    return
+  }
+  const checks: Record<string, Check> = { $exists: boolean, name: text, category: dataCategory,
+    relatedKeywords: list(text), fieldOrder: list(id, 1000), ownerItemId: id,
+    equipmentState, lastMentionChapterIndex: number }
+  if (!Object.prototype.hasOwnProperty.call(checks, key)) fail(path)
+  checks[key](value, path)
+  if (key === 'fieldOrder' && new Set(value as string[]).size !== (value as string[]).length) fail(path)
+}
+const dataReferenceState: Check = (value, path) => {
+  object({})(value, path)
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.length > 1010) fail(path)
+  for (const [key, entry] of entries) dataReferenceValue(key, entry, path + '.' + key)
+}
+const dataReferenceSource: Check = (value, path) => {
+  const kind = (value as { kind?: unknown } | null)?.kind
+  if (kind === 'author' || kind === 'unverified') object({ kind: oneOf('author', 'unverified') })(value, path)
+  else {
+    dataProposalSource(value, path)
+    object({ chapterIndex: integer })(value, path)
+  }
+}
+const dataReferenceChange: Check = (value, path) => {
+  object({ key: text })(value, path)
+  const change = value as { key: string; before?: unknown; after?: unknown }
+  if (change.before === undefined && change.after === undefined) fail(path)
+  if (change.before !== undefined) dataReferenceValue(change.key, change.before, path + '.before')
+  if (change.after !== undefined) dataReferenceValue(change.key, change.after, path + '.after')
+}
+const dataReferenceHistory = object({ baseline: dataReferenceState, revisions: list(object({
+  id, appliedAt: date, source: dataReferenceSource, changes: list(dataReferenceChange, 2020), dependencies: optional(dataReferenceState),
+})) })
 const mutation: Check = (value, path) => {
   const kind = (value as { kind?: unknown } | null)?.kind
   if (kind === 'create') object({ kind: oneOf('create'), item: object({
@@ -93,48 +195,67 @@ const chapterLengthPolicy: Check = (value, path) => {
   const policy = value as { minWords: number; targetWords: number; maxWords: number }
   if (policy.minWords < 100 || policy.maxWords > 20000 || policy.minWords > policy.targetWords || policy.targetWords > policy.maxWords) fail(path)
 }
-const reviewCoverage = object({
+const reviewCoverage: Check = (value, path) => {
+  object({
   signature: text, totalChunks: integer, completedChunks: integer, totalCharacters: integer, coveredCharacters: integer,
   status: oneOf('running', 'complete', 'failed'), globalStatus: oneOf('pending', 'complete', 'failed', 'not-needed'),
   failedChunk: optional(integer), error: optional(text),
-})
+  })(value, path)
+  if ((value as { checkpoint?: unknown }).checkpoint !== undefined && !normalizeStoredReviewCoverage(value)) fail(path + '.checkpoint')
+}
+const chapterFields = { id, volumeIndex: chapterVolumeIndex, chapterIndex: integer, ...strings('title content summary'),
+  summarySource: optional(chapterSource),
+  bannedReview: optional(text), contentReview: optional(text), contentReviewSignature: optional(text), reviewRewriteBlockedSignature: optional(text),
+  contentReviewCoverage: optional(reviewCoverage),
+  wordCount: integer, storyDaysElapsed: optional(number), storyDay: optional(number),
+  status: oneOf('draft', 'writing', 'completed', 'reviewed', 'finalized', 'locked'), ...times, versions,
+  sceneNotes: optional(list(object({ id, title: text, content: text, source, ...times }), 10_000)),
+}
+const storyTimeRecord = object({ id, kind: oneOf('origin', 'absolute', 'relative'), status: oneOf('current', 'superseded', 'invalid', 'legacy'),
+  boundary: oneOf('origin', 'chapter'), chapterId: optional(id), chapterIndex: optional(integer), startDay: number, endDay: number,
+  elapsedDays: number, confirmedAt: date, confirmationOrder: integer, source: oneOf('author', 'canon', 'legacy'),
+  sourceVersionId: optional(id), dependsOnRecordId: optional(id), label: optional(text), invalidReason: optional(text) })
+const storyTimeOrigin = object({ id, day: number, label: text, confirmedAt: date, source: oneOf('author', 'legacy') })
 const book = object({
   id, ...strings('title genre subGenre genreLabel subGenreLabel outline synopsis'), tags: list(text, 1000),
   targetWordCountMin: number, targetWordCountMax: number, currentWordCount: integer,
   writingStyle: object(strings('narrativePov toneStyle descriptionDensity dialogueStyle combatStyle pacingControl emotionExpression')),
-  writingMode: optional(oneOf('manual', 'ai')), chatWebSearchEnabled: optional(boolean), storyClock: optional(object({
+  writingMode: optional(oneOf('manual', 'ai')), coverId: optional(text), chatWebSearchEnabled: optional(boolean), storyClock: optional(object({
     currentDay: number, label: text, lastChapterIndex: optional(number), updatedAt: date,
+    origin: optional(storyTimeOrigin), history: optional(list(storyTimeRecord, 100_000)), confirmationSequence: optional(integer),
   })), settings,
   chapterLengthPolicy: optional(chapterLengthPolicy),
   status: oneOf('creating', 'writing', 'archived', 'trash', 'completed'), ...times, knowledgeBaseIds: list(id, 1000),
   volumes: list(object({ id, volumeIndex: integer, ...strings('title theme summary keyTurningPoints characterChanges'),
     estimatedChapters: number, estimatedWordCount: number, versions }), 10_000),
-  chapters: list(object({ id, volumeIndex: integer, chapterIndex: integer, ...strings('title content summary'),
-    bannedReview: optional(text), contentReview: optional(text), contentReviewSignature: optional(text), reviewRewriteBlockedSignature: optional(text),
-    contentReviewCoverage: optional(reviewCoverage),
-    wordCount: integer, storyDaysElapsed: optional(number), storyDay: optional(number),
-    status: oneOf('draft', 'writing', 'completed', 'reviewed', 'finalized', 'locked'), ...times, versions,
-    sceneNotes: optional(list(object({ id, title: text, content: text, source, ...times }), 10_000)),
-  }), 30_000),
+  chapters: list(object(chapterFields), 30_000),
+  archivedChapters: optional(list(object({ ...chapterFields, archivedAt: date }), 30_000)),
   characters: list(object({ id, ...strings('name identity personality powerLevel faction description avatarColor'), aliases: list(text),
     avatarId: optional(text),
-    status: oneOf('活跃', '退场', '死亡', '失踪'), firstAppearChapter: number, events: list(text),
-    relationships: list(object({ targetId: id, targetName: text, relation: text })),
+    status: oneOf('活跃', '退场', '死亡', '失踪', '待核对'), firstAppearChapter: number, events: list(text),
+    relationships: (value, path) => {
+      list(object({ targetId: id, targetName: text, relation: text }))(value, path)
+      assertStoredRelationshipDimensions(value)
+    },
   }), 20_000),
   chatHistory: list(dialogue, 100_000),
   inspirationHistory: optional(list(dialogue, 100_000)),
   eventLog: list(object({ id, chapterIndex: number, ...strings('title description'), characters: list(text),
     type: oneOf('主线', '支线', '伏笔', '转折', '战斗', '其他'), scope: optional(oneOf('global', 'volume', 'chapter')),
-    status: optional(oneOf('planted', 'developing', 'resolved', 'abandoned')), hintCount: optional(number),
+    status: optional(oneOf('planted', 'developing', 'resolved', 'abandoned', 'unverified')), hintCount: optional(number),
     storyTime: optional(text), location: optional(text), targetChapter: optional(number), importance: optional(number), source: optional(source),
     relatedArcIds: optional(list(id)), evidence: optional(text), lastProgressChapterIndex: optional(number), resolvedChapterIndex: optional(number),
     timestamp: date, updatedAt: optional(date),
   })),
   storyArcs: optional(list(object({ id, ...strings('title description reactivateAt'),
     type: oneOf('main', 'sub', 'character', 'relationship', 'mystery', 'world'), importance: number,
-    status: oneOf('active', 'paused', 'completed', 'abandoned'), characterIds: list(id), ...times,
+    status: oneOf('active', 'paused', 'completed', 'abandoned', 'unverified'), characterIds: list(id),
+    goal: optional(text), conflict: optional(text), expectedResolution: optional(text), dependencyArcIds: optional(list(id)),
+    initialState: optional(text), desire: optional(text), fear: optional(text), falseBelief: optional(text), finalState: optional(text),
+    turningPointEventIds: optional(list(id)), ...times,
     nodes: list(object({ id, title: text, description: text, targetChapter: number, actualChapter: optional(number),
-      status: oneOf('pending', 'completed', 'abandoned'), ...times })),
+      status: oneOf('pending', 'completed', 'abandoned', 'unverified'),
+      prerequisiteNodeIds: optional(list(id)), consequenceEventIds: optional(list(id)), ...times })),
   }))),
   chapterPlans: optional(list(object({ id, ...strings('title objective summary'), beats: list(text),
     horizon: oneOf('next', 'near', 'far'), targetChapterStart: integer, targetChapterEnd: integer,
@@ -147,13 +268,18 @@ const book = object({
       relatedArcIds: list(id), targetChapter: optional(number), evidence: text })),
   }))),
   dataPanels: list(object({ id, category: oneOf('角色', '作物', '资源', '建筑', '任务', '装备', '道具', '自定义'), name: text,
+    referenceHistory: optional(dataReferenceHistory),
     fields: list(field, 1000), relatedKeywords: list(text), ownerItemId: optional(id), equipmentState: optional(oneOf('stored', 'equipped', 'consumed', 'lost')), lastMentionChapterIndex: optional(number), versions, ...times })),
   dataPanelChanges: list(object({ id, itemId: id, fieldId: id, ...strings('itemName fieldName oldValue newValue reason'),
     confidence: optional(oneOf('clear', 'possible', 'none')), mutation: optional(mutation),
+    sourceBinding: optional(dataProposalSource),
+    updatedAt: optional(date),
     chapterIndex: number, status: oneOf('pending', 'accepted', 'rejected'), createdAt: date })),
 })
-const knowledge = object({ id, name: text, description: text, createdAt: date,
-  entries: list(object({ id, ...strings('category title content summary'), tags: list(text), ...times })) })
+const knowledge = object({ id, name: text, description: text, createdAt: date, ...knowledgeSummaryFields,
+  summary: optional(text), summaryLevel: optional(summaryLevel),
+  summaryUpdatedAt: optional((value, path) => { if (value !== '') summaryDate(value, path) }),
+  entries: list(object({ id, ...strings('category title content summary'), tags: list(text), ...times, ...knowledgeSummaryFields })) })
 
 function checkTree(value: unknown, path: string, depth = 0) {
   if (depth > 40) fail(`${path}（嵌套过深）`)
@@ -167,13 +293,15 @@ function checkTree(value: unknown, path: string, depth = 0) {
 export function validateProjectBackup(value: unknown): void {
   checkTree(value, '项目')
   object({ exportedAt: date, novels: list(book, 1000), knowledgeBases: list(knowledge, 1000),
-    chapterRevisions: optional(list(object({ id, novelId: id, chapterId: id,
+    chapterRevisions: list(object({ id, novelId: id, chapterId: id,
       ...strings('baseContent proposedContent diff reason'), source: oneOf('ai', 'user', 'review'),
       status: oneOf('pending', 'accepted', 'rejected', 'stale'), ...times, appliedAt: optional(date),
-    }))),
+      selection: optional(object({ mode: oneOf('polish', 'rewrite', 'expand', 'shorten', 'continue'),
+        startOffset: integer, endOffset: integer, contextVersion: id })),
+    })),
   })(value, '项目')
   const project = value as import('./projectBackup').ProjectBackup
-  if (project.inspirationSessions !== undefined) {
+  {
     if (!Array.isArray(project.inspirationSessions) || project.inspirationSessions.length > 1000) fail('灵感会话')
     project.inspirationSessions.forEach(parseInspirationSession)
     if (new Set(project.inspirationSessions.map(item => item.id)).size !== project.inspirationSessions.length) fail('灵感会话编号重复')
@@ -190,19 +318,100 @@ export function validateProjectBackup(value: unknown): void {
   unique('novels', project.novels)
   unique('knowledgeBases', project.knowledgeBases)
   unique('chapterRevisions', project.chapterRevisions || [])
-  for (const kb of project.knowledgeBases) unique('entries', kb.entries)
+  for (const kb of project.knowledgeBases) {
+    unique('entries', kb.entries)
+    for (const target of [kb, ...kb.entries]) {
+      const isBase = target === kb
+      const sources = [target.summarySource, ...(target.summaryHistory || []).map(history => history.summarySource)]
+      for (const source of sources) {
+        if (!source) continue
+        if (source.knowledgeBaseId !== kb.id || source.kind !== (isBase ? 'base' : 'entry')
+          || (isBase ? source.entryId !== undefined : source.entryId !== target.id)) fail('knowledge.summarySource 归属不匹配')
+        if (!isBase && source.coverage && (source.coverage.sources.length !== 1 || source.coverage.sources[0].entryId !== target.id)) fail('knowledge.summarySource.coverage 条目归属不匹配')
+      }
+      if (new Set(target.summaryHistory?.map(item => item.id)).size !== (target.summaryHistory?.length || 0)) fail('knowledge.summaryHistory 编号重复')
+    }
+  }
+  const entityOwners = new Map<string, Set<string>>()
+  const ownerKey = (kind: string, value: string) => kind + ':' + value
+  const registerEntity = (kind: string, value: string, novelId: string) => {
+    const owners = entityOwners.get(ownerKey(kind, value)) || new Set<string>()
+    owners.add(novelId)
+    entityOwners.set(ownerKey(kind, value), owners)
+  }
+  for (const novel of project.novels) {
+    for (const character of novel.characters) registerEntity('character', character.id, novel.id)
+    for (const event of novel.eventLog) registerEntity('event', event.id, novel.id)
+    for (const arc of novel.storyArcs || []) {
+      registerEntity('arc', arc.id, novel.id)
+      for (const node of arc.nodes) registerEntity('arc_node', node.id, novel.id)
+    }
+  }
+  const checkArcReference = (novelId: string, kind: string, value: string, path: string) => {
+    const owners = entityOwners.get(ownerKey(kind, value))
+    if (owners && !owners.has(novelId)) fail(`${path}（引用属于其他作品）`)
+  }
   for (const novel of project.novels) {
     for (const key of ['chapters', 'volumes', 'characters', 'chatHistory', 'inspirationHistory', 'eventLog', 'storyArcs', 'dataPanels', 'dataPanelChanges'] as const) {
       unique(key, novel[key] || [])
     }
+    // Archived IDs share the physical chapter namespace and cannot alias a live chapter or another book.
+    unique('chapters', novel.archivedChapters || [])
+    if (novel.chapters.some(chapter => 'archivedAt' in chapter)) fail(novel.title + '：归档标记不能出现在正式章节中')
     if (novel.targetWordCountMin < 0 || novel.targetWordCountMax < novel.targetWordCountMin) fail(`${novel.title}：目标字数`)
+    const timeHistory = novel.storyClock?.history || []
+    const timeIds = new Set<string>()
+    if (novel.storyClock?.origin && !storyTimeOriginWellFormed(novel.storyClock.origin)) fail(`${novel.title}.storyClock：起点格式无效`)
+    if (novel.storyClock?.confirmationSequence !== undefined && (!Number.isSafeInteger(novel.storyClock.confirmationSequence)
+      || timeHistory.some(row => row.confirmationOrder > novel.storyClock!.confirmationSequence!))) fail(`${novel.title}.storyClock：确认顺序落后于历史`)
+    for (const row of timeHistory) {
+      if (timeIds.has(row.id)) fail(`${novel.title}.storyClock.history：重复 ID ${row.id}`)
+      timeIds.add(row.id)
+      if (row.startDay < 0 || row.endDay < row.startDay || row.elapsedDays < 0) fail(`${novel.title}.storyClock.history：时间边界无效 ${row.id}`)
+      if (!Number.isSafeInteger(row.confirmationOrder)) fail(`${novel.title}.storyClock：确认顺序无效`)
+      if (row.status !== 'current') continue
+      if (!storyTimeRecordWellFormed(row) || row.source === 'legacy') fail(`${novel.title}.storyClock：当前记录来源或边界格式无效`)
+      const heads = timeHistory.filter(item => row.boundary === 'origin' ? item.boundary === 'origin' : item.chapterId === row.chapterId)
+      const latest = heads.reduce((head, item) => item.confirmationOrder >= head.confirmationOrder ? item : head)
+      if (latest !== row) fail(`${novel.title}.storyClock：旧记录不能冒充当前确认`)
+      if (row.boundary === 'origin' && (!novel.storyClock?.origin || novel.storyClock.origin.id !== row.id
+        || novel.storyClock.origin.day !== row.endDay || row.source !== 'author' || novel.storyClock.origin.source !== 'author'
+        || novel.storyClock.origin.label !== row.label || novel.storyClock.origin.confirmedAt !== row.confirmedAt)) fail(`${novel.title}.storyClock：当前起点来源不匹配`)
+      if (row.boundary === 'chapter' && (!row.chapterId || row.chapterIndex === undefined || !row.sourceVersionId)) fail(`${novel.title}.storyClock：当前章节来源不完整`)
+      if (row.dependsOnRecordId) {
+        const dependency = timeHistory.find(item => item.id === row.dependsOnRecordId)
+        if (!dependency || dependency.status !== 'current' || dependency.endDay !== row.startDay
+          || dependency.confirmationOrder >= row.confirmationOrder
+          || (row.chapterIndex === 0 ? dependency.boundary !== 'origin'
+            : dependency.boundary !== 'chapter' || dependency.chapterIndex !== row.chapterIndex! - 1)) fail(`${novel.title}.storyClock：当前依赖来源无效`)
+      }
+    }
     if (new Set(novel.chapters.map(chapter => chapter.chapterIndex)).size !== novel.chapters.length) fail(`${novel.title}：重复章节序号`)
     for (const panel of novel.dataPanels) {
+      const revisions = panel.referenceHistory?.revisions || []
+      if (new Set(revisions.map(revision => revision.id)).size !== revisions.length) fail(panel.name + '：数据来源修订ID重复')
+      for (const revision of revisions) {
+        if (!revision.changes.length || new Set(revision.changes.map(change => change.key)).size !== revision.changes.length) fail(panel.name + '：数据来源修订字段无效')
+        const source = revision.source
+        if (source.kind === 'chapter' || source.kind === 'automation') {
+          if (source.novelId !== novel.id || project.novels.some(other => other.id !== novel.id
+            && [...other.chapters, ...(other.archivedChapters || [])].some(chapter => chapter.id === source.chapterId))) fail(panel.name + '：数据来源属于其他作品')
+          if (source.kind === 'automation' && !Object.keys(revision.dependencies || {}).length) fail(panel.name + '：自动推算缺少输入来源')
+        }
+      }
       if (new Set(panel.fields.map(field => field.id)).size !== panel.fields.length) fail(`${panel.name}：重复字段 ID`)
       for (const version of panel.versions || []) object({ name: text, category: text, fields: list(field, 1000), relatedKeywords: list(text) })(JSON.parse(version.snapshot), `${panel.name}：历史快照`)
     }
-    for (const chapter of novel.chapters) {
-      for (const version of chapter.versions || []) object({ ...strings('title content summary'), status: oneOf('draft', 'writing', 'completed', 'reviewed', 'finalized', 'locked') })(JSON.parse(version.snapshot), `${chapter.title}：历史快照`)
+    for (const change of novel.dataPanelChanges) {
+      if (change.sourceBinding && change.sourceBinding.novelId !== novel.id) fail(novel.title + '：数据提案来源属于其他作品')
+    }
+    for (const chapter of [...novel.chapters, ...(novel.archivedChapters || [])]) {
+      if (chapter.summarySource && chapter.summarySource.chapterId !== chapter.id) fail(`${chapter.title}：summarySource 章节不匹配`)
+      for (const version of chapter.versions || []) {
+        const snapshot = JSON.parse(version.snapshot)
+        object({ ...strings('title content summary'), summarySource: optional(chapterSource), status: oneOf('draft', 'writing', 'completed', 'reviewed', 'finalized', 'locked') })(snapshot, `${chapter.title}：历史快照`)
+        if (snapshot.summarySource && snapshot.summarySource.chapterId !== chapter.id) fail(`${chapter.title}：历史快照 summarySource 章节不匹配`)
+      }
     }
     for (const volume of novel.volumes) {
       for (const version of volume.versions || []) object({ ...strings('title theme summary keyTurningPoints characterChanges'), volumeIndex: integer, estimatedChapters: number, estimatedWordCount: number })(JSON.parse(version.snapshot), `${volume.title}：历史快照`)
@@ -216,11 +425,30 @@ export function validateProjectBackup(value: unknown): void {
     for (const kbId of novel.knowledgeBaseIds) {
       if (!globalIds.get('knowledgeBases')?.has(kbId)) fail(`${novel.title}：知识库引用不存在 ${kbId}`)
     }
+    for (const arc of novel.storyArcs || []) {
+      arc.characterIds.forEach((target, index) => checkArcReference(novel.id, 'character', target, `${novel.title}.storyArcs.${arc.id}.characterIds[${index}]`))
+      for (const [kind, field] of [['arc', 'dependencyArcIds'], ['event', 'turningPointEventIds']] as const) {
+        for (const [index, target] of (arc[field] || []).entries()) checkArcReference(novel.id, kind, target, `${novel.title}.storyArcs.${arc.id}.${field}[${index}]`)
+      }
+      for (const node of arc.nodes) {
+        for (const [kind, field] of [['arc_node', 'prerequisiteNodeIds'], ['event', 'consequenceEventIds']] as const) {
+          for (const [index, target] of (node[field] || []).entries()) checkArcReference(novel.id, kind, target, `${novel.title}.storyArcs.${arc.id}.nodes.${node.id}.${field}[${index}]`)
+        }
+      }
+    }
+    try {
+      validateStoryArcGraph(novel)
+    } catch (error) {
+      fail(`${novel.title}.storyArcs：${error instanceof Error ? error.message : '图结构无效'}`)
+    }
     // Historical changes/proposals can intentionally refer to deleted objects.
     // They remain inert history; do not silently discard them during import.
   }
   for (const revision of project.chapterRevisions || []) {
     const novel = project.novels.find(book => book.id === revision.novelId)
-    if (!novel?.chapters.some(chapter => chapter.id === revision.chapterId)) fail(`正文修订：章节引用不存在 ${revision.chapterId}`)
+    if (!novel || ![...novel.chapters, ...(novel.archivedChapters || [])].some(chapter => chapter.id === revision.chapterId)) fail(`正文修订：章节引用不存在 ${revision.chapterId}`)
+    validateSelectionRevision(revision)
   }
+  validateEntityHistories(project.novels)
+  validateReconstructionWorkspaces(project.reconstructionWorkspaces, project.novels)
 }

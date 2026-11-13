@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useNovelStore } from '@/stores/novel'
-import { createProjectBackup } from '../projectBackup'
+import { createTestProjectBackup as createProjectBackup } from '@/test/projectBackupFixture'
 import { replaceProjectInDb } from './project'
 import { loadAllNovelsFromDb } from './novels'
 import { loadAllKnowledgeBasesFromDb } from './knowledge'

@@ -3,10 +3,31 @@ function cleanAiJsonText(text: string): string {
     .replace(/<(thinking|think|analysis|reasoning)>[\s\S]*?<\/\1>/gi, '')
     .replace(/```json\s*/gi, '')
     .replace(/```/g, '')
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-    .replace(/,\s*([}\]])/g, '$1')
     .trim()
+}
+
+/** Tolerate structural punctuation without rewriting dialogue inside JSON strings. */
+function repairJsonPunctuation(text: string): string {
+  let result = ''
+  let delimiter: '"' | '”' | undefined
+  let escaped = false
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index]
+    if (delimiter) {
+      if (escaped) { result += char; escaped = false }
+      else if (char === '\\') { result += char; escaped = true }
+      else if (char === delimiter) { result += '"'; delimiter = undefined }
+      else result += char
+      continue
+    }
+    if (char === '"' || char === '“') {
+      delimiter = char === '“' ? '”' : '"'
+      result += '"'
+    } else if (char === ',' && /^\s*[}\]]/.test(text.slice(index + 1))) {
+      // Only remove a trailing comma outside a string.
+    } else result += char
+  }
+  return result
 }
 
 function extractBalancedJson(text: string, startChar: '{' | '[', endChar: '}' | ']'): string[] {
@@ -36,7 +57,7 @@ function extractBalancedJson(text: string, startChar: '{' | '[', endChar: '}' | 
 }
 
 export function parseAiJsonObject<T = unknown>(text: string): T | null {
-  const cleaned = cleanAiJsonText(text)
+  const cleaned = repairJsonPunctuation(cleanAiJsonText(text))
   for (const json of extractBalancedJson(cleaned, '{', '}')) {
     try {
       return JSON.parse(json) as T
@@ -48,7 +69,7 @@ export function parseAiJsonObject<T = unknown>(text: string): T | null {
 }
 
 export function parseAiJsonArray<T = unknown>(text: string): T[] {
-  const cleaned = cleanAiJsonText(text)
+  const cleaned = repairJsonPunctuation(cleanAiJsonText(text))
   for (const json of extractBalancedJson(cleaned, '[', ']')) {
     try {
       const parsed = JSON.parse(json)

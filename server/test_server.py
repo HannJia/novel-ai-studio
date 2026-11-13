@@ -154,8 +154,9 @@ def test_invalid_json_and_cors(env):
     _, client = env
     assert client.post("/v1/auth/login", content="{").status_code == 400
     assert client.post("/v1/auth/login", json=[]).status_code == 400
-    valid = client.options("/v1/auth/login", headers={"Origin": "http://localhost:5173", "Access-Control-Request-Method": "POST"})
-    assert valid.headers["access-control-allow-origin"] == "http://localhost:5173"
+    for origin in ("http://localhost:5173", "http://127.0.0.1:5180"):
+        valid = client.options("/v1/auth/login", headers={"Origin": origin, "Access-Control-Request-Method": "POST"})
+        assert valid.headers["access-control-allow-origin"] == origin
     evil = client.options("/v1/auth/login", headers={"Origin": "https://untrusted.example", "Access-Control-Request-Method": "POST"})
     assert "access-control-allow-origin" not in evil.headers
 

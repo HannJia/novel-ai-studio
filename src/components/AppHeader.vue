@@ -17,6 +17,7 @@
       </nav>
     </div>
     <div class="header-right">
+      <button v-if="legacyPref" class="header-pill" type="button" title="回到新版界面" @click="useNewUi">新界面</button>
       <button class="header-pill cloud-header-btn" :title="cloud.statusText" :aria-label="cloud.statusText" @click="openCloud">
         <span class="cloud-dot" :class="cloudDotClass" aria-hidden="true" />
         <span class="cloud-header-label">{{ cloud.session ? cloud.statusText : '云同步' }}</span>
@@ -51,6 +52,7 @@ import { NIcon } from 'naive-ui'
 import { SettingsOutline, LibraryOutline, LayersOutline } from '@vicons/ionicons5'
 import { useCloudSyncStore } from '@/stores/cloudSync'
 import { useThemeStore, themeOptions } from '@/stores/theme'
+import { readShellPref, writeShellPref } from '@/v3/shell'
 
 const router = useRouter()
 const route = useRoute()
@@ -59,6 +61,12 @@ const emit = defineEmits<{
 }>()
 const themeStore = useThemeStore()
 const cloud = useCloudSyncStore()
+// 用户主动切回旧界面后，提供回到新界面的入口；新界面是默认界面。
+const legacyPref = readShellPref() === 'legacy'
+function useNewUi() {
+  writeShellPref('v3')
+  router.push('/')
+}
 
 // 书架、创建向导和书内工作台都归在“书架”下
 const isShelf = computed(() => !route.path.startsWith('/knowledge') && route.path !== '/settings')

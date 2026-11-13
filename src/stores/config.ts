@@ -18,6 +18,23 @@ export interface ModelConfig {
   contextWindow?: number // 模型上下文窗口大小（token 数），用于动态分配上下文
   chatSearchProtocol?: ChatSearchProtocol // 仅影响书内/灵感对话的联网请求
   kind?: 'chat' | 'embedding' // 模型用途类型；省略时默认为 chat
+  connectionTest?: ModelConnectionTestRecord // 仅本机连接测试记录，不参与云端配置同步
+}
+
+export type ModelConnectionTestStatus = 'testing' | 'ok' | 'fail'
+export type ModelConnectionTestEnvironment = 'browser' | 'electron'
+export interface ModelConnectionTestRecord {
+  status: ModelConnectionTestStatus
+  testedAt: string
+  fingerprint: string
+  environment: ModelConnectionTestEnvironment
+}
+
+export interface ModelConnectionTestAttempt {
+  modelId: string
+  connectionVersion: number
+  requestId: number
+  environment: ModelConnectionTestEnvironment
 }
 
 // 模型用途映射
@@ -213,8 +230,54 @@ export const useConfigStore = defineStore('config', () => {
   const isConfigured = ref(false)
   const isInitialized = ref(false)
   let saveQueue: Promise<void> = Promise.resolve()
+  let modelConnectionRequestId = 0
+  const modelConnectionVersions = new Map<string, number>()
+  const latestModelConnectionRequests = new Map<string, number>()
+  const activeModelConnectionRequests = reactive<Record<string, number>>({})
+
+  function invalidateModelConnection(id: string) {
+    modelConnectionVersions.set(id, (modelConnectionVersions.get(id) || 0) + 1)
+    latestModelConnectionRequests.delete(id)
+    delete activeModelConnectionRequests[id]
+  }
+
+  function invalidateAllModelConnections() {
+    const ids = new Set([
+      ...models.value.map(model => model.id),
+      ...modelConnectionVersions.keys(),
+      ...latestModelConnectionRequests.keys(),
+    ])
+    for (const id of ids) invalidateModelConnection(id)
+  }
+
+  function beginModelConnectionTest(id: string, environment: ModelConnectionTestEnvironment): ModelConnectionTestAttempt | null {
+    const model = models.value.find(item => item.id === id)
+    if (!model || securityStatus.environment !== environment) return null
+    const requestId = ++modelConnectionRequestId
+    latestModelConnectionRequests.set(id, requestId)
+    activeModelConnectionRequests[id] = requestId
+    return { modelId: id, connectionVersion: modelConnectionVersions.get(id) || 0, requestId, environment }
+  }
+
+  function isCurrentModelConnectionTest(attempt: ModelConnectionTestAttempt): boolean {
+    return Boolean(
+      models.value.some(model => model.id === attempt.modelId)
+      && securityStatus.environment === attempt.environment
+      && (modelConnectionVersions.get(attempt.modelId) || 0) === attempt.connectionVersion
+      && latestModelConnectionRequests.get(attempt.modelId) === attempt.requestId,
+    )
+  }
+
+  function isModelConnectionTestActive(id: string): boolean {
+    return activeModelConnectionRequests[id] !== undefined
+  }
+
+  function finishModelConnectionTest(attempt: ModelConnectionTestAttempt) {
+    if (activeModelConnectionRequests[attempt.modelId] === attempt.requestId) delete activeModelConnectionRequests[attempt.modelId]
+  }
 
   function applyConfig(input: ConfigData | null) {
+    invalidateAllModelConnections()
     const data = input ? migrateLegacyEmbedding(input) : null
     models.value = data?.models || []
     Object.assign(assignments, { outline: '', writing: '', review: '', chat: '', embedding: '', ...(data?.assignments || {}) })
@@ -403,8 +466,14 @@ export const useConfigStore = defineStore('config', () => {
   function updateModel(id: string, updates: Partial<ModelConfig>) {
     const model = models.value.find(m => m.id === id)
     if (model) {
-      const kindChanged = updates.kind !== undefined && updates.kind !== model.kind
+      const kindChanged = updates.kind !== undefined && (updates.kind || 'chat') !== (model.kind || 'chat')
+      const connectionChanged = kindChanged
+        || (Object.prototype.hasOwnProperty.call(updates, 'baseUrl') && updates.baseUrl !== model.baseUrl)
+        || (Object.prototype.hasOwnProperty.call(updates, 'apiKey') && updates.apiKey !== model.apiKey)
+        || (Object.prototype.hasOwnProperty.call(updates, 'modelName') && updates.modelName !== model.modelName)
+      if (connectionChanged) invalidateModelConnection(id)
       Object.assign(model, updates)
+      if (connectionChanged) delete model.connectionTest
       if (kindChanged) {
         const newKind = model.kind || 'chat'
         if (newKind === 'chat' && assignments.embedding === id) {
@@ -429,8 +498,20 @@ export const useConfigStore = defineStore('config', () => {
     }
   }
 
+  async function recordModelConnectionTest(attempt: ModelConnectionTestAttempt, record: ModelConnectionTestRecord): Promise<boolean> {
+    if (record.environment !== attempt.environment || !isCurrentModelConnectionTest(attempt)) return false
+    const model = models.value.find(item => item.id === attempt.modelId)
+    if (!model) return false
+    model.connectionTest = { ...record }
+    if (!isCurrentModelConnectionTest(attempt)) return false
+    await saveConfig()
+    if (record.status !== 'testing' && isCurrentModelConnectionTest(attempt)) finishModelConnectionTest(attempt)
+    return isCurrentModelConnectionTest(attempt)
+  }
+
   // 删除模型配置
   function deleteModel(id: string) {
+    invalidateModelConnection(id)
     const wasEmbedding = assignments.embedding === id
     models.value = models.value.filter(m => m.id !== id)
     const firstChat = models.value.find(m => (m.kind || 'chat') === 'chat')
@@ -489,15 +570,25 @@ export const useConfigStore = defineStore('config', () => {
   }
 
   function updateEmbeddingConfig(updates: Partial<EmbeddingConfig>) {
-    Object.assign(embedding, updates)
     const selected = getModelForTask('embedding')
     const hasConnectionUpdate = ['baseUrl', 'modelName', 'apiKey'].some(key => Object.prototype.hasOwnProperty.call(updates, key))
     if (selected && hasConnectionUpdate) {
+      const connectionChanged = selected.baseUrl !== (updates.baseUrl ?? embedding.baseUrl)
+        || selected.apiKey !== (updates.apiKey ?? embedding.apiKey)
+        || selected.modelName !== (updates.modelName ?? embedding.modelName)
+      if (connectionChanged) {
+        invalidateModelConnection(selected.id)
+        delete selected.connectionTest
+      }
+      Object.assign(embedding, updates)
       Object.assign(selected, { baseUrl: embedding.baseUrl, apiKey: embedding.apiKey, modelName: embedding.modelName })
     } else if (!selected && hasConnectionUpdate) {
+      Object.assign(embedding, updates)
       const data = exportConfig()
       delete data.assignments.embedding
       applyConfig(data)
+    } else {
+      Object.assign(embedding, updates)
     }
     syncEmbeddingConnection()
     void saveConfig()
@@ -570,6 +661,11 @@ export const useConfigStore = defineStore('config', () => {
     importConfig,
     addModel,
     updateModel,
+    beginModelConnectionTest,
+    isCurrentModelConnectionTest,
+    isModelConnectionTestActive,
+    finishModelConnectionTest,
+    recordModelConnectionTest,
     deleteModel,
     getModelForTask,
     setAssignment,

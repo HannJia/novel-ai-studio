@@ -37,4 +37,14 @@ describe('本地连续性扫描', () => {
     const novel = fixture()
     expect(scanContinuity(novel, novel.chapters[0], '   ')).toEqual([])
   })
+
+  it('只比较前文，不用未来章节制造当前章的重复问题', () => {
+    const novel = fixture(), chapter = novel.chapters[0]
+    const content = '林澈穿过笼罩在雾中的城门终于看见远方的灯火。'
+    const other = { ...chapter, id: 'other', chapterIndex: 1, content }
+    novel.chapters.push(other)
+    expect(scanContinuity(novel, chapter, content)).toEqual([])
+    chapter.chapterIndex = 2
+    expect(scanContinuity(novel, chapter, content).map(row => row.title)).toContain('段落疑似重复')
+  })
 })

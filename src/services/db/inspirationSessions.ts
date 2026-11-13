@@ -1,5 +1,6 @@
 import { execute, initDb, queryAll, runTransaction } from '../database'
 import { LEGACY_INSPIRATION_KEY, latestInspirationSessions, parseInspirationSession, type InspirationSession } from '../inspirationSessions'
+import { usesProjectKernel, readKernelBackup, mutateProjectLibrary } from '../projectKernelClient'
 
 export function writeInspirationSessions(sessions: InspirationSession[]) {
   const checked = sessions.map(parseInspirationSession)
@@ -7,6 +8,7 @@ export function writeInspirationSessions(sessions: InspirationSession[]) {
   for (const session of checked) execute('INSERT INTO inspiration_sessions(id,value) VALUES(?,?)', [session.id, JSON.stringify(session)])
 }
 export async function loadInspirationSessions(): Promise<InspirationSession[]> {
+  if (usesProjectKernel()) return (await readKernelBackup()).inspirationSessions
   await initDb()
   if (!queryAll("SELECT id FROM local_migrations WHERE id='inspiration-sessions'").length) {
     const raw = localStorage.getItem(LEGACY_INSPIRATION_KEY)
@@ -23,6 +25,10 @@ export async function loadInspirationSessions(): Promise<InspirationSession[]> {
   return latestInspirationSessions(queryAll<{ value: string }>('SELECT value FROM inspiration_sessions').map(row => parseInspirationSession(JSON.parse(row.value))))
 }
 export async function saveInspirationSessions(sessions: InspirationSession[]) {
+  if (usesProjectKernel()) {
+    const checked = sessions.map(parseInspirationSession)
+    return mutateProjectLibrary(({ backup }) => { backup.inspirationSessions = checked })
+  }
   await initDb()
   await runTransaction(() => writeInspirationSessions(sessions), { restoreOnWriteFailure: true })
 }

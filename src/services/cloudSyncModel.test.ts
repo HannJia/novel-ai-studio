@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useNovelStore } from '@/stores/novel'
-import { createProjectBackup } from './projectBackup'
+import { createTestProjectBackup as createProjectBackup, plannedProjectWorkspace } from '@/test/projectBackupFixture'
 import { canonicalJson, decideSync, hashPayload, mergeCloudDocuments, normalizeSyncEndpoint, parseCloudDocument, projectDocuments } from './cloudSyncModel'
 import { parseInspirationSession } from './inspirationSessions'
 
@@ -13,6 +13,51 @@ function book() {
 beforeEach(() => setActivePinia(createPinia()))
 
 describe('云同步文档与冲突判断', () => {
+  it('keeps cloud hashes stable when reopened storage materializes default false flags', async () => {
+    const novel = book()
+    delete novel.chapterPlanConfirmed
+    delete novel.chatWebSearchEnabled
+    const project = createProjectBackup([novel], [])
+    const key = 'novel:' + novel.id
+    const original = projectDocuments(project).get(key)!
+    const reopened = JSON.parse(JSON.stringify(project)) as typeof project
+    reopened.novels[0].chapterPlanConfirmed = false
+    reopened.novels[0].chatWebSearchEnabled = false
+    expect(projectDocuments(reopened).get(key)).toBe(original)
+    const hash = await hashPayload(original)
+    expect(decideSync(await hashPayload(projectDocuments(reopened).get(key)!), { version: 3, hash }, { version: 3, hash })).toBe('same')
+    reopened.novels[0].chapterPlanConfirmed = true
+    reopened.novels[0].chatWebSearchEnabled = true
+    const enabled = parseCloudDocument(key, projectDocuments(reopened).get(key)!)
+    expect(enabled).toMatchObject({ novel: { chapterPlanConfirmed: true, chatWebSearchEnabled: true } })
+    expect(novel.chapterPlanConfirmed).toBeUndefined()
+    expect(novel.chatWebSearchEnabled).toBeUndefined()
+  })
+  it('round trips complete V2 planning and run checkpoints, preserves other workspaces and deletes them with their novel', () => {
+    const a = book(), b = book()
+    const workspaces = [plannedProjectWorkspace(a), plannedProjectWorkspace(b)]
+    const project = createProjectBackup([a, b], [], [], [], workspaces)
+    const doc = JSON.parse(projectDocuments(project).get('novel:' + a.id)!)
+    expect(doc.reconstructionWorkspace).toEqual(workspaces[0])
+    doc.reconstructionWorkspace.creationDraft.contract.title = '另一台电脑修改的契约'
+    const merged = mergeCloudDocuments(project, new Map([['novel:' + a.id, canonicalJson(doc)]]))
+    expect(merged.reconstructionWorkspaces.find(item => item.novelId === a.id)?.creationDraft?.contract.title).toBe('另一台电脑修改的契约')
+    expect(merged.reconstructionWorkspaces.find(item => item.novelId === b.id)).toEqual(workspaces[1])
+    expect(mergeCloudDocuments(merged, new Map([['novel:' + a.id, null]])).reconstructionWorkspaces).toEqual([workspaces[1]])
+    expect(project.reconstructionWorkspaces[0].creationDraft?.contract.title).toBe('作者确认的作品契约')
+  })
+
+  it('rejects lossy V1 cloud documents and workspace ownership mismatches', () => {
+    const a = book(), b = book()
+    const legacy = { kind: 'novel', novel: a, chapterRevisions: [] }
+    expect(() => parseCloudDocument('novel:' + a.id, canonicalJson(legacy))).toThrow('V2 创作工作区')
+    const mismatched = { ...legacy, schemaVersion: 2, reconstructionWorkspace: plannedProjectWorkspace(b) }
+    expect(() => parseCloudDocument('novel:' + a.id, canonicalJson(mismatched))).toThrow()
+    const project = createProjectBackup([a], [])
+    delete (project as Partial<typeof project>).reconstructionWorkspaces
+    expect(() => projectDocuments(project)).toThrow()
+  })
+
   it('merges conversations by session ID and caps the visible history at the latest five', () => {
     const sessions = Array.from({ length: 5 }, (_, index) => parseInspirationSession({ id: `idea-${index}`, title: `${index}`,
       updatedAt: `2026-09-1${index + 1}T00:00:00Z`, messages: [], draft: 'draft' }))

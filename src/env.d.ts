@@ -7,6 +7,8 @@ declare module '*.vue' {
 }
 
 interface ElectronAPI {
+  clipboardWriteText?: (value: string) => Promise<void>
+  projectRequest?: (request: import('./types/projectKernel').ProjectKernelRequest) => Promise<import('./types/projectKernel').ProjectKernelResponse>
   updateWake?: () => Promise<import('./types/update').AppUpdateState>
   cloudSessionRead: () => Promise<import('./services/cloudSyncModel').CloudSession | null>
   cloudSessionWrite: (value: import('./services/cloudSyncModel').CloudSession | null) => Promise<void>

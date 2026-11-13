@@ -1,20 +1,26 @@
-import { ref, type Ref } from 'vue'
+import { computed, ref, type Ref } from 'vue'
 import { callAI } from '@/services/ai'
 import { buildChapterAnalysisPrompt } from '@/services/prompts'
 import { useConfigStore, type ModelConfig } from '@/stores/config'
 import { useNovelStore } from '@/stores/novel'
 import { buildDataMemoryProposals, DATA_MEMORY_OUTPUT, DATA_MEMORY_RULES } from '@/services/dataPanelExtraction'
 import { equipmentSnapshot, formatEquipmentTotals } from '@/services/dataPanelEquipment'
-import type { DataPanelItem, Novel } from '@/types/novel'
+import { projectDataPanelReferences } from '@/services/dataPanelReference'
+import type { DataPanelItem } from '@/types/novel'
 import { parseAiJsonArray, parseAiJsonObject } from '@/utils/aiJson'
-import { hasChapterEvidence, normalizeStoryPromiseDrafts, normalizeStoryStateProposalDrafts } from '@/services/storyPlanning'
+import { buildAnalysisSourceVersionId, buildChapterAnalysisCandidates, isCompleteChapterAnalysis, type ChapterAnalysisCandidatePayload } from '@/services/reconstructionCandidates'
+import { useReconstructionWorkspaceStore } from '@/stores/reconstructionWorkspace'
+import { formatCharacterAnalysisReferences, formatCharacterStateContext } from '@/services/reconstructionCharacterState'
+import type { CandidateChange } from '@/types/reconstruction'
+import { captureChapterAnalysisBaseline, formatChapterAnalysisPlans, type ChapterAnalysisSubmission } from '@/services/chapterAnalysisTransactions'
+import { assertStructuredOutputComplete } from '@/services/aiDiagnostics'
+import { formatEventCausalityAnalysisReferences } from '@/services/eventCausality'
 
 export interface ChapterStructureAnalysisOptions {
   target?: { novelId: string; chapterId: string }
   includeTimeline?: boolean
   includeCharacters?: boolean
   includeDataChanges?: boolean
-  replaceExistingAiTimeline?: boolean
   activityParentId?: string
   signal?: AbortSignal
 }
@@ -35,9 +41,16 @@ interface UseChapterAnalysisOptions {
   onInfo?: (message: string) => void
   onWarning?: (message: string) => void
   onDataChangesDetected?: (result: { novelId: string; chapterIndex: number; count: number; foreground: boolean }) => void
+  onCandidatesDetected?: (result: {
+    novelId: string
+    chapterId: string
+    chapterIndex: number
+    sourceVersionId: string
+    candidates: CandidateChange[]
+  }) => void
 }
 
-interface ChapterAnalysisPayload {
+interface ChapterAnalysisPayload extends ChapterAnalysisCandidatePayload {
   events?: Array<Record<string, any>>
   characters?: Array<Record<string, any>>
   globalPlans?: Array<Record<string, any>>
@@ -83,59 +96,100 @@ function formatDataPanelText(panels: DataPanelItem[]): string {
   }).join('\n')
 }
 
-function formatActiveGlobalPlanText(novel: Novel): string {
-  return (novel.eventLog || [])
-    .filter(event => event.type === '伏笔' && (event.status === 'planted' || event.status === 'developing'))
-    .map(event => `- ID(${event.id}): 「${event.title}」- 当前状态：${event.status === 'planted' ? '已埋下' : '推进中'}`)
-    .join('\n')
-}
-
 export function useChapterAnalysis(options: UseChapterAnalysisOptions) {
   const novelStore = useNovelStore()
   const configStore = useConfigStore()
+  const workspace = useReconstructionWorkspaceStore()
   const scanningDataChanges = ref(false)
+  const structureTasks = new Map<string, { selection: string; task: Promise<boolean> }>()
+  const dataTasks = new Map<string, Promise<void>>()
+  const pendingAnalyses = ref<Record<string, { novelId: string; chapterIndex: number; options: string; input: ChapterAnalysisSubmission; error: string }>>({})
+  const analysisKey = (novelId: string, chapterId: string) => JSON.stringify([novelId, chapterId])
+  const pendingChapterAnalysis = computed(() => pendingAnalyses.value[analysisKey(options.currentNovelId.value, options.currentChapterId.value)])
+  const pendingDataAnalysis = computed(() => pendingAnalyses.value[analysisKey(options.currentNovelId.value, options.currentChapterId.value) + ':data'])
+  function discardPendingChapterAnalysis() { delete pendingAnalyses.value[analysisKey(options.currentNovelId.value, options.currentChapterId.value)] }
+  function discardPendingDataAnalysis() { delete pendingAnalyses.value[analysisKey(options.currentNovelId.value, options.currentChapterId.value) + ':data'] }
 
-  function queueMemory(novel: Novel, chapterIndex: number, content: string, payload: unknown): number {
-    let count = 0
-    for (const proposal of buildDataMemoryProposals(novel, chapterIndex, content, payload)) {
-      if (novelStore.addDataPanelChange(novel.id, proposal)) count++
+  async function savePendingAnalysis(key: string, signal?: AbortSignal) {
+    const pending = pendingAnalyses.value[key]
+    if (!pending) return false
+    signal?.throwIfAborted()
+    try {
+      const saved = await workspace.saveChapterAnalysis(pending.novelId, pending.input, signal)
+      if (pendingAnalyses.value[key] === pending) delete pendingAnalyses.value[key]
+      options.onCandidatesDetected?.({ novelId: pending.novelId, chapterId: pending.input.chapterId,
+        chapterIndex: pending.chapterIndex, sourceVersionId: pending.input.sourceVersionId, candidates: pending.input.candidates })
+      if (saved.candidates) options.onInfo?.('已保存 ' + saved.candidates + ' 条故事变化候选，请确认后写入长期记忆')
+      if (saved.dataChanges) options.onDataChangesDetected?.({ novelId: pending.novelId, chapterIndex: pending.chapterIndex,
+        count: saved.dataChanges, foreground: pending.novelId === options.currentNovelId.value && pending.input.chapterId === options.currentChapterId.value })
+      return true
+    } catch (error) {
+      pending.error = error instanceof Error ? error.message : '分析结果保存失败，请重试'
+      throw error
     }
-    return count
   }
 
-  async function analyzeChapterStructure(
+  async function analyzeChapterStructure(model: ModelConfig, analysisOptions: ChapterStructureAnalysisOptions = {}) {
+    const key = analysisKey(analysisOptions.target?.novelId || options.currentNovelId.value,
+      analysisOptions.target?.chapterId || options.currentChapterId.value)
+    const active = structureTasks.get(key)
+    const selection = JSON.stringify([analysisOptions.includeTimeline ?? true, analysisOptions.includeCharacters ?? true, analysisOptions.includeDataChanges ?? true])
+    if (active) {
+      if (active.selection !== selection) throw new Error('本章正在分析不同范围，请等当前任务完成。')
+      return active.task
+    }
+    const task = performChapterStructureAnalysis(model, analysisOptions)
+    structureTasks.set(key, { selection, task })
+    try { return await task } finally { if (structureTasks.get(key)?.task === task) structureTasks.delete(key) }
+  }
+
+  async function performChapterStructureAnalysis(
     model: ModelConfig,
     analysisOptions: ChapterStructureAnalysisOptions = {},
   ) {
     const targetNovelId = analysisOptions.target?.novelId || options.currentNovelId.value
     const targetChapterId = analysisOptions.target?.chapterId || options.currentChapterId.value
-    const targetNovel = novelStore.getNovel(targetNovelId)
-    const targetChapter = targetNovel?.chapters.find(item => item.id === targetChapterId)
-    if (!targetNovel || !targetChapter) return false
     const includeTimeline = analysisOptions.includeTimeline ?? true
     const includeCharacters = analysisOptions.includeCharacters ?? true
     const includeDataChanges = analysisOptions.includeDataChanges ?? true
-    const targetPanels = targetNovel.dataPanels || []
+    const key = analysisKey(targetNovelId, targetChapterId), selection = JSON.stringify([includeTimeline, includeCharacters, includeDataChanges])
+    if (pendingAnalyses.value[key]) {
+      if (pendingAnalyses.value[key].options !== selection) throw new Error('还有不同范围的分析结果待保存，请先处理或放弃。')
+      return savePendingAnalysis(key, analysisOptions.signal)
+    }
+    const source = await workspace.prepareChapterAnalysis(targetNovelId), targetNovel = source.novel
+    const targetChapter = targetNovel.chapters.find(item => item.id === targetChapterId)
+    if (!targetChapter) return false
+    analysisOptions.signal?.throwIfAborted()
+    const baseline = captureChapterAnalysisBaseline(targetNovel, targetChapter, source.canonMutations)
     const sourceContent = targetChapter.content
     let result = ''
     const response = await callAI({
       model,
       skillTask: 'analysis',
+      structuredOutput: 'concise-json',
       messages: buildChapterAnalysisPrompt(
         sourceContent,
-        formatDataPanelText(targetPanels),
-        formatActiveGlobalPlanText(targetNovel),
+        formatDataPanelText(projectDataPanelReferences(targetNovel, targetChapter.chapterIndex).items),
+        formatChapterAnalysisPlans(targetNovel, targetChapter.chapterIndex),
+        formatCharacterAnalysisReferences(targetNovel, targetChapter.chapterIndex),
+        formatCharacterStateContext(targetNovel, source.canonMutations, targetChapter.chapterIndex),
+        formatEventCausalityAnalysisReferences(targetNovel, targetChapter.chapterIndex),
       ),
       stream: true,
       taskName: '更新章节记忆',
+      noAutomaticRetry: true,
       activityParentId: analysisOptions.activityParentId,
       signal: analysisOptions.signal,
       onChunk: chunk => { result += chunk },
     })
-    if (response.finishReason && response.finishReason !== 'stop') throw new Error('章节记忆输出未正常完成，未写入不完整结果')
+    assertStructuredOutputComplete(response, '章节记忆')
 
-    const parsed = parseAiJsonObject<ChapterAnalysisPayload>(result)
-    if (!parsed || !Array.isArray(parsed.events) || !Array.isArray(parsed.characters)) return false
+    const parsed = parseAiJsonObject<ChapterAnalysisPayload>(response.content || result)
+    if (!isCompleteChapterAnalysis(parsed)) {
+      options.onWarning?.('故事变化提取不完整或因果条目格式无效；需要事件、角色、知情与关系数组，可选因果条目须使用有效ID、方向、类型和说明。请重新分析。')
+      return false
+    }
     if (analysisOptions.signal?.aborted) throw analysisOptions.signal.reason
     if (novelStore.getNovel(targetNovelId)?.chapters.find(item => item.id === targetChapterId)?.content !== sourceContent) {
       options.onWarning?.('正文已变化，已跳过旧版本的分析结果')
@@ -143,93 +197,54 @@ export function useChapterAnalysis(options: UseChapterAnalysisOptions) {
     }
 
     const elapsedDays = Math.max(0, Number(parsed.timeAdvanceDays) || 0)
-    if (elapsedDays > 0 && targetChapter.storyDay === undefined) {
-      novelStore.advanceStoryClock(targetNovel.id, elapsedDays, targetChapter.chapterIndex)
-      novelStore.queueAutomaticDataPanelChanges(
-        targetNovel.id,
-        targetChapter.chapterIndex,
-        `${targetChapter.title}\n${targetChapter.content}`,
-      )
-      options.onInfo?.(`故事时间已推进 ${elapsedDays} 天，数据面板自动规则已生成待确认变更`)
-    }
+    const sourceVersionId = buildAnalysisSourceVersionId(sourceContent)
 
-    if (includeTimeline) {
-      if (analysisOptions.replaceExistingAiTimeline) {
-        targetNovel.eventLog
-          .filter(event => event.chapterIndex === targetChapter.chapterIndex && event.source === 'ai'
-            && event.type !== '伏笔' && event.scope === 'chapter')
-          .forEach(event => novelStore.deleteEvent(targetNovel.id, event.id))
-      }
-      for (const event of parsed.events || []) {
-        if (event.type === '伏笔') {
-          for (const proposal of normalizeStoryPromiseDrafts(targetNovel, targetChapter, [{
-            title: event.title, description: event.description, evidence: event.evidence,
-            characters: event.characters,
-          }])) novelStore.addStoryStateProposal(targetNovel.id, proposal)
-          continue
-        }
-        novelStore.addEvent(targetNovel.id, {
-          chapterIndex: targetChapter.chapterIndex,
-          title: event.title || '未命名事件',
-          description: event.description || '',
-          characters: Array.isArray(event.characters) ? event.characters : [],
-          type: event.type || '其他',
-          scope: event.scope || 'chapter',
-          status: event.type === '伏笔' ? (event.status || 'planted') : (event.status || 'resolved'),
-          hintCount: event.type === '伏笔' ? (Number(event.hintCount) || 1) : 0,
-          importance: event.type === '主线' || event.type === '转折' ? 4 : 3,
-          source: 'ai',
-          evidence: hasChapterEvidence(sourceContent, String(event.evidence || '')) ? String(event.evidence) : undefined,
-        })
-      }
-      for (const update of parsed.globalPlans || []) {
-        if (!update.id || !['developing', 'resolved'].includes(update.status)) continue
-        for (const proposal of normalizeStoryStateProposalDrafts(targetNovel, targetChapter, [{
-          targetType: 'event', targetId: update.id, field: 'status',
-          newValue: update.status, reason: update.note, evidence: update.evidence,
-        }])) novelStore.addStoryStateProposal(targetNovel.id, proposal)
-      }
-    }
-
-    if (includeCharacters) {
-      for (const character of parsed.characters || []) {
-        if (!character.name) continue
-        novelStore.addCharacter(targetNovel.id, {
-          name: character.name,
-          identity: character.identity || '',
-          personality: character.personality || '',
-          powerLevel: character.powerLevel || '',
-          faction: character.faction || '',
-          description: character.description || '',
-          firstAppearChapter: targetChapter.chapterIndex,
-        })
-      }
-    }
-
-    const dataChangeCount = includeDataChanges ? queueMemory(targetNovel, targetChapter.chapterIndex, sourceContent, parsed) : 0
-    if (dataChangeCount > 0) {
-      options.onDataChangesDetected?.({
-        novelId: targetNovel.id,
-        chapterIndex: targetChapter.chapterIndex,
-        count: dataChangeCount,
-        foreground: !analysisOptions.target,
-      })
-      options.onInfo?.(`检测到 ${dataChangeCount} 条数据变更，请确认`)
-    }
-    return true
+    const candidates = buildChapterAnalysisCandidates(targetNovel, targetChapter, sourceVersionId, {
+      events: includeTimeline ? parsed.events : [],
+      globalPlans: includeTimeline ? parsed.globalPlans : [],
+      eventCausalityChanges: includeTimeline ? parsed.eventCausalityChanges : [],
+      characters: includeCharacters ? parsed.characters : [],
+      timeAdvanceDays: includeTimeline ? elapsedDays : 0,
+      knowledgeChanges: includeCharacters ? parsed.knowledgeChanges : [],
+      relationshipChanges: includeCharacters ? parsed.relationshipChanges : [],
+    })
+    pendingAnalyses.value[key] = { novelId: targetNovelId, chapterIndex: targetChapter.chapterIndex, options: selection, error: '',
+      input: { chapterId: targetChapterId, sourceVersionId, baseline,
+        candidates: candidates.map(candidate => ({ ...candidate, id: candidate.id + ':payload:' + buildAnalysisSourceVersionId(candidate.proposedValue) })),
+        dataProposals: includeDataChanges ? buildDataMemoryProposals(targetNovel, targetChapter.chapterIndex, sourceContent, parsed) : [] } }
+    return savePendingAnalysis(key, analysisOptions.signal)
   }
 
   async function scanDataPanelChanges(modelArg?: ModelConfig, target?: DataPanelScanTarget) {
+    const key = JSON.stringify([target?.novelId || options.currentNovelId.value, target?.chapterIndex ?? options.currentChapterId.value])
+    const active = dataTasks.get(key)
+    if (active) return active
+    if (!target) scanningDataChanges.value = true
+    const task = performDataPanelScan(modelArg, target)
+    dataTasks.set(key, task)
+    try { await task } finally {
+      if (dataTasks.get(key) === task) dataTasks.delete(key)
+      if (!target) scanningDataChanges.value = false
+    }
+  }
+
+  async function performDataPanelScan(modelArg?: ModelConfig, target?: DataPanelScanTarget) {
     const targetNovelId = target?.novelId || options.currentNovelId.value
-    const targetNovel = novelStore.getNovel(targetNovelId)
-    const currentChapter = targetNovel?.chapters.find(item => item.id === options.currentChapterId.value)
+    const activeNovel = novelStore.getNovel(targetNovelId)
+    const currentChapter = activeNovel?.chapters.find(item => item.id === options.currentChapterId.value)
     const targetChapterIndex = target?.chapterIndex ?? currentChapter?.chapterIndex
     const targetContent = target?.content ?? options.currentContent.value
-    const targetPanels = target?.panels || options.currentPanels.value
-    if (!targetNovel || targetChapterIndex === undefined || !targetContent.trim() || (!target && scanningDataChanges.value)) return
+    if (!activeNovel || targetChapterIndex === undefined || !targetContent.trim()) return
+    const source = await workspace.prepareChapterAnalysis(targetNovelId), targetNovel = source.novel
+    const targetPanels = targetNovel.dataPanels || []
     const sourceChapter = targetNovel.chapters.find(item => item.chapterIndex === targetChapterIndex)
     const sourceChapterId = sourceChapter?.id
     const savedContent = sourceChapter?.content
+    if (!sourceChapter || targetContent !== savedContent || target && JSON.stringify(target.panels) !== JSON.stringify(targetPanels)) {
+      options.onWarning?.('正文或数据面板已变化，请先保存当前正文再扫描。'); return
+    }
+    const key = analysisKey(targetNovelId, sourceChapter.id) + ':data'
+    const baseline = captureChapterAnalysisBaseline(targetNovel, sourceChapter, source.canonMutations)
     const model = modelArg || configStore.getModelForTask('review') || configStore.getModelForTask('writing')
     if (!model) {
       options.onWarning?.('请先在设置页配置 AI 模型')
@@ -238,9 +253,11 @@ export function useChapterAnalysis(options: UseChapterAnalysisOptions) {
     if (!target) scanningDataChanges.value = true
     let result = ''
     try {
-      await callAI({
+      if (pendingAnalyses.value[key]) { await savePendingAnalysis(key); return }
+      const response = await callAI({
         model,
         skillTask: 'analysis',
+        noAutomaticRetry: true,
         messages: [{
           role: 'system',
           content: '你是小说数据连续性分析助手。只根据正文中明确出现的证据判断数据变化，不要推测未写出的变化；必须区分明确变化、可能变化和无变化。',
@@ -250,10 +267,10 @@ export function useChapterAnalysis(options: UseChapterAnalysisOptions) {
 ${DATA_MEMORY_RULES}
 
 【已知角色】
-${[targetNovel.settings.protagonist.name, ...targetNovel.characters.map(character => character.name)].filter(Boolean).join('、')}
+${[targetNovel.settings.protagonist.name, formatCharacterAnalysisReferences(targetNovel, targetChapterIndex)].filter(Boolean).join('\n')}
 
 【当前数据面板】
-${formatDataPanelText(targetPanels)}
+${formatDataPanelText(projectDataPanelReferences(targetNovel, targetChapterIndex).items)}
 
 【本章完整正文】
 ${targetContent}
@@ -265,6 +282,8 @@ ${DATA_MEMORY_OUTPUT}`,
         activityParentId: target?.activityParentId,
         onChunk: chunk => { result += chunk },
       })
+      assertStructuredOutputComplete(response, '数据变更扫描')
+      result = response.content || result
       const latestNovel = novelStore.getNovel(targetNovelId)
       const latestChapter = latestNovel?.chapters.find(item => item.id === sourceChapterId)
       if (!latestNovel || !latestChapter || latestChapter.content !== savedContent
@@ -275,19 +294,20 @@ ${DATA_MEMORY_OUTPUT}`,
       const object = parseAiJsonObject<Record<string, unknown>>(result)
       const payload = object && ['newItems', 'equipmentChanges', 'dataChanges'].some(key => Array.isArray(object[key]))
         ? object : parseAiJsonArray(result)
-      const added = queueMemory(latestNovel, targetChapterIndex, targetContent, payload)
-      if (added > 0) {
-        options.onDataChangesDetected?.({ novelId: targetNovelId, chapterIndex: targetChapterIndex, count: added, foreground: !target })
-        options.onInfo?.(`检测到 ${added} 条数据记忆，请确认新对象、属性或装备状态`)
-      } else {
-        options.onInfo?.('未检测到明确的数据变更')
-      }
-    } catch {
-      options.onWarning?.('数据变更扫描失败，已跳过')
+      const dataProposals = buildDataMemoryProposals(targetNovel, targetChapterIndex, targetContent, payload)
+      pendingAnalyses.value[key] = { novelId: targetNovelId, chapterIndex: targetChapterIndex, options: 'data', error: '',
+        input: { chapterId: sourceChapter.id, sourceVersionId: buildAnalysisSourceVersionId(savedContent!), baseline, candidates: [], dataProposals } }
+      await savePendingAnalysis(key)
+      if (!dataProposals.length) options.onInfo?.('未检测到明确的数据变更')
+    } catch (error) {
+      options.onWarning?.(pendingAnalyses.value[key]
+        ? '数据扫描结果尚未保存，已保留，可重试：' + (error instanceof Error ? error.message : String(error))
+        : '数据变更扫描失败，已跳过')
     } finally {
       if (!target) scanningDataChanges.value = false
     }
   }
 
-  return { scanningDataChanges, analyzeChapterStructure, scanDataPanelChanges }
+  return { scanningDataChanges, analyzeChapterStructure, scanDataPanelChanges, pendingChapterAnalysis, discardPendingChapterAnalysis,
+    pendingDataAnalysis, discardPendingDataAnalysis }
 }

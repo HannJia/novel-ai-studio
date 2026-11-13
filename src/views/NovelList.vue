@@ -158,15 +158,11 @@ import { AddOutline, EllipsisHorizontal, FolderOpenOutline, CloudUploadOutline, 
 import { useNovelStore } from '@/stores/novel'
 import type { Novel } from '@/types/novel'
 import { formatWordCount } from '@/utils/format'
-import { useKnowledgeStore } from '@/stores/knowledge'
-import { createProjectBackup, downloadProjectBackup, parseProjectBackup } from '@/services/projectBackup'
+import { downloadProjectBackup, parseProjectBackup } from '@/services/projectBackup'
 import { MAX_PROJECT_BACKUP_BYTES } from '@/services/projectBackup'
-import { importProject } from '@/services/projectTransfer'
-import { loadProjectChapterRevisions } from '@/services/db/chapterRevisions'
-import { useInspirationSessionsStore } from '@/stores/inspirationSessions'
+import { exportProjectSnapshot, importProject } from '@/services/projectTransfer'
 
 const novelStore = useNovelStore()
-const knowledgeStore = useKnowledgeStore()
 const router = useRouter()
 const dialog = useDialog()
 const message = useMessage()
@@ -302,8 +298,7 @@ function confirmPurgeNovel(id: string) {
 
 async function exportProject() {
   try {
-    const backup = createProjectBackup(novelStore.novels, knowledgeStore.knowledgeBases, await loadProjectChapterRevisions(), useInspirationSessionsStore().sessions)
-    parseProjectBackup(JSON.stringify(backup))
+    const backup = await exportProjectSnapshot()
     downloadProjectBackup(backup, `ai-novel-writer-backup-${new Date().toISOString().slice(0, 10)}.json`)
     message.success('项目备份已校验并导出')
   } catch (error) { message.error(error instanceof Error ? error.message : '备份校验失败') }
@@ -340,12 +335,14 @@ async function handleImportFile(event: Event) {
   }
 }
 
-function confirmRename() {
+async function confirmRename() {
   const title = renameTitle.value.trim().replace(/[《》]/g, '')
   if (!renameNovelId.value || !title) return
-  novelStore.updateTitle(renameNovelId.value, title)
-  showRenameModal.value = false
-  message.success('书名已修改')
+  try {
+    await novelStore.updateTitleWithImpact(renameNovelId.value, title)
+    showRenameModal.value = false
+    message.success('书名已修改')
+  } catch (error) { message.error(error instanceof Error ? error.message : '书名保存失败') }
 }
 
 function handleRenameKeydown(event: KeyboardEvent) {

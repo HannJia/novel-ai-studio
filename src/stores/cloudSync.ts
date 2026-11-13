@@ -1,8 +1,5 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { useNovelStore } from './novel'
-import { useKnowledgeStore } from './knowledge'
-import { useInspirationSessionsStore } from './inspirationSessions'
 import { cloudRequest, CloudApiError } from '@/services/cloudSyncApi'
 import {
   DEFAULT_SYNC_ENDPOINT, normalizeSyncEndpoint, emptySyncState, projectDocuments, hashPayload,
@@ -10,13 +7,13 @@ import {
   type CloudSession, type CloudUser, type CloudRecord, type SyncState, type SyncConflict,
 } from '@/services/cloudSyncModel'
 import { readCloudState, readCloudConflicts, persistCloudState } from '@/services/db/cloudSync'
-import { createProjectBackup, downloadProjectBackup } from '@/services/projectBackup'
-import { loadProjectChapterRevisions } from '@/services/db/chapterRevisions'
+import { downloadProjectBackup } from '@/services/projectBackup'
+import { adoptProjectSnapshot, captureProjectSnapshot, flushProjectState } from '@/services/projectSnapshot'
 import { retainProjectRestorePoint } from '@/services/database'
-import { cloudApplyBusy, cloudPreferencesBusy, appUpdateInstalling, flushEditorDrafts } from '@/services/appLifecycle'
+import { cloudApplyBusy, cloudPreferencesBusy, appUpdateInstalling, activeAutonomousRunCount, activeMemoryRunCount } from '@/services/appLifecycle'
 import { chapterBackgroundQueue } from '@/services/aiTaskQueue'
 import { activeAiCount } from '@/services/aiActivity'
-import { projectTransferBusy } from '@/services/projectTransfer'
+import { exportProjectSnapshot, projectTransferBusy } from '@/services/projectTransfer'
 
 const SESSION_KEY = 'novel-cloud-session'
 
@@ -54,16 +51,14 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
     return ['', '/', '/settings'].includes(path)
   }
   function localWorkBusy() {
-    return activeAiCount.value > 0 || chapterBackgroundQueue.pendingCount > 0
+    return activeAiCount.value > 0 || activeAutonomousRunCount.value > 0 || activeMemoryRunCount.value > 0 || chapterBackgroundQueue.pendingCount > 0
       || projectTransferBusy.value || appUpdateInstalling.value
   }
   async function capture() {
-    const revisions = await loadProjectChapterRevisions()
-    return createProjectBackup(useNovelStore().novels, useKnowledgeStore().knowledgeBases, revisions, useInspirationSessionsStore().sessions)
+    return captureProjectSnapshot()
   }
   async function flush() {
-    await flushEditorDrafts()
-    await Promise.all([useNovelStore().flushPendingSaves(), useKnowledgeStore().flushPendingSaves(), useInspirationSessionsStore().flushPendingSaves()])
+    await flushProjectState()
   }
   async function writeSession(value: CloudSession | null) {
     if (window.electronAPI?.cloudSessionWrite) await window.electronAPI.cloudSessionWrite(value)
@@ -293,9 +288,7 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
         if (accepted.size > 0) {
           await persistCloudState(next, newConflicts, project)
           if (project) {
-            useNovelStore().adoptImportedNovels(project.novels)
-            useKnowledgeStore().adoptImportedKnowledgeBases(project.knowledgeBases)
-            if (project.inspirationSessions) useInspirationSessionsStore().adopt(project.inspirationSessions)
+            adoptProjectSnapshot(project)
           }
           state.value = next
           conflicts.value = await readCloudConflicts()
@@ -469,6 +462,8 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
     if (!item) return
     const auth = session.value
     await exclusively(async () => {
+      // exclusively schedules a microtask: recheck before taking ownership, without an await gap.
+      if (localWorkBusy() || cloudApplyBusy.value || !safeView()) throw new Error('AI 或项目任务正在运行，请等待结束后再处理冲突。')
       cloudApplyBusy.value = true
       try {
       const latest = await cloudRequest<{ records: CloudRecord[] }>(auth.endpoint, 'sync/pull', {
@@ -478,8 +473,14 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
       if (remote.key !== item.key || await hashPayload(remote.payload ?? null) !== remote.hash) throw new Error('云端文档校验失败。')
       if (remote.payload !== null) parseCloudDocument(item.key, remote.payload!)
       if (remote.version !== item.remoteVersion) {
-        const refreshed = { ...item, remote: remote.payload ?? null, remoteHash: remote.hash, remoteVersion: remote.version }
-        await persistCloudState(state.value, [{ ...item, id: crypto.randomUUID(), resolution: 'local' }, refreshed])
+        await flush()
+        const current = await capture()
+        const currentPayload = projectDocuments(current).get(item.key) ?? null
+        const latestPayload = remote.payload ?? null
+        const refreshed = { ...item, id: crypto.randomUUID(), title: documentTitle(item.key, currentPayload ?? latestPayload),
+          local: currentPayload, remote: latestPayload, remoteHash: remote.hash, remoteVersion: remote.version, createdAt: new Date().toISOString() }
+        const currentState = JSON.parse(JSON.stringify(state.value)) as SyncState
+        await persistCloudState(currentState, [{ ...item, resolution: 'superseded' }, refreshed])
         conflicts.value = await readCloudConflicts()
         throw new Error('云端版本又有更新，已刷新冲突记录，请重新选择。')
       }
@@ -494,9 +495,7 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
       if (currentPayload !== item.local) archives.push({ ...item, id: crypto.randomUUID(), local: currentPayload, resolution: choice })
       await persistCloudState(next, archives, project)
       if (project) {
-        useNovelStore().adoptImportedNovels(project.novels)
-        useKnowledgeStore().adoptImportedKnowledgeBases(project.knowledgeBases)
-        if (project.inspirationSessions) useInspirationSessionsStore().adopt(project.inspirationSessions)
+        adoptProjectSnapshot(project)
       }
       state.value = next
       conflicts.value = await readCloudConflicts()
@@ -509,7 +508,7 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
   async function exportConflict(id: string, side: 'local' | 'remote') {
     const item = conflicts.value.find(conflict => conflict.id === id)
     if (!item) return
-    const project = mergeCloudDocuments(await capture(), new Map([[item.key, item[side]]]))
+    const project = mergeCloudDocuments(await exportProjectSnapshot(), new Map([[item.key, item[side]]]))
     downloadProjectBackup(project, `同步冲突-${side === 'local' ? '本机' : '云端'}-${item.createdAt.slice(0, 10)}.json`)
   }
   async function createInvite(uses = 1) {

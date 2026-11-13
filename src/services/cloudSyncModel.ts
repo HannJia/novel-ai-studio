@@ -1,6 +1,6 @@
 import type { Novel, ChapterRevision } from '@/types/novel'
 import type { KnowledgeBase } from '@/stores/knowledge'
-import { createProjectBackup, parseProjectBackup, type ProjectBackup } from './projectBackup'
+import { createProjectBackup, parseProjectBackup, type ProjectBackup, type ProjectWorkspaceSnapshot } from './projectBackup'
 import { latestInspirationSessions, parseInspirationSession, type InspirationSession } from './inspirationSessions'
 
 export const DEFAULT_SYNC_ENDPOINT = 'https://154.94.227.164'
@@ -20,10 +20,10 @@ export interface SyncState {
 }
 export interface SyncConflict {
   id: string; key: string; title: string; local: string | null; remote: string | null
-  remoteVersion: number; remoteHash: string | null; createdAt: string; resolution?: 'local' | 'remote'
+  remoteVersion: number; remoteHash: string | null; createdAt: string; resolution?: 'local' | 'remote' | 'superseded'
 }
 export type SyncDocument =
-  | { kind: 'novel'; novel: Novel; chapterRevisions: ChapterRevision[] }
+  | { kind: 'novel'; schemaVersion: 2; novel: Novel; chapterRevisions: ChapterRevision[]; reconstructionWorkspace: ProjectWorkspaceSnapshot }
   | { kind: 'knowledge'; knowledge: KnowledgeBase }
   | { kind: 'inspiration'; inspiration: InspirationSession }
 export const emptySyncState = (): SyncState => ({ 
@@ -63,12 +63,21 @@ export async function hashPayload(payload: string | null): Promise<string | null
 }
 
 export function projectDocuments(project: ProjectBackup): Map<string, string> {
+  // Fail closed if an internal caller tries to sync an incomplete V2 snapshot.
+  parseProjectBackup(JSON.stringify(project))
   const result = new Map<string, string>()
   const knownLibraries = new Set(project.knowledgeBases.map(kb => kb.id))
   for (const novel of project.novels) {
     result.set(`novel:${novel.id}`, canonicalJson({
-      kind: 'novel', novel: { ...novel, knowledgeBaseIds: novel.knowledgeBaseIds.filter(id => knownLibraries.has(id)) },
+      kind: 'novel', schemaVersion: 2, novel: {
+        ...novel,
+        knowledgeBaseIds: novel.knowledgeBaseIds.filter(id => knownLibraries.has(id)),
+        // SQLite materializes omitted optional flags as false when reopening.
+        chatWebSearchEnabled: novel.chatWebSearchEnabled || undefined,
+        chapterPlanConfirmed: novel.chapterPlanConfirmed || undefined,
+      },
       chapterRevisions: (project.chapterRevisions || []).filter(item => item.novelId === novel.id).sort((a, b) => a.id.localeCompare(b.id)),
+      reconstructionWorkspace: project.reconstructionWorkspaces.find(workspace => workspace.novelId === novel.id),
     }))
   }
   for (const knowledge of project.knowledgeBases) result.set(`knowledge:${knowledge.id}`, canonicalJson({ kind: 'knowledge', knowledge }))
@@ -84,15 +93,17 @@ export function parseCloudDocument(key: string, payload: string): SyncDocument {
     return { kind: 'inspiration', inspiration: parseInspirationSession(value.inspiration) }
   }
   if (value?.kind === 'knowledge' && key === `knowledge:${value.knowledge?.id}`) {
-    parseProjectBackup(JSON.stringify(createProjectBackup([], [value.knowledge])))
+    parseProjectBackup(JSON.stringify(createProjectBackup({ novels: [], knowledgeBases: [value.knowledge], chapterRevisions: [], inspirationSessions: [], reconstructionWorkspaces: [] })))
     return value
   }
   if (value?.kind === 'novel' && key === `novel:${value.novel?.id}` && Array.isArray(value.chapterRevisions)) {
+    if (value.schemaVersion !== 2 || !value.reconstructionWorkspace) throw new Error('云端小说缺少完整的 V2 创作工作区，已停止合并以保护本机规划和审核记录。')
     // References are checked against the complete project again before application.
     const placeholders = (value.novel.knowledgeBaseIds || []).map(id => ({
       id, name: '', description: '', entries: [], createdAt: now,
     }))
-    parseProjectBackup(JSON.stringify(createProjectBackup([value.novel], placeholders, value.chapterRevisions)))
+    parseProjectBackup(JSON.stringify(createProjectBackup({ novels: [value.novel], knowledgeBases: placeholders,
+      chapterRevisions: value.chapterRevisions, inspirationSessions: [], reconstructionWorkspaces: [value.reconstructionWorkspace] })))
     return value
   }
   throw new Error('云端文档类型或编号不匹配。')
@@ -117,20 +128,24 @@ export function decideSync(localHash: string | null, remote: SyncBase | undefine
 }
 
 export function mergeCloudDocuments(project: ProjectBackup, updates: Map<string, string | null>): ProjectBackup {
+  parseProjectBackup(JSON.stringify(project))
   let novels = [...project.novels]
   let libraries = [...project.knowledgeBases]
   let revisions = [...(project.chapterRevisions || [])]
-  let sessions = project.inspirationSessions ? [...project.inspirationSessions] : undefined
+  let sessions = [...project.inspirationSessions]
+  let workspaces = [...project.reconstructionWorkspaces]
   for (const [key, payload] of updates) {
     const id = key.slice(key.indexOf(':') + 1)
     if (key.startsWith('novel:')) {
       novels = novels.filter(book => book.id !== id)
       revisions = revisions.filter(item => item.novelId !== id)
+      workspaces = workspaces.filter(item => item.novelId !== id)
       if (payload !== null) {
         const doc = parseCloudDocument(key, payload)
         if (doc.kind !== 'novel') throw new Error('小说类型错误。')
         novels.push(doc.novel)
         revisions.push(...doc.chapterRevisions)
+        workspaces.push(doc.reconstructionWorkspace)
       }
     } else if (key.startsWith('knowledge:')) {
       libraries = libraries.filter(kb => kb.id !== id)
@@ -151,6 +166,6 @@ export function mergeCloudDocuments(project: ProjectBackup, updates: Map<string,
   // A deleted library leaves no dangling link, but never deletes book content.
   const available = new Set(libraries.map(kb => kb.id))
   novels = novels.map(novel => ({ ...novel, knowledgeBaseIds: novel.knowledgeBaseIds.filter(id => available.has(id)) }))
-  return parseProjectBackup(JSON.stringify(createProjectBackup(novels, libraries, revisions,
-    sessions ? latestInspirationSessions(sessions) : undefined)))
+  return parseProjectBackup(JSON.stringify(createProjectBackup({ novels, knowledgeBases: libraries, chapterRevisions: revisions,
+    inspirationSessions: latestInspirationSessions(sessions), reconstructionWorkspaces: workspaces })))
 }

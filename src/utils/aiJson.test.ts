@@ -14,4 +14,20 @@ describe('AI JSON parsing', () => {
     expect(parsed).toEqual({ values: [1, 2, 3] })
     expect(parseAiJsonArray<number>('prefix [1,2,3] suffix')).toEqual([1, 2, 3])
   })
+
+  it('preserves Chinese dialogue and comma/bracket text inside valid JSON strings', () => {
+    const value = { reason: '他说“今晚不开门”，保留原样 ,} 和 ,]。', dialogue: '她说‘不知道’。' }
+    expect(parseAiJsonObject(JSON.stringify(value))).toEqual(value)
+    expect(parseAiJsonArray(JSON.stringify([value]))).toEqual([value])
+  })
+
+  it('only repairs structural trailing commas, preserving quoted text', () => {
+    expect(parseAiJsonObject('{"reason":"保留 ,} 和 ,] 以及“引号”", "values":[1,2,],}'))
+      .toEqual({ reason: '保留 ,} 和 ,] 以及“引号”', values: [1, 2] })
+  })
+
+  it('accepts typographic delimiters without changing valid string content', () => {
+    expect(parseAiJsonObject('{“reason”: “已经结束”, “valid”: true}'))
+      .toEqual({ reason: '已经结束', valid: true })
+  })
 })

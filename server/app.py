@@ -187,7 +187,12 @@ def create_app(data_dir=None):
     repo = Repository(data_dir or os.environ.get("SYNC_DATA_DIR", "/var/lib/novel-sync"))
     app = FastAPI(title="Novel Writer Sync", version=VERSION, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.repo = repo
-    app.add_middleware(CORSMiddleware, allow_origins=["null", "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://127.0.0.1:5174"],
+    app.add_middleware(CORSMiddleware, allow_origins=[
+        "null",
+        "http://localhost:5173", "http://127.0.0.1:5173",
+        "http://localhost:5174", "http://127.0.0.1:5174",
+        "http://localhost:5180", "http://127.0.0.1:5180",
+    ],
                        allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type"])
 
     @app.middleware("http")

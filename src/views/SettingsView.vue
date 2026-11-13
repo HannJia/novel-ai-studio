@@ -1,5 +1,5 @@
 <template>
-  <div class="page-container fade-in" id="settings-page">
+  <div class="page-container fade-in" :class="{ 'settings-v3': !props.overlay }" id="settings-page">
 
 
     <div class="settings-layout">
@@ -12,65 +12,25 @@
       <h1 class="page-title">设置</h1>
     </div>
       <button
+        v-for="item in navItems"
+        :key="item.key"
         type="button"
         role="tab"
         class="settings-nav-item"
-        :aria-selected="activeTab === 'cloud'"
-        :tabindex="activeTab === 'cloud' ? 0 : -1"
-        @click="activeTab = 'cloud'"
-      ><n-icon :size="21"><cloud-outline /></n-icon><span>云同步</span></button>
-      <button
-        type="button"
-        role="tab"
-        class="settings-nav-item"
-        :aria-selected="activeTab === 'models'"
-        :tabindex="activeTab === 'models' ? 0 : -1"
-        @click="activeTab = 'models'"
-      ><n-icon :size="21"><hardware-chip-outline /></n-icon><span>模型配置</span></button>
-      <button
-        type="button"
-        role="tab"
-        class="settings-nav-item"
-        :aria-selected="activeTab === 'workflow'"
-        :tabindex="activeTab === 'workflow' ? 0 : -1"
-        @click="activeTab = 'workflow'"
-      ><n-icon :size="21"><git-network-outline /></n-icon><span>AI 工作流</span></button>
-      <button
-        type="button"
-        role="tab"
-        class="settings-nav-item"
-        :aria-selected="activeTab === 'retrieval'"
-        :tabindex="activeTab === 'retrieval' ? 0 : -1"
-        @click="activeTab = 'retrieval'"
-      ><n-icon :size="21"><search-outline /></n-icon><span>语义检索</span></button>
-      <button
-        type="button"
-        role="tab"
-        class="settings-nav-item"
-        :aria-selected="activeTab === 'skills'"
-        :tabindex="activeTab === 'skills' ? 0 : -1"
-        @click="activeTab = 'skills'"
-      ><n-icon :size="21"><document-text-outline /></n-icon><span>写作技能</span></button>
-      <button
-        type="button"
-        role="tab"
-        class="settings-nav-item"
-        :aria-selected="activeTab === 'about'"
-        :tabindex="activeTab === 'about' ? 0 : -1"
-        @click="activeTab = 'about'"
-      ><n-icon :size="21"><information-circle-outline /></n-icon><span>关于与更新</span></button>
+        :aria-selected="activeNav === item.key"
+        :tabindex="activeNav === item.key ? 0 : -1"
+        @click="selectNav(item.key)"
+      ><V3Icon :name="item.icon" /><span>{{ item.label }}</span></button>
     </nav>
-    <div class="settings-content">
+    <div ref="contentEl" class="settings-content">
       <section v-show="activeTab === 'cloud'" class="settings-section cloud-settings-section">
         <CloudSyncPanel />
+        <ProjectHistoryPanel />
       </section>
       <!-- 模型配置 -->
       <section v-show="activeTab === 'models'" class="settings-section paper-panel">
         <div class="section-header">
-          <div><h2 class="section-title">模型配置</h2><p class="section-desc">统一管理写作、对话与语义检索模型。</p></div>
-          <n-button type="primary" size="small" @click="openAddModel" id="add-model-btn">
-            + 添加模型
-          </n-button>
+          <div><h2 class="section-title">模型配置</h2><p class="section-desc">连接信息统一在这里管理；{{ keyStorageNote }}</p></div>
         </div>
 
         <div class="model-workbench">
@@ -80,7 +40,7 @@
           <p>还没有配置任何 AI 模型</p>
           <p class="hint">添加一个模型来开始使用 AI 功能</p>
         </div>
-        <div v-else class="model-list">
+        <div class="model-list">
           <div
             v-for="model in configStore.models"
             :key="model.id"
@@ -88,9 +48,18 @@
             :class="{ 'model-card--selected': editingModel === model.id && showAddModel }"
           >
             <div class="model-info">
-              <button type="button" class="model-name model-select" :aria-label="`编辑模型 ${model.modelName}`" @click="editModel(model)">{{ model.modelName }}</button>
+              <div class="model-head">
+                <button type="button" class="model-name model-select" :aria-label="`编辑模型 ${model.modelName}`" @click="editModel(model)">{{ model.modelName }}</button>
+                <!-- 只显示与当前本机环境和连接配置指纹匹配的实际测试结果。 -->
+                <div v-if="testState[model.id]" class="model-test-result" title="与当前配置匹配的连接测试结果">
+                  <span class="model-status" :class="testState[model.id]">
+                    {{ testState[model.id] === 'ok' ? '连接正常' : testState[model.id] === 'fail' ? '测试失败' : configStore.isModelConnectionTestActive(model.id) ? '测试中...' : '上次测试未完成' }}
+                  </span>
+                  <time v-if="model.connectionTest?.testedAt" class="model-tested-at" :datetime="model.connectionTest.testedAt">{{ formatTestedAt(model.connectionTest.testedAt) }}</time>
+                </div>
+              </div>
               <div v-if="model.name && model.name !== model.modelName" class="model-detail">备注：{{ model.name }}</div>
-              <div class="model-detail">{{ maskKey(model.apiKey) }}</div>
+              <div class="model-detail model-key">{{ maskKey(model.apiKey) }}</div>
               <div class="model-badges">
                 <span class="badge" :class="model.kind === 'embedding' ? 'badge-vector' : 'badge-outline'">{{ model.kind === 'embedding' ? '向量模型' : '写作／对话' }}</span>
                 <span v-if="configStore.assignments.outline === model.id" class="badge badge-outline">大纲</span>
@@ -103,13 +72,12 @@
               <n-button size="tiny" quaternary @click="testModel(model)" :loading="testingId === model.id">
                 {{ testingId === model.id ? '测试中...' : model.kind === 'embedding' ? '测试向量' : '测试对话' }}
               </n-button>
-              <n-button v-if="model.kind !== 'embedding'" size="tiny" quaternary @click="editModel(model)" title="打开模型设置，单独测试搜索能力">
-                <template #icon><n-icon><globe-outline /></n-icon></template>测试联网
-              </n-button>
+              <ModelSearchTest v-if="model.kind !== 'embedding'" :model="model" compact />
               <n-button size="tiny" quaternary @click="editModel(model)">编辑</n-button>
               <n-button size="tiny" quaternary type="error" @click="handleDeleteModel(model.id)">删除</n-button>
             </div>
           </div>
+          <button type="button" id="add-model-btn" class="model-add-card" @click="openAddModel"><V3Icon name="plus" />添加模型</button>
         </div>
           </div>
     <section v-if="showAddModel" class="model-editor" aria-label="编辑模型配置">
@@ -296,6 +264,17 @@
         </div>
       </section>
 
+      <section v-show="activeTab === 'look'" class="settings-section paper-panel look-section">
+        <h2 class="section-title">外观</h2>
+        <p class="section-desc">主题只影响界面显示，偏好保存在本机。</p>
+        <div class="theme-cards" role="radiogroup" aria-label="界面主题">
+          <button v-for="item in themeCards" :key="item.name" type="button" role="radio" class="theme-card" :class="{ on: theme.currentTheme === item.name }" :aria-checked="theme.currentTheme === item.name" @click="chooseTheme(item.name)">
+            <span class="theme-swatch" aria-hidden="true"><i :style="{ background: item.colors[0] }" /><i :style="{ background: item.colors[1] }"><b :style="{ background: item.colors[2] }" /></i></span>
+            <span class="theme-name">{{ item.label }}</span>
+          </button>
+        </div>
+      </section>
+
       <section v-show="activeTab === 'workflow'" class="settings-section paper-panel">
         <h2 class="section-title">AI 工作流</h2>
         <p class="section-desc">控制生成后的自动检查次数与后台 AI 调用量。章节结尾完整性检查在所有模式下都会保留。</p>
@@ -435,6 +414,19 @@
         <p class="about-desc">本地优先的 AI 长篇小说写作工具。创作内容保存在本机，可按需开启云同步。</p>
         <div class="about-features"><article><span><n-icon :size="28"><create-outline /></n-icon></span><div><h4>作者主笔</h4><p>尊重创作意图，随时编辑故事与正文。</p></div></article><article><span><n-icon :size="28"><hardware-chip-outline /></n-icon></span><div><h4>AI 辅助</h4><p>为构思、写作与审查提供支持。</p></div></article><article><span><n-icon :size="28"><document-text-outline /></n-icon></span><div><h4>知识库与剧情记忆</h4><p>整理人物、世界观和情节，让长篇创作更连贯。</p></div></article></div>
         <section class="about-update" aria-labelledby="about-update-title"><h3 id="about-update-title" class="about-help-title">软件更新</h3><AppUpdatePanel /></section>
+        <details class="font-licenses">
+          <summary>内置字体与许可</summary>
+          <p class="font-license-note">HarmonyOS Sans SC 未随应用分发，界面使用 Noto Sans SC 替代；不分发微软系统字体。</p>
+          <p class="font-license-note">以下许可原文随应用内置，可离线展开查看。</p>
+          <details v-for="font in bundledFonts" :key="font.name" class="font-license-item">
+            <summary>{{ font.name }} <span>{{ font.license }}</span></summary>
+            <p class="font-license-package">{{ font.package }}</p>
+            <div v-for="document in font.documents" :key="document.name">
+              <h4 class="font-license-heading">{{ document.name }}</h4>
+              <pre class="font-license-text" tabindex="0" role="region" :aria-label="`${font.name} · ${document.name}`">{{ document.text }}</pre>
+            </div>
+          </details>
+        </details>
         <h3 class="about-help-title">信息与帮助</h3>
         <nav class="about-links" aria-label="信息与帮助">
           <a href="https://github.com/HannJia/novel-ai-studio" target="_blank" rel="noopener noreferrer"><strong>项目主页</strong><small>了解墨笺的更新动态与相关资源。</small><span aria-hidden="true">↗</span></a>
@@ -452,21 +444,62 @@
 
 <script setup lang="ts">
 import CloudSyncPanel from '@/components/CloudSyncPanel.vue'
+import ProjectHistoryPanel from '@/components/ProjectHistoryPanel.vue'
 import AppUpdatePanel from '@/components/AppUpdatePanel.vue'
 import ModelSearchTest from '@/components/ModelSearchTest.vue'
+import V3Icon from '@/v3/components/V3Icon.vue'
+import type { IconName } from '@/v3/icons'
+import { THEME_LABEL } from '@/v3/shell'
 import { ref, computed, reactive, nextTick, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NIcon, NInput, NInputNumber, NSelect, NSwitch, NTag, useMessage, useDialog } from 'naive-ui'
-import { CloudOutline, HardwareChipOutline, GitNetworkOutline, SearchOutline, DocumentTextOutline, InformationCircleOutline, ArrowBackOutline, GlobeOutline, CreateOutline, FlashOutline, ShieldCheckmarkOutline, ScaleOutline } from '@vicons/ionicons5'
+import { HardwareChipOutline, DocumentTextOutline, ArrowBackOutline, CreateOutline, FlashOutline, ShieldCheckmarkOutline, ScaleOutline } from '@vicons/ionicons5'
 import { getAiWorkflowPolicy } from '@/services/aiWorkflow'
 import { createBuiltInSkills } from '@/data/skills'
-import { useConfigStore, type ModelConfig } from '@/stores/config'
+import { useThemeStore, type ThemeName } from '@/stores/theme'
+import { useConfigStore, type ModelConfig, type ModelConnectionTestRecord, type ModelConnectionTestStatus } from '@/stores/config'
 import { listAvailableModels, openAiV1BaseUrl, testConnection, type AvailableModel } from '@/services/ai'
 import { testEmbeddingConnection } from '@/services/embeddings'
+import { modelConnectionFingerprint } from '@/services/modelConnectionTest'
 import { chatSearchProtocolOptions } from '@/services/chatSearch'
 import type { ChatSearchProtocol } from '@/types/chat'
 import type { WritingSkill, WritingSkillTask } from '@/types/skill'
 import { version as appVersion } from '../../package.json'
+import notoSerifLicense from '@fontsource-variable/noto-serif-sc/LICENSE?raw'
+import notoSansLicense from '@fontsource-variable/noto-sans-sc/LICENSE?raw'
+import jetbrainsMonoLicense from '@fontsource-variable/jetbrains-mono/LICENSE?raw'
+import lxgwWenkaiFontLicense from 'lxgw-wenkai-webfont/OFL.txt?raw'
+import lxgwWenkaiPackageLicense from 'lxgw-wenkai-webfont/LICENSE?raw'
+
+const bundledFonts = [
+  {
+    name: 'Noto Serif SC（思源宋体，可变字体）',
+    package: '@fontsource-variable/noto-serif-sc 5.3.1',
+    license: 'OFL 1.1',
+    documents: [{ name: '字体许可 · LICENSE', text: notoSerifLicense }],
+  },
+  {
+    name: 'Noto Sans SC（思源黑体，可变字体）',
+    package: '@fontsource-variable/noto-sans-sc 5.3.1',
+    license: 'OFL 1.1',
+    documents: [{ name: '字体许可 · LICENSE', text: notoSansLicense }],
+  },
+  {
+    name: 'JetBrains Mono（可变字体）',
+    package: '@fontsource-variable/jetbrains-mono 5.3.0',
+    license: 'OFL 1.1',
+    documents: [{ name: '字体许可 · LICENSE', text: jetbrainsMonoLicense }],
+  },
+  {
+    name: 'LXGW WenKai（霞鹜文楷，Regular）',
+    package: 'lxgw-wenkai-webfont 1.7.0',
+    license: '字体 OFL 1.1 · 包 MIT',
+    documents: [
+      { name: '字体许可 · OFL.txt', text: lxgwWenkaiFontLicense },
+      { name: 'Webfont 包许可 · LICENSE', text: lxgwWenkaiPackageLicense },
+    ],
+  },
+]
 
 const configStore = useConfigStore()
 const message = useMessage()
@@ -474,8 +507,96 @@ const dialog = useDialog()
 const route = useRoute()
 const router = useRouter()
 const props = defineProps<{ overlay?: boolean }>()
+const theme = useThemeStore()
 
-const activeTab = ref('cloud')
+type SettingsTab = 'models' | 'workflow' | 'look' | 'retrieval' | 'skills' | 'cloud' | 'about'
+// 左侧导航按原型顺序排列；“任务分配”与“软件更新”分别是模型配置页、关于页里的锚点，不是独立页面。
+const navItems: Array<{ key: string; label: string; icon: IconName; tab: SettingsTab; anchor?: string }> = [
+  { key: 'models', label: '模型配置', icon: 'grid', tab: 'models' },
+  { key: 'assign', label: '任务分配', icon: 'target', tab: 'models', anchor: '#model-task-assignments' },
+  { key: 'workflow', label: 'AI 工作流', icon: 'bolt', tab: 'workflow' },
+  { key: 'look', label: '外观', icon: 'sun', tab: 'look' },
+  { key: 'retrieval', label: '语义检索', icon: 'search', tab: 'retrieval' },
+  { key: 'skills', label: '写作技能', icon: 'pen', tab: 'skills' },
+  { key: 'cloud', label: '云同步与历史', icon: 'cloud', tab: 'cloud' },
+  { key: 'update', label: '软件更新', icon: 'refresh', tab: 'about', anchor: '.about-update' },
+  { key: 'about', label: '关于', icon: 'info', tab: 'about' },
+]
+const activeTab = ref<SettingsTab>('models')
+const activeNav = ref('models')
+const contentEl = ref<HTMLElement | null>(null)
+watch(activeTab, tab => {
+  // 其他入口（编辑模型、前往任务分配等）切换页面时，导航高亮跟着走；同一页面内的锚点高亮保持不变。
+  if (navItems.find(item => item.key === activeNav.value)?.tab !== tab) activeNav.value = navItems.find(item => item.tab === tab)!.key
+})
+watch(() => route.query.section, section => {
+  if (typeof section === 'string' && navItems.some(item => item.key === section)) void selectNav(section)
+}, { immediate: true })
+async function selectNav(key: string) {
+  const item = navItems.find(entry => entry.key === key)
+  if (!item) return
+  activeNav.value = key
+  activeTab.value = item.tab
+  await nextTick()
+  const target = item.anchor ? contentEl.value?.querySelector<HTMLElement>(item.anchor) : null
+  if (target) target.scrollIntoView?.({ block: 'start', behavior: 'auto' })
+  else if (contentEl.value) contentEl.value.scrollTop = 0
+}
+
+const themeCards: Array<{ name: ThemeName; label: string; colors: [string, string, string] }> = [
+  { name: 'fanqie', label: THEME_LABEL.fanqie, colors: ['#1B1A17', '#FCFAF5', '#B8321F'] },
+  { name: 'dark', label: THEME_LABEL.dark, colors: ['#0E0D0C', '#1F1D1A', '#E0634B'] },
+  { name: 'eyecare', label: THEME_LABEL.eyecare, colors: ['#1C2A24', '#F8FAF7', '#B23A2A'] },
+]
+function chooseTheme(name: ThemeName) {
+  try { theme.switchTheme(name) } catch { message.error('主题偏好无法保存，本次未切换。') }
+}
+const keyStorageNote = computed(() => configStore.securityStatus.storage === 'encrypted' ? '接口密钥由系统安全存储加密。'
+  : configStore.securityStatus.storage === 'local-development' ? '接口密钥保存在当前浏览器的本地配置中。' : '当前环境不提供系统加密，密钥只在本次会话保留。')
+const testState = reactive<Record<string, ModelConnectionTestStatus>>({})
+let testStateSyncGeneration = 0
+
+function modelConnectionStateKey(model: ModelConfig) {
+  const record = model.connectionTest
+  return [
+    model.id,
+    model.baseUrl,
+    model.modelName,
+    model.apiKey,
+    model.kind || 'chat',
+    record?.status || '',
+    record?.testedAt || '',
+    record?.fingerprint || '',
+    record?.environment || '',
+  ].join('\u0000')
+}
+
+async function syncPersistedTestState() {
+  const generation = ++testStateSyncGeneration
+  const environment = configStore.securityStatus.environment
+  const states = await Promise.all(configStore.models.map(async model => {
+    const record = model.connectionTest
+    if (!record || record.environment !== environment) {
+      return [model.id, undefined] as const
+    }
+    const fingerprint = await modelConnectionFingerprint(model)
+    return [model.id, fingerprint === record.fingerprint ? record.status : undefined] as const
+  }))
+  if (generation !== testStateSyncGeneration) return
+  for (const id of Object.keys(testState)) delete testState[id]
+  for (const [id, state] of states) if (state) testState[id] = state
+}
+
+function formatTestedAt(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'short' })
+}
+
+watch([
+  () => configStore.securityStatus.environment,
+  () => configStore.models.map(modelConnectionStateKey),
+], () => { void syncPersistedTestState() }, { immediate: true })
 
 function handleSettingsNavKeydown(event: KeyboardEvent) {
   const buttons = Array.from((event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('.settings-nav-item'))
@@ -490,6 +611,7 @@ function handleSettingsNavKeydown(event: KeyboardEvent) {
 
 async function openTaskAssignments() {
   activeTab.value = 'models'
+  activeNav.value = 'assign'
   await nextTick()
   const target = document.getElementById('model-task-assignments')
   target?.scrollIntoView?.({ block: 'nearest' })
@@ -521,6 +643,7 @@ function handleClose() {
 const showAddModel = ref(false)
 const editingModel = ref<string | null>(null)
 const testingId = ref<string | null>(null)
+let modelTestUiGeneration = 0
 const availableModels = ref<AvailableModel[]>([])
 const selectedModelNames = ref<string[]>([])
 const modelDiscoveryLoading = ref(false)
@@ -528,6 +651,7 @@ const modelDiscoveryError = ref('')
 let modelDiscoveryController: AbortController | null = null
 onBeforeUnmount(() => modelDiscoveryController?.abort())
 const testingEmbedding = ref(false)
+let embeddingTestUiGeneration = 0
 const showSkillModal = ref(false)
 const editingSkill = ref<string | null>(null)
 
@@ -796,21 +920,59 @@ function handleDeleteModel(id: string) {
 }
 
 // 测试连接
+function connectionTestRecord(status: ModelConnectionTestRecord['status'], fingerprint: string, environment: ModelConnectionTestRecord['environment']): ModelConnectionTestRecord {
+  return { status, testedAt: new Date().toISOString(), fingerprint, environment }
+}
+
+async function runModelConnectionTest(model: ModelConfig) {
+  const snapshot = { ...model }
+  const environment = configStore.securityStatus.environment
+  const attempt = configStore.beginModelConnectionTest(model.id, environment)
+  if (!attempt) return
+  try {
+    const fingerprint = await modelConnectionFingerprint(snapshot)
+    if (!configStore.isCurrentModelConnectionTest(attempt)) return
+    const started = await configStore.recordModelConnectionTest(attempt, connectionTestRecord('testing', fingerprint, environment))
+    if (!started || !configStore.isCurrentModelConnectionTest(attempt)) return
+
+    let status: 'ok' | 'fail'
+    let successMessage = ''
+    let failureMessage = '连接测试失败'
+    try {
+      if (snapshot.kind === 'embedding') {
+        const result = await testEmbeddingConnection({ enabled: true, baseUrl: snapshot.baseUrl, apiKey: snapshot.apiKey, modelName: snapshot.modelName, batchSize: 1 })
+        status = 'ok'
+        successMessage = `连接成功：${result.dimensions} 维，${result.latency} ms`
+      } else {
+        const result = await testConnection(snapshot)
+        status = result.ok ? 'ok' : 'fail'
+        successMessage = result.message
+        failureMessage = result.message
+      }
+    } catch (error) {
+      status = 'fail'
+      failureMessage = error instanceof Error ? error.message : '连接测试失败'
+    }
+
+    const published = await configStore.recordModelConnectionTest(attempt, connectionTestRecord(status, fingerprint, environment))
+    if (!published) return
+    testState[model.id] = status
+    if (status === 'ok') message.success(successMessage)
+    else message.error(failureMessage)
+  } finally {
+    configStore.finishModelConnectionTest(attempt)
+  }
+}
+
 async function testModel(model: ModelConfig) {
+  const generation = ++modelTestUiGeneration
   testingId.value = model.id
   try {
-    if (model.kind === 'embedding') {
-      const result = await testEmbeddingConnection({ enabled: true, baseUrl: model.baseUrl, apiKey: model.apiKey, modelName: model.modelName, batchSize: 1 })
-      message.success(`连接成功：${result.dimensions} 维，${result.latency} ms`)
-    } else {
-      const result = await testConnection(model)
-      if (result.ok) message.success(result.message)
-      else message.error(result.message)
-    }
+    await runModelConnectionTest(model)
   } catch (error) {
     message.error(error instanceof Error ? error.message : '连接测试失败')
   } finally {
-    testingId.value = null
+    if (generation === modelTestUiGeneration) testingId.value = null
   }
 }
 
@@ -847,14 +1009,14 @@ async function handleTestEmbedding() {
     message.warning('请先在任务分配中选择向量模型')
     return
   }
+  const generation = ++embeddingTestUiGeneration
   testingEmbedding.value = true
   try {
-    const result = await testEmbeddingConnection({ ...configStore.embedding, enabled: true })
-    message.success(`连接成功：${result.dimensions} 维，${result.latency} ms`)
+    await runModelConnectionTest(assignedEmbeddingModel.value)
   } catch (error) {
     message.error(error instanceof Error ? error.message : '向量服务连接失败')
   } finally {
-    testingEmbedding.value = false
+    if (generation === embeddingTestUiGeneration) testingEmbedding.value = false
   }
 }
 
@@ -1323,6 +1485,7 @@ function handleDeleteSkill(id: string) {
 .model-workbench { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 24px; align-items: start; }
 .model-catalogue { min-width: 0; }
 .model-catalogue .model-card { flex-direction: column; align-items: stretch; padding: 16px; }
+.model-catalogue .model-actions { flex-wrap: wrap; }
 .model-card--selected { border-color: var(--color-primary); background: var(--color-primary-light); }
 .model-select { display: block; width: 100%; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
 .model-editor { min-width: 0; padding: 20px; background: var(--bg-color-paper); border: 1px solid var(--border-color-light); border-radius: var(--radius-lg); }
@@ -1422,5 +1585,115 @@ function handleDeleteSkill(id: string) {
 .workflow-rounds-value { color: var(--color-primary); font-size: 17px; font-variant-numeric: tabular-nums; margin: 0 3px; }
 .about-update { margin: 16px 0; padding: 16px 0 0; border-top: 1px solid var(--border-color-light); }
 .about-update > .about-help-title { border: 0; padding: 0 0 12px; }
+.font-licenses { margin: 16px 0; padding: 12px 0; border-top: 1px solid var(--border-color-light); font-size: 13px; }
+.font-licenses summary { cursor: pointer; padding: 6px 0; color: var(--text-color-primary); }
+.font-licenses > summary { font-weight: 600; }
+.font-license-note, .font-license-package { margin: 8px 0; color: var(--text-color-secondary); line-height: 1.6; overflow-wrap: anywhere; }
+.font-license-item { padding: 4px 0; border-top: 1px solid var(--border-color-light); }
+.font-license-item summary span { margin-left: 6px; color: var(--text-color-secondary); font-size: 12px; }
+.font-license-package { font-size: 12px; }
+.font-license-heading { margin: 12px 0 6px; font-size: 12px; font-weight: 600; }
+.font-license-text { max-height: 18rem; overflow: auto; margin: 0 0 12px; padding: 12px; border: 1px solid var(--border-color-light); border-radius: var(--radius-sm); background: var(--bg-color); color: var(--text-color-secondary); font: 12px/1.6 var(--font-family-mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.font-licenses summary:focus-visible, .font-license-text:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 @media (max-width: 900px) { .about-features { grid-template-columns: 1fr; gap: 16px; } }
+
+/* ---------- V3 外壳内的设置页：按原型的左导航 + 右内容两栏 ---------- */
+.settings-v3.page-container { position: absolute; inset: 0; display: block; padding: 0; overflow: hidden; background: var(--desk); }
+.settings-v3 .settings-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 0; align-items: stretch; width: 100%; max-width: none; height: 100%; }
+.settings-v3 .settings-nav { position: static; display: flex; flex-direction: column; gap: 2px; width: auto; padding: 22px 12px; overflow: auto; border: 0; border-right: 1px solid var(--line); border-radius: 0; background: var(--panel); box-shadow: none; }
+.settings-v3 .settings-header { display: none; }
+.settings-v3 .settings-nav-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 12px; border: 0; border-radius: 7px; background: none; color: var(--ink-2); font: 500 13.5px var(--f-ui); text-align: left; }
+.settings-v3 .settings-nav-item:hover { background: var(--hover); color: var(--ink); }
+.settings-v3 .settings-nav-item[aria-selected="true"] { border-left: 0; background: var(--paper); box-shadow: var(--shadow-1); color: var(--ink); font-weight: 600; }
+.settings-v3 .settings-nav-item:focus-visible { outline: 2px solid var(--zhu); outline-offset: -2px; }
+.settings-v3 .settings-content { gap: 28px; max-width: none; padding: 28px 36px 60px; overflow: auto; }
+.settings-v3 .settings-section.paper-panel { padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
+.settings-v3 .section-title { margin: 0 0 4px; color: var(--ink); font: 600 24px var(--f-serif); }
+.settings-v3 .section-desc { margin: 0 0 14px; color: var(--ink-3); font-size: 13px; }
+.settings-v3 .subsection-title { margin: 0 0 4px; color: var(--ink); font: 600 20px var(--f-serif); }
+.settings-v3 .section-header { align-items: flex-start; margin-bottom: 0; }
+.settings-v3 :deep(.cloud-heading h2) { font: 600 24px var(--f-serif); }
+.settings-v3 :deep(.cloud-page-subtitle) { font-size: 13px; }
+.settings-v3 :deep(.history-panel h2) { margin: 0 0 8px; font: 600 20px var(--f-serif); }
+.settings-v3 :deep(.history-panel h3) { font: 600 16px var(--f-serif); }
+.settings-v3 :deep(.history-panel p) { color: var(--ink-3); font-size: 12px; line-height: 1.8; }
+.settings-v3 :deep(.history-panel button) { min-height: 32px; max-width: 100%; padding: 6px 12px; border: 1px solid var(--line-2); border-radius: var(--r-s); background: var(--paper); color: var(--ink-2); font: 12px var(--f-ui); }
+.settings-v3 :deep(.history-panel button:hover:not(:disabled)) { border-color: var(--ink-3); color: var(--ink); }
+.settings-v3 :deep(.history-panel button:focus-visible) { outline: 2px solid var(--zhu); outline-offset: 2px; }
+
+/* 模型卡片：三列网格，末尾是“添加模型”虚线卡 */
+.settings-v3 .model-workbench { display: block; }
+.settings-v3 .model-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0 24px; }
+.settings-v3 .model-catalogue .model-card { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 6px; padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--paper); }
+.settings-v3 .model-card:hover { border-color: var(--line-2); }
+.settings-v3 .model-card--selected { border-color: var(--zhu); background: var(--paper); box-shadow: 0 0 0 3px var(--zhu-soft); }
+.settings-v3 .model-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.settings-v3 .model-name { color: var(--ink); font: 600 14px var(--f-ui); }
+.settings-v3 .model-detail { margin-top: 4px; color: var(--ink-3); font: 12px var(--f-num); }
+.settings-v3 .model-key, .settings-v3 .model-tested-at { display: none; }
+.settings-v3 .model-test-result { display: flex; flex: none; flex-direction: column; align-items: flex-end; gap: 2px; }
+.settings-v3 .model-status { flex: none; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+.settings-v3 .model-status.ok { background: var(--qing-soft); color: var(--qing); }
+.settings-v3 .model-status.fail { background: var(--zhu-soft); color: var(--zhu); }
+.settings-v3 .model-status.testing { background: var(--hover); color: var(--ink-3); }
+.settings-v3 .model-tested-at { color: var(--ink-3); font: 11px var(--f-num); white-space: nowrap; }
+.settings-v3 .model-badges { margin-top: 5px; }
+.settings-v3 .badge { padding: 1px 7px; border: 1px solid var(--line-2); border-radius: 4px; background: none; color: var(--ink-3); font-size: 11px; font-weight: 500; }
+.settings-v3 .model-actions { flex-wrap: wrap; align-items: center; gap: 2px 6px; margin: 3px -6px -2px; padding-top: 5px; border-top: 1px dashed var(--line); }
+.settings-v3 .model-actions :deep(.n-button) { --n-padding: 0 8px; font-size: 12px; }
+.settings-v3 .model-add-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 104px; border: 1px dashed var(--line-2); border-radius: var(--r-m); background: none; color: var(--ink-3); font-size: 13px; cursor: pointer; }
+.settings-v3 .model-add-card:hover { border-color: var(--zhu); color: var(--zhu); }
+.settings-v3 .model-add-card:focus-visible { outline: 2px solid var(--zhu); outline-offset: 2px; }
+.settings-v3 .empty-models { padding: 12px 0 0; text-align: left; }
+.settings-v3 .model-editor { margin: 0 0 24px; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--paper); }
+.settings-v3 .model-editor-empty { display: none; }
+
+/* 任务分配：左标签右下拉的表格式行 */
+.settings-v3 #model-task-assignments { scroll-margin-top: 8px; outline: none; }
+.settings-v3 .assignment-grid { display: block; overflow: hidden; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--paper); }
+.settings-v3 .assignment-item { display: grid; grid-template-columns: 160px minmax(220px, 280px) minmax(0, 1fr); align-items: center; gap: 4px 16px; padding: 12px 16px; border-top: 1px solid var(--line); }
+.settings-v3 .assignment-item:first-child { border-top: 0; }
+.settings-v3 .assignment-item > label { color: var(--ink); font-size: 13px; font-weight: 600; }
+.settings-v3 .assignment-hint { grid-column: 3; color: var(--ink-3); font-size: 12px; }
+
+/* AI 工作流：三张选项卡 */
+.settings-v3 .workflow-cards { gap: 12px; margin: 16px 0; }
+.settings-v3 .workflow-card { display: block; min-height: 0; padding: 16px; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--paper); }
+.settings-v3 .workflow-card:hover { background: var(--paper); border-color: var(--line-2); }
+.settings-v3 .workflow-card--active { border-color: var(--zhu); background: var(--paper); box-shadow: 0 0 0 3px var(--zhu-soft); }
+.settings-v3 .workflow-symbol { display: none; }
+.settings-v3 .workflow-card h4 { margin: 0; color: var(--ink); font: 600 16px var(--f-serif); }
+.settings-v3 .workflow-card p { margin: 6px 0 0; color: var(--ink-3); font-size: 12.5px; line-height: 1.65; }
+.settings-v3 .workflow-preview { padding: 18px 20px; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--paper); }
+.settings-v3 .workflow-preview h3, .settings-v3 .retrieval-howto h3 { margin: 0 0 6px; font: 600 17px var(--f-serif); }
+
+/* 外观：三张主题卡 */
+.theme-cards { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
+.theme-card { width: 150px; padding: 8px; border: 1px solid var(--line, var(--border-color-light)); border-radius: 10px; background: var(--paper, var(--bg-color-card)); cursor: pointer; text-align: left; }
+.theme-card.on { border-color: var(--zhu, var(--color-primary)); box-shadow: 0 0 0 3px var(--zhu-soft, var(--color-primary-light)); }
+.theme-card:focus-visible { outline: 2px solid var(--zhu, var(--color-primary)); outline-offset: 2px; }
+.theme-swatch { display: grid; grid-template-columns: 14px 1fr; height: 64px; margin-bottom: 6px; overflow: hidden; border-radius: 6px; }
+.theme-swatch i { position: relative; display: block; }
+.theme-swatch b { position: absolute; top: 12px; left: 12px; width: 22px; height: 6px; border-radius: 3px; }
+.theme-name { font-size: 12.5px; }
+
+@media (max-width: 1100px) {
+  .settings-v3 .model-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .settings-v3 .assignment-item { grid-template-columns: 140px minmax(0, 1fr); }
+  .settings-v3 .assignment-hint { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+  .settings-v3.page-container { overflow: auto; }
+  .settings-v3 .settings-layout { display: flex; flex-direction: column; height: auto; }
+  .settings-v3 .settings-nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); flex: none; gap: 4px; padding: 10px 12px; overflow: visible; border-right: 0; border-bottom: 1px solid var(--line); }
+  .settings-v3 .settings-nav-item { width: auto; min-width: 0; padding: 8px 6px; gap: 6px; white-space: normal; font-size: 12px; }
+  .settings-v3 .settings-nav-item span { min-width: 0; overflow-wrap: anywhere; }
+  .settings-v3 .settings-content { padding: 20px 14px 40px; overflow: visible; }
+  .settings-v3 .model-list { grid-template-columns: 1fr; }
+  .settings-v3 .assignment-item { grid-template-columns: 1fr; }
+  .settings-v3 .workflow-cards { grid-template-columns: 1fr; }
+}
+@media (max-width: 420px) {
+  .settings-v3 .settings-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 </style>

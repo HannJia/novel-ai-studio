@@ -14,7 +14,7 @@ export interface PortableConfig {
 }
 export interface PublicSettings {
   schema: 1
-  models: Omit<ModelConfig, 'apiKey'>[]
+  models: Omit<ModelConfig, 'apiKey' | 'connectionTest'>[]
   assignments: ModelAssignments
   embedding: Omit<EmbeddingConfig, 'apiKey'>
   skills: WritingSkill[]
@@ -62,7 +62,7 @@ export function validatePublicSettings(value: unknown): PublicSettings {
     const id = identifier(m.id)
     if (ids.has(id)) throw invalid()
     ids.add(id)
-    const model: Omit<ModelConfig, 'apiKey'> = { id, name: text(m.name, 200), baseUrl: url(m.baseUrl), modelName: text(m.modelName, 200, true),
+    const model: Omit<ModelConfig, 'apiKey' | 'connectionTest'> = { id, name: text(m.name, 200), baseUrl: url(m.baseUrl), modelName: text(m.modelName, 200, true),
       maxTokens: number(m.maxTokens, 1, 2000000), temperature: number(m.temperature, 0, 2), topP: number(m.topP, 0, 1) }
     if (m.contextWindow !== undefined) model.contextWindow = number(m.contextWindow, 1, 10000000)
     if (m.chatSearchProtocol !== undefined) {
@@ -105,7 +105,7 @@ export function validatePublicSettings(value: unknown): PublicSettings {
   return { schema: 1, models, assignments, embedding, skills, aiWorkflowMode: data.aiWorkflowMode, pdfVisionEnabled: bool(data.pdfVisionEnabled), theme: data.theme }
 }
 export function splitConfig(config: PortableConfig, theme: PublicSettings['theme']): { settings: PublicSettings; secrets: VaultSecrets } {
-  const models = config.models.map(({ apiKey: _secret, ...model }) => {
+  const models = config.models.map(({ apiKey: _secret, connectionTest: _localTest, ...model }) => {
     // Omitted kind already means chat; retain the old wire shape when possible.
     if (model.kind === 'chat') delete model.kind
     return model

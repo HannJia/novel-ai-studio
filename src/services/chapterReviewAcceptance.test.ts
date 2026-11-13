@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { normalizeStoredReviewCoverage, isReviewCoverageComplete } from './chapterReviewAcceptance'
+import { buildAnalysisSourceVersionId } from './reconstructionCandidates'
+import { isReviewCheckpoint, splitReviewChunks, type ReviewCheckpoint } from './chapterReviewCheckpoint'
 
 const validComplete = {
   signature: 'abc123',
@@ -9,6 +11,18 @@ const validComplete = {
   totalCharacters: 8000,
   globalStatus: 'complete' as const,
   status: 'complete' as const,
+}
+
+const validReviewReport = '总体判断：可通过\n\n## 本段事实摘要\n主角在城门前确认了密信内容。'
+
+function checkpointFor(source: string, count = splitReviewChunks(source).length): ReviewCheckpoint {
+  const chunks = splitReviewChunks(source).slice(0, count).map(chunk => ({
+    index: chunk.index, start: chunk.start, end: chunk.end, report: validReviewReport,
+  }))
+  return {
+    version: 1, binding: 'chapter-binding', sourceVersionId: buildAnalysisSourceVersionId(source),
+    totalCharacters: source.length, totalChunks: splitReviewChunks(source).length, chunks,
+  }
 }
 
 describe('normalizeStoredReviewCoverage', () => {
@@ -126,6 +140,58 @@ describe('normalizeStoredReviewCoverage', () => {
     expect(input).toHaveProperty('extra')
     expect(result).not.toHaveProperty('extra')
   })
+
+  it('round-trips valid partial and complete checkpoints with isolated mutable data', () => {
+    const source = 'x'.repeat(8000)
+    const partialCheckpoint = checkpointFor(source, 1)
+    const partial = {
+      ...validComplete, completedChunks: 1, coveredCharacters: 3200, status: 'failed' as const,
+      globalStatus: 'pending' as const, failedChunk: 2, error: '第二段失败', checkpoint: partialCheckpoint,
+    }
+    const partialResult = normalizeStoredReviewCoverage(partial)
+    expect(partialResult).toEqual(partial)
+    expect(partialResult?.checkpoint).not.toBe(partialCheckpoint)
+    expect(partialResult?.checkpoint?.chunks).not.toBe(partialCheckpoint.chunks)
+    partialCheckpoint.chunks[0].report = '被外部修改'
+    expect(partialResult?.checkpoint?.chunks[0].report).toBe(validReviewReport)
+
+    const completeCheckpoint = checkpointFor(source)
+    completeCheckpoint.globalReport = '总体判断：可通过'
+    const complete = { ...validComplete, checkpoint: completeCheckpoint }
+    expect(normalizeStoredReviewCoverage(complete)).toEqual(complete)
+  })
+
+  it.each([
+    ['invalid range', (checkpoint: ReviewCheckpoint) => ({ ...checkpoint, chunks: [{ ...checkpoint.chunks[0], end: 3000 }] })],
+    ['invalid order', (checkpoint: ReviewCheckpoint) => ({ ...checkpoint, chunks: checkpoint.chunks.map((chunk, index) => index === 1 ? { ...chunk, start: 2900 } : chunk) })],
+    ['unknown conclusion', (checkpoint: ReviewCheckpoint) => ({ ...checkpoint, chunks: [{ ...checkpoint.chunks[0], report: '这不是有效结论' }] })],
+    ['missing facts', (checkpoint: ReviewCheckpoint) => ({ ...checkpoint, chunks: [{ ...checkpoint.chunks[0], report: '总体判断：可通过' }] })],
+  ])('rejects checkpoint with %s', (_, mutate) => {
+    const source = 'x'.repeat(8000)
+    const checkpoint = mutate(checkpointFor(source, 2))
+    expect(isReviewCheckpoint(checkpointFor(source, 2))).toBe(true)
+    expect(isReviewCheckpoint(checkpoint)).toBe(false)
+    expect(normalizeStoredReviewCoverage({ ...validComplete, completedChunks: 2, coveredCharacters: 6240, checkpoint })).toBeUndefined()
+  })
+
+  it.each([
+    ['coverage chunk count mismatch', (checkpoint: ReviewCheckpoint) => ({ ...validComplete, status: 'failed', globalStatus: 'pending', completedChunks: 1, coveredCharacters: 8000, checkpoint })],
+    ['coverage end mismatch', (checkpoint: ReviewCheckpoint) => ({ ...validComplete, status: 'failed', globalStatus: 'pending', completedChunks: 3, coveredCharacters: 7999, checkpoint })],
+    ['missing global report', (checkpoint: ReviewCheckpoint) => ({ ...validComplete, checkpoint })],
+  ])('rejects checkpoint with %s', (_, makeCoverage) => {
+    const source = 'x'.repeat(8000)
+    const checkpoint = checkpointFor(source)
+    expect(normalizeStoredReviewCoverage(makeCoverage(checkpoint))).toBeUndefined()
+  })
+
+  it('accepts a failed write after a complete checkpoint report', () => {
+    const source = 'x'.repeat(8000)
+    const checkpoint = checkpointFor(source)
+    checkpoint.globalReport = '总体判断：可通过'
+    expect(normalizeStoredReviewCoverage({
+      ...validComplete, status: 'failed', globalStatus: 'failed', error: '保存失败', checkpoint,
+    })).toMatchObject({ status: 'failed', globalStatus: 'failed', checkpoint })
+  })
 })
 
 describe('isReviewCoverageComplete', () => {
@@ -147,6 +213,15 @@ describe('isReviewCoverageComplete', () => {
 
   it('returns true for valid complete multichunk coverage', () => {
     expect(isReviewCoverageComplete(validComplete, 'abc123', source)).toBe(true)
+  })
+
+  it('requires a checkpoint to match the exact current source, including equal-length edits', () => {
+    const source = '甲'.repeat(8000)
+    const checkpoint = checkpointFor(source)
+    checkpoint.globalReport = '总体判断：可通过'
+    const record = { ...validComplete, checkpoint }
+    expect(isReviewCoverageComplete(record, 'abc123', source)).toBe(true)
+    expect(isReviewCoverageComplete(record, 'abc123', '乙'.repeat(8000))).toBe(false)
   })
 
   it('returns true for valid complete single-chunk coverage', () => {

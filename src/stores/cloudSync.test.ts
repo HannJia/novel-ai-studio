@@ -8,18 +8,22 @@ import { parseInspirationSession } from '@/services/inspirationSessions'
 import { useCloudSyncStore } from './cloudSync'
 import { canonicalJson, emptySyncState, hashPayload, type CloudRecord } from '@/services/cloudSyncModel'
 import { cloudPreferencesBusy } from '@/services/appLifecycle'
+import { emptyProjectWorkspace, plannedProjectWorkspace } from '@/test/projectBackupFixture'
+import { useReconstructionWorkspaceStore } from './reconstructionWorkspace'
 
 const memory = vi.hoisted(() => ({
   state: null as any, conflicts: [] as any[], records: new Map<string, any>(), userId: 'owner',
   onPull: null as null | (() => void | Promise<void>), onPush: null as null | (() => Promise<void>), failSave: false, expired: false,
   requests: [] as { endpoint: string; path: string }[],
+  workspaces: new Map<string, any>(),
 }))
 vi.mock('@/services/db/cloudSync', () => ({
   readCloudState: async () => structuredClone(memory.state),
   readCloudConflicts: async () => structuredClone(memory.conflicts),
-  persistCloudState: async (state: any, conflicts: any[] = []) => {
+  persistCloudState: async (state: any, conflicts: any[] = [], project?: any) => {
     if (memory.failSave) throw new Error('磁盘写入失败')
     memory.state = structuredClone(state)
+    if (project) memory.workspaces = new Map(project.reconstructionWorkspaces.map((item: any) => [item.novelId, structuredClone(item)]))
     for (const item of conflicts) {
       memory.conflicts = memory.conflicts.filter(old => old.id !== item.id)
       memory.conflicts.push(structuredClone(item))
@@ -33,6 +37,10 @@ vi.mock('@/services/db/knowledge', () => ({
   loadAllKnowledgeBasesFromDb: async () => [], saveKnowledgeBaseToDb: async () => {}, deleteKnowledgeBaseFromDb: async () => {},
 }))
 vi.mock('@/services/db/inspirationSessions', () => ({ loadInspirationSessions: async () => [], saveInspirationSessions: async () => {} }))
+vi.mock('@/services/db/reconstruction', () => ({
+  loadReconstructionWorkspace: async (id: string) => structuredClone(memory.workspaces.get(id) || { candidates: [], reviewFindings: [], chapterReviews: [], aiRuns: [], canonMutations: [] }),
+  saveReconstructionWorkspace: async (id: string, snapshot: any) => { memory.workspaces.set(id, JSON.parse(JSON.stringify(snapshot))) },
+}))
 vi.mock('@/services/db/chapterRevisions', async importOriginal => ({
   ...await importOriginal<any>(), loadProjectChapterRevisions: async () => [],
 }))
@@ -84,6 +92,7 @@ beforeEach(async () => {
   memory.failSave = false
   memory.expired = false
   memory.requests = []
+  memory.workspaces = new Map()
   cloudPreferencesBusy.value = false
   setActivePinia(createPinia())
   await useNovelStore().initStore()
@@ -114,11 +123,40 @@ async function remoteEdit(key: string, title: string | null) {
 }
 
 describe('首次下载与本机内容确认', () => {
+  it('applies V2 planning to the live workspace only after durable cloud commit and retains it on failure', async () => {
+    const novel = addBook()
+    const localState = plannedProjectWorkspace(novel)
+    memory.workspaces.set(novel.id, localState)
+    const workspace = useReconstructionWorkspaceStore()
+    await workspace.hydrateFromPersistence(novel.id)
+    await loginAndEnable()
+    const key = 'novel:' + novel.id
+    const old = memory.records.get(key)
+    const doc = JSON.parse(old.payload)
+    expect(doc.reconstructionWorkspace.creationDraft).toEqual(localState.creationDraft)
+    doc.reconstructionWorkspace.creationDraft.contract.title = '云端契约修改'
+    const payload = canonicalJson(doc)
+    memory.records.set(key, { ...old, payload, version: old.version + 1, hash: await hashPayload(payload) })
+    memory.failSave = true
+    await sync.syncNow()
+    expect(sync.error).toContain('磁盘写入失败')
+    expect(workspace.getCreationDraft(novel.id)?.contract.title).toBe('作者确认的作品契约')
+    memory.failSave = false
+    await sync.syncNow()
+    expect(sync.error).toBe('')
+    expect(workspace.getCreationDraft(novel.id)?.contract.title).toBe('云端契约修改')
+    expect(workspace.getAiRuns(novel.id)[0].checkpoint).toBe('chapter-1:review-needs-author')
+    await remoteEdit(key, null)
+    await sync.syncNow()
+    expect(workspace.getCreationDraft(novel.id)).toBeUndefined()
+    expect(workspace.getAiRuns(novel.id)).toEqual([])
+  })
+
   async function seedRemote() {
     const book = addBook()
     book.title = '云端作品'
     const key = 'novel:' + book.id
-    const payload = canonicalJson({ kind: 'novel', novel: book, chapterRevisions: [] })
+    const payload = canonicalJson({ kind: 'novel', schemaVersion: 2, novel: book, chapterRevisions: [], reconstructionWorkspace: emptyProjectWorkspace(book.id) })
     memory.records.set(key, { key, payload, hash: await hashPayload(payload), version: 1, bytes: payload.length, updatedAt: Date.now() })
     useNovelStore().adoptImportedNovels([])
     return book.id
@@ -225,6 +263,22 @@ describe('首次下载与本机内容确认', () => {
 })
 
 describe('云同步状态机', () => {
+  it('keeps browser login in the current tab session and restores it after a reload', async () => {
+    await sync.authenticate('login', 'owner', 'not-a-real-password')
+    expect(sessionStorage.getItem('novel-cloud-session')).toContain('test-token-not-a-secret')
+    expect(localStorage.getItem('novel-cloud-session')).toBeNull()
+
+    sync.dispose()
+    setActivePinia(createPinia())
+    await useNovelStore().initStore(); await useKnowledgeStore().initStore(); await useInspirationSessionsStore().initialize()
+    sync = useCloudSyncStore()
+    await sync.initialize()
+    expect(sync.session?.token).toBe('test-token-not-a-secret')
+
+    await sync.logout()
+    expect(sessionStorage.getItem('novel-cloud-session')).toBeNull()
+  })
+
   it('serializes project operations against silent preference network synchronization', async () => {
     addBook()
     await loginAndEnable()
@@ -364,6 +418,26 @@ describe('云同步状态机', () => {
     expect(sync.pendingConflicts).toHaveLength(0)
     expect(sync.conflicts[0].local).toContain('家里')
     expect(sync.conflicts[0].resolution).toBe('remote')
+  })
+  it('refreshes a stale conflict without recording an unapplied local choice', async () => {
+    const novel = addBook()
+    await loginAndEnable()
+    useNovelStore().getNovel(novel.id)!.title = '家里'
+    const key = `novel:${novel.id}`
+    await remoteEdit(key, '公司')
+    await sync.syncNow()
+    const original = sync.pendingConflicts[0]
+
+    await remoteEdit(key, '公司又改了')
+    await expect(sync.resolveConflict(original.id, 'remote')).rejects.toThrow('已刷新冲突记录')
+
+    expect(useNovelStore().getNovel(novel.id)?.title).toBe('家里')
+    expect(sync.pendingConflicts).toHaveLength(1)
+    expect(sync.pendingConflicts[0]).toMatchObject({ local: expect.stringContaining('家里'), remote: expect.stringContaining('公司又改了'), remoteVersion: 3 })
+    expect(sync.conflicts.find(item => item.id === original.id)?.resolution).toBe('superseded')
+
+    await sync.resolveConflict(sync.pendingConflicts[0].id, 'remote')
+    expect(useNovelStore().getNovel(novel.id)?.title).toBe('公司又改了')
   })
   it('refuses to upload a bound local shelf to another account', async () => {
     addBook()

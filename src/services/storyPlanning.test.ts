@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import * as ai from '@/services/ai'
+import type { ModelConfig } from '@/stores/config'
 import type { Chapter, Novel } from '@/types/novel'
 import {
-  formatChapterPlanContext, normalizeChapterPlanDrafts, normalizeStoryArcDrafts, normalizeStoryPromiseDrafts, normalizeStoryStateProposalDrafts,
+  formatChapterPlanContext, generateChapterPlanDrafts, normalizeChapterPlanDrafts, normalizeStoryArcDrafts, normalizeStoryPromiseDrafts, normalizeStoryStateProposalDrafts,
 } from '@/services/storyPlanning'
 
 function createNovel(): Novel {
@@ -27,6 +30,15 @@ function createNovel(): Novel {
 }
 
 describe('chapter planning', () => {
+  it.each([8192, 800])('uses the configured output budget of %i and rejects incomplete plans', async maxTokens => {
+    setActivePinia(createPinia())
+    const request = vi.spyOn(ai, 'callAI').mockResolvedValueOnce({ content: '{"plans":[]}', finishReason: 'length' })
+    try {
+      await expect(generateChapterPlanDrafts(createNovel(), { maxTokens } as ModelConfig)).rejects.toThrow('未完整返回')
+      expect(request).toHaveBeenCalledWith(expect.objectContaining({ maxTokens }))
+      expect(request.mock.calls[0][0].messages[1].content).toContain('不得为了凑层数扩展结局后的章节')
+    } finally { request.mockRestore() }
+  })
   it('normalizes AI story arc drafts and clamps milestone chapter numbers', () => {
     const arcs = normalizeStoryArcDrafts([{
       title: '主线追查', description: '调查异常来源', type: 'main', importance: 8,
@@ -73,6 +85,23 @@ describe('chapter planning', () => {
     expect(normalizeStoryStateProposalDrafts(novel, chapter, [
       { targetType: 'event', targetId: 'event-1', field: 'status', newValue: 'resolved', evidence: '凭空解决了失踪案' },
     ])).toHaveLength(0)
+  })
+
+  it('does not normalize proposals for closed targets or targets omitted from the model allowlist', () => {
+    const novel = createNovel(), chapter = novel.chapters[0]
+    chapter.content = '林澈已经发现了新的线索。'
+    novel.eventLog[0].status = 'resolved'
+    novel.storyArcs![0].status = 'completed'
+    expect(normalizeStoryStateProposalDrafts(novel, chapter, [
+      { targetType: 'event', targetId: 'event-1', field: 'status', newValue: 'developing', evidence: chapter.content },
+      { targetType: 'story_arc', targetId: 'arc-1', field: 'status', newValue: 'active', evidence: chapter.content },
+      { targetType: 'arc_node', targetId: 'node-1', field: 'status', newValue: 'completed', evidence: chapter.content },
+    ])).toHaveLength(0)
+    novel.eventLog = Array.from({ length: 51 }, (_, index) => ({ ...novel.eventLog[0], id: 'listed-' + index, title: '事件' + index, status: 'planted' }))
+    expect(normalizeStoryStateProposalDrafts(novel, chapter, [
+      { targetType: 'event', targetId: 'listed-0', field: 'status', newValue: 'resolved', evidence: chapter.content },
+      { targetType: 'event', targetId: 'listed-50', field: 'status', newValue: 'resolved', evidence: chapter.content },
+    ]).map(item => item.targetId)).toEqual(['listed-0'])
   })
 
   it('only proposes new promises backed by chapter text and known arcs', () => {

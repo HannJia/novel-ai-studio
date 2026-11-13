@@ -1,4 +1,5 @@
 import type { DataPanelItem, EquipmentState } from '@/types/novel'
+import { dataPanelReferenceUnknown } from './dataPanelReference'
 
 export const equipmentStateOptions: Array<{ label: string; value: EquipmentState }> = [
   { label: '持有 / 未装备', value: 'stored' },
@@ -12,6 +13,8 @@ export function equipmentStateLabel(state?: EquipmentState): string {
 }
 
 export function equipmentSnapshot(item: DataPanelItem, items: DataPanelItem[]): string {
+  const unknown = dataPanelReferenceUnknown(item)
+  if (unknown.has('ownerItemId') || unknown.has('equipmentState')) return '持有人或装备状态待核对'
   const owner = items.find(candidate => candidate.id === item.ownerItemId)?.name || '未指定'
   return `${owner} · ${equipmentStateLabel(item.equipmentState)}`
 }

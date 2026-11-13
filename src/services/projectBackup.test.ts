@@ -1,7 +1,10 @@
+import { applyEntityDefinitionEdit } from './entityDefinitionEditing'
 import { describe, expect, it } from 'vitest'
-import { createProjectBackup, parseProjectBackup } from './projectBackup'
+import { parseProjectBackup } from './projectBackup'
+import { createTestProjectBackup as createProjectBackup } from '@/test/projectBackupFixture'
 import { createPinia, setActivePinia } from 'pinia'
 import { useNovelStore } from '@/stores/novel'
+import { createChapterSourceBinding } from './derivedSources'
 
 function validBook() {
   setActivePinia(createPinia())
@@ -11,14 +14,88 @@ function validBook() {
 }
 
 describe('项目备份格式', () => {
+  it('round trips archived chapters with their original manuscript and revision history', () => {
+    const book = validBook(), chapter = useNovelStore().addChapter(book.id, { content: '删除前的合成正文。', summary: '原章总结。' })!
+    book.archivedChapters = [{ ...chapter, archivedAt: book.updatedAt }]
+    book.chapters = []; book.currentWordCount = 0
+    const backup = createProjectBackup([book], [], [{ id: 'archived-revision', novelId: book.id, chapterId: chapter.id,
+      baseContent: chapter.content, proposedContent: '未接受的改稿', diff: '', source: 'user', reason: '', status: 'rejected',
+      createdAt: book.createdAt, updatedAt: book.updatedAt }])
+    expect(parseProjectBackup(JSON.stringify(backup))).toEqual(backup)
+  })
+
+  it.each(['active-alias', 'archive-alias', 'bad-time', 'bad-body', 'wrong-summary', 'active-marker'] as const)(
+    'rejects malformed archived chapters before import: %s', problem => {
+      const book = validBook(), chapter = useNovelStore().addChapter(book.id, { content: '合成正文。', summary: '合成总结。' })!
+      book.archivedChapters = [{ ...chapter, archivedAt: book.updatedAt }]
+      book.chapters = []; book.currentWordCount = 0
+      const backup = createProjectBackup([book], [])
+      const stored = backup.novels[0], archived = stored.archivedChapters![0]
+      if (problem === 'active-alias') stored.chapters = [chapter]
+      if (problem === 'archive-alias') stored.archivedChapters!.push({ ...archived })
+      if (problem === 'bad-time') archived.archivedAt = 'not-a-date'
+      if (problem === 'bad-body') (archived as unknown as Record<string, unknown>).content = 12
+      if (problem === 'wrong-summary') archived.summarySource!.chapterId = 'other-chapter'
+      if (problem === 'active-marker') { stored.chapters = [archived]; stored.archivedChapters = [] }
+      expect(() => parseProjectBackup(JSON.stringify(backup))).toThrow('备份数据不完整或无效')
+    })
+
+  it('preserves stale chapter-summary provenance and historical bindings without trusting them again', () => {
+    const book = validBook(), store = useNovelStore()
+    const chapter = store.addChapter(book.id, { content: '正文第一版。', summary: '总结第一版。' })!
+    store.updateChapter(book.id, chapter.id, { content: '正文第二版。' })
+    const backup = createProjectBackup([store.getNovel(book.id)!], [])
+    const parsed = parseProjectBackup(JSON.stringify(backup))
+    expect(parsed.novels[0].chapters[0].summarySource).toEqual(chapter.summarySource)
+    expect(parsed.novels[0].chapters[0].versions).toEqual(chapter.versions)
+  })
+
+  it.each(['empty-value', 'other-chapter', 'bad-origin', 'bad-date', 'history-owner'] as const)(
+    'rejects malformed or cross-chapter summary sources: %s', problem => {
+      const book = validBook(), store = useNovelStore()
+      const chapter = store.addChapter(book.id, { content: '正文。', summary: '总结。' })!
+      const backup = createProjectBackup([store.getNovel(book.id)!], [])
+      const item = backup.novels[0].chapters[0]
+      if (problem === 'history-owner') {
+        item.versions = [{ id: 'history', label: '旧版', savedAt: book.createdAt, snapshot: JSON.stringify({
+          title: '历史标题', content: chapter.content, summary: chapter.summary, status: 'draft',
+          summarySource: createChapterSourceBinding({ id: 'other', content: chapter.content }, chapter.summary, 'author', book.createdAt),
+        }) }]
+      } else {
+        const source = item.summarySource! as unknown as Record<string, unknown>
+        if (problem === 'empty-value') source.derivedValue = '  '
+        if (problem === 'other-chapter') source.chapterId = 'other'
+        if (problem === 'bad-origin') source.origin = 'unknown'
+        if (problem === 'bad-date') source.createdAt = 'not-a-date'
+      }
+      expect(() => parseProjectBackup(JSON.stringify(backup))).toThrow('summarySource')
+    })
+
   it('round trips optional manual avatar IDs and keeps legacy characters valid', () => {
     const book = validBook()
     const store = useNovelStore()
-    store.addCharacter(book.id, { name: '林晚', identity: '学者', avatarId: 'ink-scholar-f' })
-    store.addCharacter(book.id, { name: '沈舟', identity: '剑客' })
+    applyEntityDefinitionEdit(book, { action: 'create', kind: 'character', data: { name: '林晚', identity: '学者', avatarId: 'ink-scholar-f' } }, book.createdAt, () => 'test-scholar')
+    applyEntityDefinitionEdit(book, { action: 'create', kind: 'character', data: { name: '沈舟', identity: '剑客' } }, book.createdAt, () => 'test-warrior')
     const parsed = parseProjectBackup(JSON.stringify(createProjectBackup([store.getNovel(book.id)!], [])))
     expect(parsed.novels[0].characters[0].avatarId).toBe('ink-scholar-f')
     expect(parsed.novels[0].characters[1].avatarId).toBeUndefined()
+  })
+
+  it('round trips an optional manual cover ID, keeps books without one valid, and rejects a non-text cover', () => {
+    const covered = validBook()
+    const store = useNovelStore()
+    store.setCover(covered.id, 'moon-1')
+    const plain = store.addNovel({ genre: '', subGenre: '', tags: [], targetWordCountMin: 1, targetWordCountMax: 2,
+      settings: store.defaultSettings(), writingStyle: store.defaultWritingStyle() })
+    const backup = createProjectBackup([store.getNovel(covered.id)!, store.getNovel(plain.id)!], [])
+    const parsed = parseProjectBackup(JSON.stringify(backup))
+    expect(parsed.novels.find(n => n.id === covered.id)!.coverId).toBe('moon-1')
+    expect(parsed.novels.find(n => n.id === plain.id)!.coverId).toBeUndefined()
+    store.setCover(covered.id, '')
+    expect(store.getNovel(covered.id)!.coverId).toBeUndefined()
+    const corrupt = JSON.parse(JSON.stringify(backup))
+    corrupt.novels[0].coverId = 12
+    expect(() => parseProjectBackup(JSON.stringify(corrupt))).toThrow('coverId')
   })
 
   it('preserves book length settings and validates their order during backup import', () => {
@@ -77,7 +154,8 @@ describe('项目备份格式', () => {
 
   it('拒绝格式或必需数组不正确的文件', () => {
     expect(() => parseProjectBackup('{}')).toThrow('不是有效的墨笺项目备份文件')
-    expect(() => parseProjectBackup(JSON.stringify({ format: 'ai-novel-writer-backup', version: 1, novels: [{ id: 'x' }], knowledgeBases: [] }))).toThrow('备份数据不完整')
+    expect(() => parseProjectBackup(JSON.stringify({ format: 'ai-novel-writer-backup', version: 2, novels: [{ id: 'x' }], knowledgeBases: [] }))).toThrow('备份数据不完整')
+    expect(() => parseProjectBackup(JSON.stringify({ format: 'ai-novel-writer-backup', version: 1, novels: [], knowledgeBases: [] }))).toThrow('旧版备份缺少 V2')
   })
 
   it('rejects nested corruption, duplicate IDs, dangling knowledge references and prototype keys', () => {
@@ -88,6 +166,6 @@ describe('项目备份格式', () => {
     expect(() => parseProjectBackup(JSON.stringify({ ...original, novels: [original.novels[0], original.novels[0]] }))).toThrow('重复 ID')
     original.novels[0].knowledgeBaseIds = ['missing-kb']
     expect(() => parseProjectBackup(JSON.stringify(original))).toThrow('引用不存在')
-    expect(() => parseProjectBackup('{"format":"ai-novel-writer-backup","version":1,"novels":[],"knowledgeBases":[],"__proto__":{}}')).toThrow('__proto__')
+    expect(() => parseProjectBackup('{"format":"ai-novel-writer-backup","version":2,"novels":[],"knowledgeBases":[],"__proto__":{}}')).toThrow('__proto__')
   })
 })

@@ -2,6 +2,8 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { loadAllNovelsFromDb, saveNovelToDb } from '@/services/db/novels'
 import type { DataPanelChange, Novel } from '@/types/novel'
 import { getLastTransactionStats } from '@/services/database'
+import { buildAnalysisSourceVersionId } from '@/services/reconstructionCandidates'
+import { splitReviewChunks } from '@/services/chapterReviewCheckpoint'
 
 const memory = new Map<string, string>()
 
@@ -64,6 +66,31 @@ describe('large novel SQLite persistence', () => {
     expect(loaded.currentWordCount).toBe(777)
   })
 
+  it('round-trips checkpoint reports for a failed second body segment through SQLite', async () => {
+    const novel = largeNovel()
+    novel.id = 'checkpoint-coverage-roundtrip'
+    novel.dataPanelChanges = []
+    const content = `${'甲'.repeat(5000)}${'乙'.repeat(5000)}`
+    const chunks = splitReviewChunks(content)
+    const firstReport = '总体判断：可通过\n\n## 本段事实摘要\n第一段正文确认主角已收到密信。'
+    const checkpoint = {
+      version: 1 as const, binding: 'checkpoint-db-test', sourceVersionId: buildAnalysisSourceVersionId(content),
+      totalCharacters: content.length, totalChunks: chunks.length,
+      chunks: [{ index: 0, start: chunks[0].start, end: chunks[0].end, report: firstReport }],
+    }
+    novel.chapters = [{ id: 'checkpoint-chapter', volumeIndex: 0, chapterIndex: 0, title: '断点正文', content, summary: '',
+      wordCount: 10_000, status: 'writing', createdAt: novel.createdAt, updatedAt: novel.updatedAt,
+      contentReviewCoverage: { signature: 'review-v4:checkpoint-db', status: 'failed', totalChunks: chunks.length, completedChunks: 1,
+        coveredCharacters: chunks[0].end, totalCharacters: content.length, globalStatus: 'pending', failedChunk: 2,
+        error: '第二段写盘失败，但第一段有效前缀已保存', checkpoint },
+    }]
+    await saveNovelToDb(novel)
+    const loaded = (await loadAllNovelsFromDb()).find(book => book.id === novel.id)!
+    expect(loaded.chapters[0].contentReviewCoverage).toEqual(novel.chapters[0].contentReviewCoverage)
+    expect(loaded.chapters[0].contentReviewCoverage?.checkpoint?.chunks[0].report).toBe(firstReport)
+    expect(loaded.chapters[0].content).toBe(content)
+  })
+
   it('round-trips new-book promise evidence and review proposals', async () => {
     const novel = largeNovel()
     novel.id = 'promise-roundtrip'
@@ -109,6 +136,9 @@ describe('large novel SQLite persistence', () => {
     novel.dataPanelChanges = [{ id: 'proposal-db', itemId: 'new:ring', fieldId: '__create__', itemName: '戒指', fieldName: '新增对象',
       oldValue: '未记录', newValue: '戒指', reason: '获得戒指', confidence: 'clear', chapterIndex: 0, status: 'pending', createdAt: novel.createdAt,
       mutation: { kind: 'create', item: { name: '戒指', category: '装备', fields: [], relatedKeywords: [], ownerItemName: '林澈', equipmentState: 'stored' } } }]
+    const { bindAuthorDataPanelProposalSource } = await import('../dataPanelProposalSource')
+    novel.dataPanelChanges[0].sourceBinding = bindAuthorDataPanelProposalSource(novel, novel.dataPanelChanges[0])
+    novel.dataPanelChanges[0].updatedAt = novel.updatedAt
     await saveNovelToDb(novel)
     const loaded = (await loadAllNovelsFromDb()).find(book => book.id === novel.id)!
     expect(loaded.dataPanels[1]).toMatchObject(novel.dataPanels[1])
@@ -137,6 +167,17 @@ describe('large novel SQLite persistence', () => {
     expect(cleared.inspirationHistory).toEqual(novel.inspirationHistory)
     expect(Date.now() - started).toBeLessThan(5_000)
   }, 10_000)
+
+  it('persists an optional manual cover and clears it back to genre matching', async () => {
+    const novel = largeNovel()
+    novel.coverId = 'moon-2'
+    await saveNovelToDb(novel)
+    expect((await loadAllNovelsFromDb()).find(item => item.id === novel.id)?.coverId).toBe('moon-2')
+    delete novel.coverId
+    await saveNovelToDb(novel)
+    const cleared = (await loadAllNovelsFromDb()).find(item => item.id === novel.id)!
+    expect('coverId' in cleared).toBe(false)
+  })
 
   it('benchmarks a million-character manuscript with version snapshots and a one-chapter edit', async () => {
     const novel = largeNovel()
