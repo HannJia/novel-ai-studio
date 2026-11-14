@@ -26,7 +26,6 @@
         </label>
       </div>
     </fieldset>
-    <slot name="input" />
     <div class="choice-actions">
       <p class="choice-summary" aria-live="polite">
         {{ writingMode === 'ai' ? 'AI 模式' : '作者主笔 · 写作辅助' }}

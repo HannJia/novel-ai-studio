@@ -18,7 +18,10 @@
         <V3Icon :name="themeIcon" size="l" /><span>{{ THEME_LABEL[theme.currentTheme] }}</span>
       </button>
       <button type="button" class="rail-btn" @click="openSettings"><V3Icon name="sliders" size="l" /><span>设置</span></button>
-      <button type="button" class="rail-ver" :title="updateTitle" @click="appUpdate.detailsOpen = true">v{{ appUpdate.state.currentVersion }}</button>
+      <button type="button" class="rail-ver" :class="{ 'has-update': appUpdate.hasUpdate }" :title="updateTitle"
+        :aria-label="`当前版本 v${appUpdate.state.currentVersion}，${updateTitle}`" @click="appUpdate.detailsOpen = true">
+        v{{ appUpdate.state.currentVersion }}<span v-if="appUpdate.hasUpdate" class="rail-update-dot" aria-hidden="true" />
+      </button>
     </nav>
 
     <header class="top">
@@ -107,7 +110,8 @@ const book = computed(() => {
 })
 const autoRunning = computed(() => !!book.value && workspace.getAiRuns(book.value.id).some(run => run.status === 'running'))
 const themeIcon = computed<IconName>(() => ({ fanqie: 'sun', eyecare: 'leaf', dark: 'moon' } as const)[theme.currentTheme])
-const updateTitle = computed(() => appUpdate.state.release && appUpdate.state.phase !== 'unsupported' ? `发现新版本 ${appUpdate.state.release.version}` : '软件更新')
+const updateTitle = computed(() => appUpdate.state.supported && appUpdate.state.release && !['unsupported', 'current'].includes(appUpdate.state.phase)
+  ? `${appUpdate.state.phase === 'downloaded' ? '更新已准备好' : '发现新版本'} ${appUpdate.state.release!.version}` : '软件更新')
 const saveErrorText = computed(() => [novels.saveError, knowledge.saveError, inspiration.saveError].filter(Boolean).join('；'))
 const saving = computed(() => novels.saving || novels.hasPendingSaves)
 function openSettings() { void router.push('/settings') }

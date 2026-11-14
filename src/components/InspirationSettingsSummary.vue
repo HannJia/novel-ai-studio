@@ -7,8 +7,10 @@
         <span class="field-label">{{ field.label }}</span><strong :class="{ empty: !field.value }">{{ field.value || '待整理' }}</strong><n-icon class="field-pencil" :size="17"><create-outline /></n-icon>
       </button>
     </div>
-    <div class="summary-tip"><n-icon :size="23"><bulb-outline /></n-icon><div><h3>完善设定</h3><p>继续讨论人物、背景与冲突，或先手动补充。点击下方按钮，从完整对话整理设定并检查。</p></div></div>
-    <slot><n-button class="summary-extract" block type="primary" size="large" :loading="extracting" :disabled="busy || !canExtract" @click="emit('extract')"><template #icon><n-icon><document-text-outline /></n-icon></template>{{ extracting ? '整理中' : '整理设定并检查' }}</n-button></slot>
+    <div class="summary-tip"><n-icon :size="23"><bulb-outline /></n-icon><div><h3>完善设定</h3><p>整理当前讨论，更新上方设定并压缩上下文后可继续聊。编辑后的设定会用于后续回复；确定后点击“完成”进入详细检查。</p></div></div>
+    <p v-if="settingsStatus" class="summary-status" role="status">{{ settingsStatus }}</p>
+    <n-button class="summary-extract" block type="primary" size="large" :loading="extracting" :disabled="busy || !canExtract" @click="emit('extract')"><template #icon><n-icon><document-text-outline /></n-icon></template>{{ extracting ? '整理中' : '整理设定' }}</n-button>
+    <n-button class="summary-finish" block size="large" :disabled="busy || !canFinish" @click="emit('finish')"><template #icon><n-icon><checkmark-outline /></n-icon></template>完成</n-button>
     <n-button block size="large" class="summary-history" :disabled="busy" @click="emit('history')"><template #icon><n-icon><time-outline /></n-icon></template>查看历史</n-button>
     <p class="summary-footnote">未整理的字段会保持为空，不会自动替你决定。</p>
     <n-modal :show="editing !== null" preset="card" :title="`编辑${fields.find(field => field.key === editing)?.label || '设定'}`" style="width:min(520px,calc(100vw - 32px))" @update:show="value => { if (!value) editing = null }">
@@ -22,11 +24,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { NButton, NIcon, NInput, NModal, NSelect } from 'naive-ui'
-import { BookOutline, BulbOutline, CreateOutline, DocumentTextOutline, LinkOutline, LocationOutline, PersonOutline, TimeOutline } from '@vicons/ionicons5'
+import { BookOutline, BulbOutline, CheckmarkOutline, CreateOutline, DocumentTextOutline, LinkOutline, LocationOutline, PersonOutline, TimeOutline } from '@vicons/ionicons5'
 import { genres } from '@/data/genres'
 import type { CreateWizardForm } from '@/types/novel'
-const props = defineProps<{ form: CreateWizardForm; busy: boolean; extracting: boolean; canExtract: boolean }>()
-const emit = defineEmits<{ extract: []; history: []; 'draft-change': [form: CreateWizardForm] }>()
+const props = withDefaults(defineProps<{ form: CreateWizardForm; busy: boolean; extracting: boolean; canExtract: boolean; canFinish?: boolean; settingsStatus?: string }>(), { canFinish: true, settingsStatus: '' })
+const emit = defineEmits<{ extract: []; finish: []; history: []; 'draft-change': [form: CreateWizardForm] }>()
 type SummaryKey = 'genre' | 'protagonist' | 'world' | 'conflict'
 const editing = ref<SummaryKey | null>(null)
 const draft = ref('')
@@ -54,6 +56,7 @@ function saveEdit() {
 
 <style scoped>
 .inspiration-settings { display: flex; flex-direction: column; gap: 16px; min-width: 0; padding: 24px; }
+.inspiration-settings > * { flex-shrink: 0; }
 .summary-heading { display: flex; align-items: flex-start; gap: 12px; }
 .summary-heading h2 { font-size: 23px; margin: 0 0 6px; }
 .summary-heading p, .summary-tip p { color: var(--ink-2); font-size: 13px; line-height: 1.75; }
@@ -67,6 +70,7 @@ function saveEdit() {
 .summary-tip > .n-icon { color: var(--jin); flex-shrink: 0; }
 .summary-tip h3 { font-size: 16px; margin-bottom: 6px; }
 .summary-footnote { color: var(--ink-3); font-size: 11px; }
+.summary-status { color: var(--ink-2); font-size: 12px; line-height: 1.7; }
 .summary-edit-actions { display: flex; justify-content: flex-end; gap: 10px; }
 @media (max-width: 1100px) { .inspiration-settings { padding: 18px; } .summary-field { grid-template-columns: 32px minmax(0, 1fr) 17px; gap: 8px; } .field-label { grid-column: 2; } .summary-field strong { grid-column: 2; } .field-symbol { width: 32px; grid-row: span 2; } .field-pencil { grid-column: 3; grid-row: 1 / 3; } }
 </style>

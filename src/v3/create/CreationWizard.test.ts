@@ -2,21 +2,26 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, shallowMount } from '@vue/test-utils'
+import type { ComponentPublicInstance } from 'vue'
 import CreateWizard from '@/v3/create/CreationWizard.vue'
 import InspirationChat from '@/components/InspirationChat.vue'
+import CreationEntrySource from '@/components/CreationEntrySource.vue'
 import { useNovelStore } from '@/stores/novel'
 import { useReconstructionWorkspaceStore } from '@/stores/reconstructionWorkspace'
 import type { CreateWizardForm } from '@/types/novel'
 
-const { push } = vi.hoisted(() => ({ push: vi.fn() }))
-vi.mock('vue-router', () => ({ useRouter: () => ({ push }), onBeforeRouteLeave: vi.fn() }))
+const { push, leave, warning, success } = vi.hoisted(() => ({ push: vi.fn(), leave: vi.fn(), warning: vi.fn(), success: vi.fn() }))
+vi.mock('vue-router', () => ({ useRouter: () => ({ push }), onBeforeRouteLeave: (guard: () => unknown) => leave.mockImplementation(guard) }))
 vi.mock('naive-ui', async importOriginal => ({
-  ...await importOriginal<object>(), useMessage: () => ({ success: vi.fn(), error: vi.fn() }),
-  useDialog: () => ({ warning: vi.fn() }),
+  ...await importOriginal<object>(), useMessage: () => ({ success, error: vi.fn() }),
+  useDialog: () => ({ warning }),
 }))
 beforeEach(() => {
   setActivePinia(createPinia())
   push.mockReset()
+  leave.mockReset()
+  warning.mockReset()
+  success.mockReset()
   vi.spyOn(useReconstructionWorkspaceStore(), 'persistInitialCreation').mockResolvedValue()
 })
 const options = { global: { renderStubDefaultSlot: true, stubs: {
@@ -40,15 +45,105 @@ function proposal(writingMode: 'ai' | 'manual'): CreateWizardForm {
 }
 
 describe('independent writing and settings choices', () => {
-  it('V3 起点灵感带入真实创建输入，不跳过契约确认或自动调用模型', async () => {
+  it.each([
+    ['作品名称', 'Input', 'placeholder', '在作品契约中继续确认', '修灯人的故事'],
+    ['主角', 'Input', 'placeholder', '主角姓名', '顾宁'],
+    ['故事起点', 'InputNumber', 'aria-label', '起始故事日', 0],
+    ['起点名称', 'Input', 'placeholder', '例如：玄历三年春，抵达当天', '抵达当天'],
+  ])('protects unfinished %s on navigation and refresh', async (_label, component, attribute, selector, value) => {
+    const wrapper = shallowMount(CreateWizard, options)
+    await choose(wrapper, 'manual', 'custom')
+    expect(await leave()).toBe(true)
+    if (_label === '主角') {
+      await wrapper.findAll('.genre-btn').find(button => button.text() === '都市')!.trigger('click')
+      await wrapper.findAll('.sub-genre-btn').find(button => button.text() === '商战职场')!.trigger('click')
+      await wrapper.get('#wizard-next-btn').trigger('click')
+    }
+    const field = wrapper.findAllComponents({ name: String(component) }).find(item => item.attributes(String(attribute)) === selector)!
+    field.vm.$emit('update:value', value)
+    await flushPromises()
+    const navigating = leave()
+    expect(warning).toHaveBeenCalledOnce()
+    warning.mock.calls[0][0].onNegativeClick()
+    expect(await navigating).toBe(false)
+    expect(field.props('value')).toBe(value)
+    const refresh = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(refresh)
+    expect(refresh.defaultPrevented).toBe(true)
+    const exiting = leave()
+    warning.mock.calls[1][0].onPositiveClick()
+    expect(await exiting).toBe(true)
+    wrapper.unmount()
+    const afterUnmount = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(afterUnmount)
+    expect(afterUnmount.defaultPrevented).toBe(false)
+  })
+
+  it('protects a selected genre and keeps the editing step when cancelling or confirming the same setup', async () => {
+    const wrapper = shallowMount(CreateWizard, options)
+    await choose(wrapper, 'manual', 'custom')
+    await wrapper.findAll('.genre-btn').find(button => button.text() === '都市')!.trigger('click')
+    const navigating = leave()
+    warning.mock.calls[0][0].onMaskClick()
+    expect(await navigating).toBe(false)
+    await wrapper.findAll('.sub-genre-btn').find(button => button.text() === '商战职场')!.trigger('click')
+    await wrapper.get('#wizard-next-btn').trigger('click')
+    const change = () => wrapper.findAll('button').find(button => button.text() === '更换搭配')!.trigger('click')
+    await change()
+    await wrapper.get('input[name="creation-writing-mode"][value="ai"]').setValue(true)
+    await wrapper.get('input[name="creation-setup-method"][value="inspiration"]').setValue(true)
+    await wrapper.get('#wizard-back-btn').trigger('click')
+    expect(wrapper.get('#wizard-page-2').isVisible()).toBe(true)
+    expect(wrapper.findComponent(InspirationChat).props('form')).toMatchObject({ writingMode: 'manual', genre: 'urban' })
+    expect(push).not.toHaveBeenCalled()
+    await change()
+    await choose(wrapper, 'ai', 'custom')
+    expect(wrapper.get('#wizard-page-2').isVisible()).toBe(true)
+    expect(wrapper.findComponent(InspirationChat).props('form').writingMode).toBe('ai')
+    wrapper.unmount()
+  })
+
+  it('keeps organized settings in discussion and enters detailed settings only after completion', async () => {
+    const wrapper = shallowMount(CreateWizard, options)
+    await choose(wrapper, 'manual', 'inspiration')
+    await wrapper.findAll('button').find(button => button.text().includes('展开灵感对话'))!.trigger('click')
+    const chat = wrapper.findComponent(InspirationChat)
+    expect(wrapper.classes()).toContain('discussing-inspiration')
+    chat.vm.$emit('draft-change', proposal('ai'))
+    await flushPromises()
+    expect(chat.props('active')).toBe(true)
+    expect(chat.props('form')).toMatchObject({ writingMode: 'manual', settings: { protagonist: { name: '陈安' } } })
+    expect(useNovelStore().novels).toHaveLength(0)
+    chat.vm.$emit('apply', chat.props('form'), [{ role: 'user', content: '当前讨论' }])
+    await flushPromises()
+    expect(chat.props('active')).toBe(false)
+    expect(wrapper.classes()).not.toContain('discussing-inspiration')
+    expect(wrapper.get('#wizard-page-1').isVisible()).toBe(true)
+    expect(success).toHaveBeenCalledWith('已进入详细设定，请检查并补充')
+    expect(useNovelStore().novels).toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it('V3 起点只选择方式，下一步填写灵感并保存为创建输入', async () => {
     const store = useNovelStore()
     const wrapper = shallowMount(CreateWizard, { ...options, props: { appearance: 'v3' } })
     expect(wrapper.find('#origin-idea').exists()).toBe(false)
     await wrapper.get('input[name="creation-setup-method"][value="inspiration"]').setValue(true)
-    await wrapper.get('#origin-idea').setValue('合成灵感：渡口的守灯人正在等待一封旧信。')
+    expect(wrapper.find('#origin-idea').exists()).toBe(false)
+    expect(wrapper.find('.origin-seed').exists()).toBe(false)
     await wrapper.get('#start-creation-btn').trigger('click')
     expect(store.novels).toHaveLength(0)
     expect(wrapper.findComponent(InspirationChat).props('active')).toBe(false)
+    wrapper.getComponent<ComponentPublicInstance>('[aria-label="一句话灵感"]').vm
+      .$emit('update:value', '合成灵感：渡口的守灯人正在等待一封旧信。')
+    await flushPromises()
+    expect(wrapper.findComponent(CreationEntrySource).exists()).toBe(false)
+    await wrapper.findAll('button').find(button => button.text() === '发送灵感并开始讨论')!.trigger('click')
+    expect(wrapper.findComponent(InspirationChat).props()).toMatchObject({ active: true, initialIdea: '合成灵感：渡口的守灯人正在等待一封旧信。',
+      startRequest: { id: 1, idea: '合成灵感：渡口的守灯人正在等待一封旧信。' } })
+    await wrapper.findAll('button').find(button => button.text() === '保留讨论，返回创建输入')!.trigger('click')
+    expect(wrapper.findComponent(CreationEntrySource).exists()).toBe(false)
+    expect(wrapper.getComponent<ComponentPublicInstance>('[aria-label="一句话灵感"]').props()).toMatchObject({ value: '合成灵感：渡口的守灯人正在等待一封旧信。' })
     await wrapper.get('#entry-create-btn').trigger('click')
     await flushPromises()
     expect(store.novels).toHaveLength(1)

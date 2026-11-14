@@ -24,6 +24,7 @@
       ><V3Icon :name="item.icon" /><span>{{ item.label }}</span></button>
     </nav>
     <div ref="contentEl" class="settings-content">
+      <p v-if="hasUnsavedChanges" class="settings-draft-note" role="status">有未保存的模型或技能草稿。切换条目或分区会暂存，离开设置前请保存。</p>
       <section v-show="activeTab === 'cloud'" class="settings-section cloud-settings-section">
         <CloudSyncPanel />
         <ProjectHistoryPanel />
@@ -51,6 +52,7 @@
             <div class="model-info">
               <div class="model-head">
                 <button type="button" class="model-name model-select" :aria-label="`编辑模型 ${model.modelName}`" @click="editModel(model)">{{ model.modelName }}</button>
+                <span v-if="dirtyModelKeys.has(model.id)" class="draft-badge">未保存</span>
                 <!-- 只显示与当前本机环境和连接配置指纹匹配的实际测试结果。 -->
                 <div v-if="testState[model.id]" class="model-test-result" title="与当前配置匹配的连接测试结果">
                   <span class="model-status" :class="testState[model.id]">
@@ -78,7 +80,7 @@
               <n-button size="tiny" quaternary type="error" @click="handleDeleteModel(model.id)">删除</n-button>
             </div>
           </div>
-          <button type="button" id="add-model-btn" class="model-add-card" @click="openAddModel"><V3Icon name="plus" />添加模型</button>
+          <button type="button" id="add-model-btn" class="model-add-card" @click="openAddModel"><V3Icon name="plus" />添加模型<span v-if="dirtyModelKeys.has(null)" class="draft-badge">未保存</span></button>
         </div>
           </div>
     <section v-if="showAddModel" class="model-editor" aria-label="编辑模型配置">
@@ -355,21 +357,22 @@
             <h2 class="section-title">写作技能</h2>
             <p class="section-desc section-desc-inline">按任务自动注入的可复用写作规则</p>
           </div>
-          <n-button type="primary" size="small" @click="openSkillModal()">添加技能</n-button>
+          <n-button type="primary" size="small" @click="openSkillModal()">添加技能<span v-if="dirtySkillKeys.has(null)" class="draft-badge">（未保存）</span></n-button>
         </div>
         <div class="skill-workbench">
         <div class="skill-list">
-          <div v-for="skill in configStore.skills" :key="skill.id" class="skill-row" :class="{ selected: showSkillModal && editingSkill === skill.id }">
-            <n-switch :value="skill.enabled" :aria-label="`启用${skill.name}`" @update:value="value => configStore.updateSkill(skill.id, { enabled: value })" />
+          <div v-for="skill in configStore.skills" :key="skill.id" class="skill-row" :class="{ selected: showSkillModal && editingSkill === skill.id }" @click="openSkillModal(skill)">
+            <n-switch :value="skill.enabled" :aria-label="`启用${skill.name}`" @click.stop @update:value="value => configStore.updateSkill(skill.id, { enabled: value })" />
             <div class="skill-info">
               <div class="skill-name">
-                <button type="button" class="skill-select" @click="openSkillModal(skill)">{{ skill.name }}</button>
+                <button type="button" class="skill-select" :aria-pressed="showSkillModal && editingSkill === skill.id" @click.stop="openSkillModal(skill)">{{ skill.name }}</button>
+                <span v-if="dirtySkillKeys.has(skill.id)" class="draft-badge">未保存</span>
                 <n-tag size="small" :type="skill.builtIn ? 'info' : 'default'">{{ skill.builtIn ? '内置' : '自定义' }}</n-tag>
                 <n-tag size="small">{{ skillTaskLabel(skill.task) }}</n-tag>
               </div>
               <p>{{ skill.description }}</p>
             </div>
-            <div class="model-actions">
+            <div class="model-actions" @click.stop>
               <n-button size="small" quaternary circle :title="`查看和编辑${skill.name}`" :aria-label="`查看和编辑${skill.name}`" @click="openSkillModal(skill)">
                 <template #icon><n-icon><create-outline /></n-icon></template>
               </n-button>
@@ -399,7 +402,7 @@
 
         <div class="section-actions">
           <n-button v-if="configStore.skills.find(item => item.id === editingSkill)?.builtIn" @click="restoreSkill">恢复内置规则</n-button>
-          <n-button @click="showSkillModal = false">取消</n-button>
+          <n-button @click="closeSkillModal">取消</n-button>
           <n-button type="primary" :disabled="!skillForm.name.trim() || !skillForm.instructions.trim()" @click="saveSkill">保存</n-button>
         </div>
 
@@ -452,8 +455,8 @@ import ModelSearchTest from '@/components/ModelSearchTest.vue'
 import V3Icon from '@/v3/components/V3Icon.vue'
 import type { IconName } from '@/v3/icons'
 import { THEME_LABEL } from '@/v3/shell'
-import { ref, computed, reactive, nextTick, onBeforeUnmount, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, computed, reactive, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { NButton, NIcon, NInput, NInputNumber, NSelect, NSwitch, NTag, useMessage, useDialog } from 'naive-ui'
 import { HardwareChipOutline, DocumentTextOutline, ArrowBackOutline, CreateOutline, FlashOutline, ShieldCheckmarkOutline, ScaleOutline } from '@vicons/ionicons5'
 import { getAiWorkflowPolicy } from '@/services/aiWorkflow'
@@ -511,7 +514,7 @@ const router = useRouter()
 const theme = useThemeStore()
 
 type SettingsTab = 'models' | 'workflow' | 'look' | 'retrieval' | 'skills' | 'cloud' | 'about'
-// 左侧导航按原型顺序排列；“任务分配”与“软件更新”分别是模型配置页、关于页里的锚点，不是独立页面。
+// “任务分配”定位到模型配置页的锚点，软件更新统一放在“关于”页。
 const navItems: Array<{ key: string; label: string; icon: IconName; tab: SettingsTab; anchor?: string }> = [
   { key: 'models', label: '模型配置', icon: 'grid', tab: 'models' },
   { key: 'assign', label: '任务分配', icon: 'target', tab: 'models', anchor: '#model-task-assignments' },
@@ -520,28 +523,26 @@ const navItems: Array<{ key: string; label: string; icon: IconName; tab: Setting
   { key: 'retrieval', label: '语义检索', icon: 'search', tab: 'retrieval' },
   { key: 'skills', label: '写作技能', icon: 'pen', tab: 'skills' },
   { key: 'cloud', label: '云同步与历史', icon: 'cloud', tab: 'cloud' },
-  { key: 'update', label: '软件更新', icon: 'refresh', tab: 'about', anchor: '.about-update' },
   { key: 'about', label: '关于', icon: 'info', tab: 'about' },
 ]
-const activeTab = ref<SettingsTab>('models')
-const activeNav = ref('models')
+const activeNav = computed(() => navItems.some(item => item.key === route.query.section) ? String(route.query.section) : 'models')
+const activeNavItem = computed(() => navItems.find(item => item.key === activeNav.value)!)
+const activeTab = computed(() => activeNavItem.value.tab)
 const contentEl = ref<HTMLElement | null>(null)
-watch(activeTab, tab => {
-  // 其他入口（编辑模型、前往任务分配等）切换页面时，导航高亮跟着走；同一页面内的锚点高亮保持不变。
-  if (navItems.find(item => item.key === activeNav.value)?.tab !== tab) activeNav.value = navItems.find(item => item.tab === tab)!.key
-})
-watch(() => route.query.section, section => {
-  if (typeof section === 'string' && navItems.some(item => item.key === section)) void selectNav(section)
-}, { immediate: true })
+watch(activeNav, scrollToActiveSection, { immediate: true })
 async function selectNav(key: string) {
-  const item = navItems.find(entry => entry.key === key)
-  if (!item) return
-  activeNav.value = key
-  activeTab.value = item.tab
+  if (!navItems.some(item => item.key === key)) return
+  if (route.query.section === key) return scrollToActiveSection()
+  await router.push({ query: { ...route.query, section: key }, hash: route.hash })
+}
+async function scrollToActiveSection() {
   await nextTick()
+  const item = activeNavItem.value
   const target = item.anchor ? contentEl.value?.querySelector<HTMLElement>(item.anchor) : null
-  if (target) target.scrollIntoView?.({ block: 'start', behavior: 'auto' })
-  else if (contentEl.value) contentEl.value.scrollTop = 0
+  if (target) {
+    target.scrollIntoView?.({ block: 'start', behavior: 'auto' })
+    target.focus({ preventScroll: true })
+  } else if (contentEl.value) contentEl.value.scrollTop = 0
 }
 
 const themeCards: Array<{ name: ThemeName; label: string; colors: [string, string, string] }> = [
@@ -611,12 +612,7 @@ function handleSettingsNavKeydown(event: KeyboardEvent) {
 }
 
 async function openTaskAssignments() {
-  activeTab.value = 'models'
-  activeNav.value = 'assign'
-  await nextTick()
-  const target = document.getElementById('model-task-assignments')
-  target?.scrollIntoView?.({ block: 'nearest' })
-  target?.focus()
+  await selectNav('assign')
 }
 
 const returnPath = computed(() => {
@@ -638,7 +634,6 @@ const selectedModelNames = ref<string[]>([])
 const modelDiscoveryLoading = ref(false)
 const modelDiscoveryError = ref('')
 let modelDiscoveryController: AbortController | null = null
-onBeforeUnmount(() => modelDiscoveryController?.abort())
 const testingEmbedding = ref(false)
 let embeddingTestUiGeneration = 0
 const showSkillModal = ref(false)
@@ -685,6 +680,69 @@ const modelForm = reactive({
   maxTokens: 4096,
   chatSearchProtocol: 'auto' as ChatSearchProtocol,
 })
+type ModelDraft = {
+  form: typeof modelForm
+  baseline: string
+  availableModels: AvailableModel[]
+  selectedModelNames: string[]
+  discoveryError: string
+}
+type SkillDraft = { form: typeof skillForm; baseline: string }
+// 草稿仅随当前设置页保留在内存中，包含密钥的表单不写入持久化存储。
+const modelDrafts = reactive(new Map<string | null, ModelDraft>())
+const skillDrafts = reactive(new Map<string | null, SkillDraft>())
+const modelBaseline = ref('')
+const skillBaseline = ref('')
+const modelDirty = computed(() => showAddModel.value && modelFormSignature() !== modelBaseline.value)
+const skillDirty = computed(() => showSkillModal.value && JSON.stringify(skillForm) !== skillBaseline.value)
+const dirtyModelKeys = computed(() => new Set([
+  ...modelDrafts.keys(),
+  ...(modelDirty.value ? [editingModel.value] : []),
+]))
+const dirtySkillKeys = computed(() => new Set([
+  ...skillDrafts.keys(),
+  ...(skillDirty.value ? [editingSkill.value] : []),
+]))
+const hasUnsavedChanges = computed(() => dirtyModelKeys.value.size > 0 || dirtySkillKeys.value.size > 0)
+
+function modelFormSignature() {
+  return JSON.stringify([modelForm, selectedModelNames.value])
+}
+
+function confirmDiscardChanges(content: string) {
+  return new Promise<boolean>(resolve => {
+    let settled = false
+    function finish(discard: boolean) {
+      if (settled) return
+      settled = true
+      resolve(discard)
+    }
+    dialog.warning({
+      title: '放弃未保存的修改？', content,
+      positiveText: '放弃修改', negativeText: '继续编辑',
+      onPositiveClick: () => finish(true),
+      onNegativeClick: () => finish(false),
+      onClose: () => finish(false),
+      onMaskClick: () => finish(false),
+    })
+  })
+}
+
+onBeforeRouteLeave(() => hasUnsavedChanges.value
+  ? confirmDiscardChanges('离开设置将丢弃本页所有未保存的模型和技能草稿，确定离开吗？')
+  : true)
+
+function protectSettingsDrafts(event: BeforeUnloadEvent) {
+  if (!hasUnsavedChanges.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+onMounted(() => window.addEventListener('beforeunload', protectSettingsDrafts))
+onBeforeUnmount(() => {
+  stopModelDiscovery()
+  window.removeEventListener('beforeunload', protectSettingsDrafts)
+})
+
 const searchTestModel = computed<ModelConfig>(() => ({
   ...modelForm,
   id: editingModel.value || 'search-test',
@@ -731,10 +789,16 @@ function maskKey(key: string): string {
 }
 
 // 编辑模型
-function editModel(model: ModelConfig) {
-  activeTab.value = 'models'
-  editingModel.value = model.id
-  Object.assign(modelForm, {
+function editModel(model?: ModelConfig) {
+  void selectNav('models')
+  const id = model?.id ?? null
+  if (showAddModel.value && editingModel.value === id) return
+  rememberModelDraft()
+  resetForm()
+  editingModel.value = id
+  const draft = modelDrafts.get(id)
+  if (draft) Object.assign(modelForm, draft.form)
+  else if (model) Object.assign(modelForm, {
     kind: model.kind || 'chat',
     name: model.name,
     baseUrl: model.baseUrl,
@@ -745,23 +809,36 @@ function editModel(model: ModelConfig) {
     maxTokens: model.maxTokens,
     chatSearchProtocol: model.chatSearchProtocol || 'auto',
   })
-  availableModels.value = []
-  selectedModelNames.value = [model.modelName]
-  modelDiscoveryError.value = ''
+  availableModels.value = draft?.availableModels || []
+  selectedModelNames.value = draft?.selectedModelNames || (model ? [model.modelName] : [])
+  modelDiscoveryError.value = draft?.discoveryError || ''
+  modelBaseline.value = draft?.baseline || modelFormSignature()
+  modelDrafts.delete(id)
   showAddModel.value = true
 }
 
 function openAddModel() {
-  activeTab.value = 'models'
-  resetForm()
-  availableModels.value = []
-  selectedModelNames.value = []
-  modelDiscoveryError.value = ''
-  showAddModel.value = true
+  editModel()
+}
+
+function rememberModelDraft() {
+  stopModelDiscovery()
+  if (!modelDirty.value) return
+  modelDrafts.set(editingModel.value, {
+    form: { ...modelForm }, baseline: modelBaseline.value,
+    availableModels: [...availableModels.value], selectedModelNames: [...selectedModelNames.value],
+    discoveryError: modelDiscoveryError.value,
+  })
+}
+
+function stopModelDiscovery() {
+  modelDiscoveryController?.abort()
+  modelDiscoveryController = null
+  modelDiscoveryLoading.value = false
 }
 
 function handleModelSourceChange() {
-  if (!availableModels.value.length) return
+  stopModelDiscovery()
   availableModels.value = []
   selectedModelNames.value = []
   modelDiscoveryError.value = ''
@@ -778,7 +855,7 @@ async function fetchAvailableModels() {
       baseUrl: modelForm.baseUrl,
       apiKey: modelForm.apiKey,
     }, controller.signal)
-    if (controller.signal.aborted) return
+    if (controller.signal.aborted || modelDiscoveryController !== controller) return
     availableModels.value = models
     if (models.length === 0) {
       modelDiscoveryError.value = '接口返回了空模型列表，请确认地址和密钥对应的服务。'
@@ -790,7 +867,7 @@ async function fetchAvailableModels() {
     modelForm.modelName = initialModelName
     message.success(`已获取 ${models.length} 个可用模型，请选择模型名称`)
   } catch (error: unknown) {
-    if (controller.signal.aborted) return
+    if (controller.signal.aborted || modelDiscoveryController !== controller) return
     modelDiscoveryError.value = error instanceof Error ? error.message : '获取模型失败，请检查接口地址和接口密钥'
   } finally {
     if (modelDiscoveryController === controller) {
@@ -801,11 +878,13 @@ async function fetchAvailableModels() {
 }
 
 function handleSelectedModelNamesChange(value: string[]) {
+  stopModelDiscovery()
   selectedModelNames.value = value
   modelForm.modelName = value[0] || ''
 }
 
 function handleManualModelNameChange(value: string) {
+  stopModelDiscovery()
   modelForm.modelName = value
   const trimmed = value.trim()
   if (!trimmed || selectedModelNames.value.some(modelName => modelName !== trimmed)) {
@@ -814,6 +893,7 @@ function handleManualModelNameChange(value: string) {
 }
 
 function selectAllAvailableModels() {
+  stopModelDiscovery()
   selectedModelNames.value = availableModels.value.map(model => model.id)
   modelForm.modelName = selectedModelNames.value[0] || ''
 }
@@ -835,8 +915,7 @@ function handleSaveModel() {
     configStore.addModel(config)
     message.success('模型已添加')
   }
-  closeModelModal()
-  resetForm()
+  clearModelEditor()
 }
 
 function modelConfigKey(baseUrl: string, modelName: string, apiKey: string) {
@@ -883,26 +962,40 @@ function handleBatchSaveModels() {
   } else {
     message.info('所选模型都已存在，未新增配置')
   }
-  closeModelModal()
-  resetForm()
+  // 批量添加不保存当前已有模型的修改，继续保留这份草稿。
+  if (editingModel.value) {
+    selectedModelNames.value = modelForm.modelName ? [modelForm.modelName] : []
+    rememberModelDraft()
+  }
+  clearModelEditor(Boolean(editingModel.value))
 }
 
-function closeModelModal() {
-  modelDiscoveryController?.abort()
-  modelDiscoveryController = null
-  modelDiscoveryLoading.value = false
+async function closeModelModal() {
+  const id = editingModel.value
+  if (modelDirty.value && !await confirmDiscardChanges('当前模型的修改和批量选择尚未保存，确定放弃吗？')) return
+  if (editingModel.value === id) clearModelEditor()
+}
+
+function clearModelEditor(keepDraft = false) {
+  if (!keepDraft) modelDrafts.delete(editingModel.value)
+  stopModelDiscovery()
   showAddModel.value = false
+  availableModels.value = []
+  modelDiscoveryError.value = ''
+  resetForm()
 }
 
 // 删除模型
 function handleDeleteModel(id: string) {
   dialog.warning({
     title: '确认删除',
-    content: '确定要删除这个模型配置吗？',
+    content: dirtyModelKeys.value.has(id) ? '确定要删除这个模型配置及其未保存的草稿吗？' : '确定要删除这个模型配置吗？',
     positiveText: '删除',
     negativeText: '取消',
     onPositiveClick: () => {
       configStore.deleteModel(id)
+      modelDrafts.delete(id)
+      if (editingModel.value === id) clearModelEditor()
       message.success('模型已删除')
     },
   })
@@ -1014,20 +1107,40 @@ function skillTaskLabel(task: WritingSkillTask) {
 }
 
 function openSkillModal(skill?: WritingSkill) {
-  editingSkill.value = skill?.id || null
-  Object.assign(skillForm, skill ? {
+  const id = skill?.id ?? null
+  if (showSkillModal.value && editingSkill.value === id) return
+  if (skillDirty.value) skillDrafts.set(editingSkill.value, { form: { ...skillForm }, baseline: skillBaseline.value })
+  editingSkill.value = id
+  const draft = skillDrafts.get(id)
+  Object.assign(skillForm, draft?.form || (skill ? {
     name: skill.name,
     description: skill.description,
     task: skill.task,
     instructions: skill.instructions,
-  } : { name: '', description: '', task: 'writing', instructions: '' })
+  } : { name: '', description: '', task: 'writing', instructions: '' }))
+  skillBaseline.value = draft?.baseline || JSON.stringify(skillForm)
+  skillDrafts.delete(id)
   showSkillModal.value = true
 }
 watch(activeTab, tab => {
   if (tab === 'skills' && !showSkillModal.value && configStore.skills.length) openSkillModal(configStore.skills[0])
-})
+}, { immediate: true })
+
+async function closeSkillModal() {
+  const id = editingSkill.value
+  if (skillDirty.value && !await confirmDiscardChanges('当前技能的修改尚未保存，确定放弃吗？')) return
+  if (editingSkill.value === id) clearSkillEditor()
+}
+
+function clearSkillEditor() {
+  skillDrafts.delete(editingSkill.value)
+  showSkillModal.value = false
+  editingSkill.value = null
+  Object.assign(skillForm, { name: '', description: '', task: 'writing', instructions: '' })
+}
 
 async function saveSkill() {
+  const signature = JSON.stringify(skillForm)
   const data = {
     name: skillForm.name.trim(),
     description: skillForm.description.trim(),
@@ -1035,10 +1148,20 @@ async function saveSkill() {
     instructions: skillForm.instructions.trim(),
   }
   if (editingSkill.value) configStore.updateSkill(editingSkill.value, data)
-  else configStore.addSkill(data)
+  else editingSkill.value = configStore.addSkill(data).id
+  const id = editingSkill.value
   try {
     await configStore.saveConfig()
-    showSkillModal.value = false
+    if (showSkillModal.value && editingSkill.value === id) {
+      skillBaseline.value = signature
+      if (!skillDirty.value) clearSkillEditor()
+    } else {
+      const draft = skillDrafts.get(id)
+      if (draft) {
+        draft.baseline = signature
+        if (JSON.stringify(draft.form) === signature) skillDrafts.delete(id)
+      }
+    }
     message.success('技能已保存')
   } catch { message.error('技能保存失败，请重试保存。') }
 }
@@ -1052,11 +1175,13 @@ function restoreSkill() {
 function handleDeleteSkill(id: string) {
   dialog.warning({
     title: '删除技能',
-    content: '确定删除这个自定义技能？',
+    content: dirtySkillKeys.value.has(id) ? '确定删除这个自定义技能及其未保存的草稿？' : '确定删除这个自定义技能？',
     positiveText: '删除',
     negativeText: '取消',
     onPositiveClick: () => {
       configStore.deleteSkill(id)
+      skillDrafts.delete(id)
+      if (editingSkill.value === id) clearSkillEditor()
       message.success('技能已删除')
     },
   })
@@ -1064,6 +1189,8 @@ function handleDeleteSkill(id: string) {
 </script>
 
 <style scoped>
+.settings-draft-note { padding: 10px 12px; border-left: 3px solid var(--zhu); background: var(--zhu-soft); color: var(--ink-2); font-size: 13px; }
+.draft-badge { color: var(--zhu); font-size: 12px; }
 .crumb-link { color: var(--ink-3); text-decoration: none; }.crumb-link:hover { color: var(--zhu); }.crumb-sep { margin: 0 7px; color: var(--ink-4); }
 .settings-header {
   display: flex;
@@ -1516,7 +1643,8 @@ function handleDeleteSkill(id: string) {
 .settings-nav-item[aria-selected="true"] { border-left: 3px solid var(--zhu); background: var(--zhu-soft); }
 .skill-workbench { display: grid; grid-template-columns: minmax(250px, 0.8fr) minmax(0, 1.3fr); gap: 24px; align-items: start; }
 .skill-list { gap: 12px; }
-.skill-row { position: relative; display: flex; flex-wrap: wrap; align-items: flex-start; padding: 18px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--paper); gap: 12px; }
+.skill-row { position: relative; display: flex; flex-wrap: wrap; align-items: flex-start; padding: 18px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--paper); gap: 12px; cursor: pointer; }
+.skill-row:hover, .skill-row:focus-within { border-color: var(--zhu); }
 .skill-row.selected { border-color: var(--zhu); background: var(--zhu-soft); }
 .skill-info { flex: 1; min-width: 100px; }
 .skill-select { font: 600 20px var(--f-serif); color: var(--ink); border: 0; background: transparent; padding: 0; text-align: left; cursor: pointer; }

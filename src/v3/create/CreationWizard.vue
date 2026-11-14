@@ -1,12 +1,12 @@
 <template>
-  <div class="wizard-layout" :class="{ 'choosing-options': choosingCreationOptions }" id="create-wizard-page">
+  <div class="wizard-layout" :class="{ 'choosing-options': choosingCreationOptions, 'discussing-inspiration': showInspiration }" id="create-wizard-page">
     <!-- 顶部固定区 -->
-    <div v-if="!choosingCreationOptions" class="wizard-top">
+    <div v-if="!choosingCreationOptions || previousCreationState" class="wizard-top">
       <!-- 向导头部 -->
       <div class="wizard-header">
         <button class="back-btn" @click="handleBack" id="wizard-back-btn">
           <n-icon :size="20"><arrow-back-outline /></n-icon>
-          <span>{{ choosingCreationOptions && previousCreationState ? '返回' : '返回书架' }}</span>
+          <span>{{ choosingCreationOptions && previousCreationState ? '取消更换，返回编辑' : '返回书架' }}</span>
         </button>
         <span v-if="!choosingCreationOptions && setupMethod" class="creation-combination" role="status">{{ form.writingMode === 'ai' ? 'AI 模式' : '作者主笔' }} · {{ creationSetupLabels[setupMethod] }}</span>
         <n-button v-if="!choosingCreationOptions" quaternary :disabled="creating" @click="openCreationOptions">更换搭配</n-button>
@@ -39,17 +39,8 @@
     <!-- 可滚动内容区 -->
     <creation-mode-picker v-if="choosingCreationOptions"
       v-model:writing-mode="form.writingMode" v-model:setup-method="setupMethod"
-      :disabled="creating" @start="startCreation">
-      <template v-if="setupMethod === 'inspiration'" #input>
-        <section class="origin-seed">
-          <label for="origin-idea">一句话灵感</label>
-          <textarea id="origin-idea" v-model="ideaSentence" :disabled="creating" maxlength="4000" rows="2" aria-label="起点灵感草稿" placeholder="一个人物、一个冲突或一个场景，就可以作为起点……" />
-          <p>先记下想法，下一步可继续编辑或展开对话。继续不会自动调用模型，也不会批准任何故事事实。</p>
-        </section>
-      </template>
-    </creation-mode-picker>
+      :disabled="creating" @start="startCreation" />
     <div v-if="showEntry && !discussingInspiration" class="creation-entry-body">
-      <CreationEntrySource v-if="creationCheckpoint" :input="creationCheckpoint" />
       <section class="paper-panel creation-entry-panel">
         <h2>{{ setupMethod ? creationSetupLabels[setupMethod] : '' }}</h2>
         <p>保存创建输入后，依次编辑作品契约、比较骨架候选并确认规划。此处不会生成正文或批准故事事实。</p>
@@ -57,8 +48,8 @@
         <template v-if="setupMethod === 'inspiration'">
           <label>一句话灵感<n-input v-model:value="ideaSentence" type="textarea" :rows="4" :maxlength="4000" :disabled="creating || !!createdNovelId" aria-label="一句话灵感" placeholder="一个人物、一个冲突或一个场景，就可以作为起点" /></label>
           <n-checkbox v-model:checked="includeInspirationHistory" :disabled="creating || !!createdNovelId || !inspirationHistory.length">一并保存当前灵感讨论（{{ inspirationHistory.length }} 条）</n-checkbox>
-          <n-button :disabled="creating || !!createdNovelId" @click="openInspirationDiscussion">继续已有讨论 / 展开灵感对话</n-button>
-          <p>一句话即可开始，不要求先调用模型整理设定。选用讨论时，创建会保存当前选择的讨论记录。</p>
+          <n-button :disabled="creating || !!createdNovelId" @click="openInspirationDiscussion">{{ ideaSentence.trim() ? '发送灵感并开始讨论' : '继续已有讨论 / 展开灵感对话' }}</n-button>
+          <p>填写灵感后，点击上方按钮会直接发送并开始讨论；留空可继续已有对话。创建时可一并保存讨论记录。</p>
         </template>
         <CreationOutlineInput v-if="setupMethod === 'outline'" v-model="outlineInput" :saved="outlineSaved"
           :disabled="creating || !!createdNovelId" @save="saveOutlineInput" @reading="outlineReading = $event" />
@@ -76,7 +67,7 @@
       </section>
     </div>
     <inspiration-chat v-show="showInspiration"
-      :active="showInspiration" :form="form" @apply="applyInspiration" @draft-change="updateInspirationDraft" @history-change="handleInspirationHistoryChange" />
+      :active="showInspiration" :form="form" :initial-idea="ideaSentence" :start-request="discussionStart" @apply="applyInspiration" @draft-change="updateInspirationDraft" @history-change="handleInspirationHistoryChange" />
     <div v-show="showSettings" class="wizard-body">
 
 
@@ -600,7 +591,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import {
   NButton, NIcon, NInput, NInputNumber, NSelect, NModal, NSwitch, NCheckbox, NCheckboxGroup, useDialog, useMessage
@@ -616,7 +607,6 @@ import type { CreateWizardForm } from '@/types/novel'
 import InspirationChat from '@/components/InspirationChat.vue'
 import CreationModePicker from '@/v3/create/CreationModePicker.vue'
 import CreationOutlineInput from '@/components/CreationOutlineInput.vue'
-import CreationEntrySource from '@/components/CreationEntrySource.vue'
 import { creationSetupLabels, type CreationSetupMethod, type CreationOutlineInput as OutlineInput, type CreationEntryInput } from '@/types/creationEntry'
 import { assertCreationEntryInput, creationOutlineInputSignature } from '@/services/creationEntryInput'
 import type { InspirationMessage } from '@/services/inspiration'
@@ -638,17 +628,10 @@ const choosingCreationOptions = ref(true)
 const setupMethod = ref<CreationSetupMethod | null>(null)
 const reviewingInspiration = ref(false)
 const discussingInspiration = ref(false)
+const discussionStart = ref<{ id: number; idea: string }>()
 const ideaSentence = ref(''), includeInspirationHistory = ref(false)
 const outlineInput = ref<OutlineInput>(), savedOutlineInput = ref<OutlineInput>(), outlineReading = ref(false)
 const outlineSaved = computed(() => !!savedOutlineInput.value && creationOutlineInputSignature(outlineInput.value) === creationOutlineInputSignature(savedOutlineInput.value))
-const creationCheckpoint = computed<CreationEntryInput | undefined>(() => {
-  if (!setupMethod.value) return undefined
-  if (setupMethod.value === 'outline') return savedOutlineInput.value ? { method: 'outline', outline: savedOutlineInput.value, savedAt: savedOutlineInput.value.savedAt || savedOutlineInput.value.capturedAt } : undefined
-  const savedAt = new Date().toISOString()
-  if (setupMethod.value === 'inspiration' && ideaSentence.value.trim()) return { method: 'inspiration', idea: ideaSentence.value, includeDiscussion: includeInspirationHistory.value, savedAt }
-  if (setupMethod.value === 'blank') return { method: 'blank', savedAt }
-  return undefined
-})
 const creationId = crypto.randomUUID()
 let committedCreation: ReturnType<typeof prepareStoryCreation> | undefined
 const creating = ref(false)
@@ -656,6 +639,7 @@ const createdNovelId = ref('')
 const inspirationHistory = ref<InspirationMessage[]>([])
 const previousCreationState = ref<{
   setupMethod: CreationSetupMethod | null
+  writingMode: CreateWizardForm['writingMode']
   reviewingInspiration: boolean
   discussingInspiration: boolean
   currentStep: number
@@ -669,6 +653,7 @@ function openCreationOptions() {
   if (choosingCreationOptions.value || creating.value) return
   previousCreationState.value = {
     setupMethod: setupMethod.value,
+    writingMode: form.writingMode,
     reviewingInspiration: reviewingInspiration.value,
     discussingInspiration: discussingInspiration.value,
     currentStep: currentStep.value,
@@ -678,12 +663,25 @@ function openCreationOptions() {
 
 function startCreation() {
   if (!setupMethod.value || !form.writingMode || creating.value) return
+  const previous = previousCreationState.value
   choosingCreationOptions.value = false
+  if (previous?.setupMethod === setupMethod.value) {
+    currentStep.value = previous.currentStep
+    reviewingInspiration.value = previous.reviewingInspiration
+    discussingInspiration.value = previous.discussingInspiration
+  } else {
+    currentStep.value = 0
+    reviewingInspiration.value = false
+    discussingInspiration.value = false
+  }
   previousCreationState.value = null
-  currentStep.value = 0
-  reviewingInspiration.value = false; discussingInspiration.value = false
 }
-function openInspirationDiscussion() { discussingInspiration.value = true; includeInspirationHistory.value = true }
+function openInspirationDiscussion() {
+  if (discussingInspiration.value || creating.value || createdNovelId.value) return
+  discussingInspiration.value = true
+  includeInspirationHistory.value = true
+  discussionStart.value = { id: (discussionStart.value?.id || 0) + 1, idea: ideaSentence.value.trim() }
+}
 function saveOutlineInput(value: OutlineInput) { savedOutlineInput.value = JSON.parse(JSON.stringify(value)) }
 
 function updateInspirationDraft(settings: CreateWizardForm) {
@@ -700,15 +698,19 @@ function applyInspiration(settings: CreateWizardForm, history: InspirationMessag
   includeInspirationHistory.value = true
   reviewingInspiration.value = true
   currentStep.value = 0
-  message.success('设定已整理，请检查并确认')
+  message.success('已进入详细设定，请检查并补充')
 }
 
 function handleInspirationHistoryChange(history: InspirationMessage[]) {
   inspirationHistory.value = history
 }
 
-const hasCreationInput = computed(() => !createdNovelId.value && (!!outlineInput.value?.text.trim() || !!ideaSentence.value.trim()
-  || setupMethod.value === 'inspiration' && includeInspirationHistory.value && inspirationHistory.value.some(item => item.role === 'user')))
+const hasCreationInput = computed(() => !createdNovelId.value && (
+  JSON.stringify({ ...form, writingMode: 'manual' }) !== initialFormSnapshot
+  || storyOriginDay.value !== null || !!storyOriginLabel.value.trim()
+  || !!outlineInput.value?.text.trim() || !!ideaSentence.value.trim() || !!importJsonText.value.trim()
+  || setupMethod.value === 'inspiration' && includeInspirationHistory.value && inspirationHistory.value.some(item => item.role === 'user')
+))
 
 function confirmLeave(): Promise<boolean> {
   return new Promise(resolve => {
@@ -720,12 +722,13 @@ function confirmLeave(): Promise<boolean> {
     }
     dialog.warning({
       title: '退出创建？',
-      content: '本页的创建输入尚未随作品保存。灵感对话可在历史会话中继续；本页填写或导入的大纲尚未创建入库。确定退出吗？',
+      content: '退出将丢弃本页尚未创建的作品名称、设定和大纲等输入。灵感对话可在历史会话中继续。确定退出吗？',
       positiveText: '退出创建',
       negativeText: '继续编辑',
       onPositiveClick: () => finish(true),
       onNegativeClick: () => finish(false),
       onClose: () => finish(false),
+      onMaskClick: () => finish(false),
     })
   })
 }
@@ -734,6 +737,14 @@ onBeforeRouteLeave(async () => {
   if (creating.value || !hasCreationInput.value) return true
   return confirmLeave()
 })
+
+function protectCreationInput(event: BeforeUnloadEvent) {
+  if (!hasCreationInput.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+onMounted(() => window.addEventListener('beforeunload', protectCreationInput))
+onBeforeUnmount(() => window.removeEventListener('beforeunload', protectCreationInput))
 
 const referenceAnalysisPrompt = `你是一名资深网文策划编辑。请根据我提供的参考小说资料，自动识别这本小说的类型、世界观、主角设定、力量体系、核心冲突、爽点结构和写作风格，并整理成适合导入“AI 小说写作软件”的新书创建配置。
 重要：不要联网搜索，不要调用 web_search、browser、插件、函数或任何外部工具；只能基于我粘贴的资料和你的类型经验进行推断，并以普通文本返回一个完整 JSON 对象。
@@ -881,6 +892,7 @@ const form = reactive<CreateWizardForm>({
   writingStyle: novelStore.defaultWritingStyle(),
   settings: novelStore.defaultSettings(),
 })
+const initialFormSnapshot = JSON.stringify(form)
 
 const selectedKnowledgeBaseIds = computed<string[]>({
   get: () => form.knowledgeBaseIds || [],
@@ -1175,6 +1187,7 @@ function handleBack() {
   if (choosingCreationOptions.value && previousCreationState.value) {
     const previous = previousCreationState.value
     setupMethod.value = previous.setupMethod
+    form.writingMode = previous.writingMode
     reviewingInspiration.value = previous.reviewingInspiration
     discussingInspiration.value = previous.discussingInspiration
     currentStep.value = previous.currentStep
@@ -1570,9 +1583,13 @@ async function handleCreate() {
 .wizard-layout {
   flex-direction: column;
   display: flex; height: auto; min-height: 0; overflow: visible; background: transparent; }
+.wizard-layout.discussing-inspiration { flex: 1; overflow: hidden; }
+@media (max-width: 850px) {
+  .wizard-layout.discussing-inspiration > :deep(.inspiration-chat) { padding: 0; }
+}
 .wizard-top { margin: 0 auto; width: 100%;
   flex-shrink: 0;
-  box-sizing: border-box; max-width: none; padding: 0; }.choosing-options .wizard-top { display: none; }
+  box-sizing: border-box; max-width: none; padding: 0; }
 .wizard-header { flex-wrap: wrap;
   align-items: center;
   display: flex; gap: 12px; margin-bottom: 18px; }.wizard-header .page-title { font-size: 36px; display: none; }.back-btn {
@@ -1610,10 +1627,6 @@ async function handleCreate() {
   display: flex;
   height: 32px;
   width: 32px; background: var(--paper); border-color: var(--line-2); }.step-active .step-dot, .step-completed .step-dot { border-color: var(--zhu); background: var(--zhu); color: white; }
-.origin-seed { order: 2; padding: 18px 20px; margin-top: 22px; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--paper); }
-.origin-seed label { display: block; font-size: 12px; color: var(--ink-3); margin-bottom: 8px; }
-.origin-seed textarea { width: 100%; resize: vertical; min-height: 68px; border: 0; outline: 0; background: transparent; color: var(--ink); font: 18px/1.8 var(--f-serif); }
-.origin-seed p { margin: 10px 0 0; font-size: 11px; color: var(--ink-3); line-height: 1.6; }
 .wizard-body { margin: 0 auto; width: 100%; align-items: start; display: grid;
   flex: 1;
   min-height: 0;

@@ -196,13 +196,13 @@ function createUpdateController(options) {
     startupTimer = intervalTimer = retryTimer = null
   }
   function scheduleRetry() {
-    if (disposed || !supported || !state.autoCheck) return
+    if (disposed || !supported) return
     const minutes = [1, 5, 15, 30, 60][Math.min(retryCount++, 4)]
     retryTimer = setTimeout(() => { retryTimer = null; void check() }, minutes * 60000)
     retryTimer.unref?.()
   }
   function wake() {
-    if (disposed || !supported || !state.autoCheck || !lastAttempt || operation) return snapshot()
+    if (disposed || !supported || !lastAttempt || operation) return snapshot()
     const retryable = state.phase === 'error' || (state.phase === 'available' && !ready)
     const stale = ['idle', 'current'].includes(state.phase)
     if ((retryable || stale) && Date.now() - lastAttempt >= (retryable ? 60000 : 6 * 60 * 60 * 1000)) return check()
@@ -212,10 +212,10 @@ function createUpdateController(options) {
     stopTimers()
     disposed = false
     retryCount = 0
-    if (!supported || !state.autoCheck) return
+    if (!supported) return
     startupTimer = setTimeout(() => { void check() }, 12000)
     intervalTimer = setInterval(() => {
-      if (['idle', 'current', 'error'].includes(state.phase) || (state.phase === 'available' && !ready)) void check()
+      if (!['checking', 'downloading', 'downloaded', 'installing'].includes(state.phase)) void check()
     }, 6 * 60 * 60 * 1000)
     startupTimer.unref?.()
     intervalTimer.unref?.()

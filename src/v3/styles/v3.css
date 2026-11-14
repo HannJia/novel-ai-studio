@@ -76,8 +76,10 @@
 .v3 .rail-dot { position: absolute; top: 5px; right: 11px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px; background: var(--zhu); color: #fff; font: 600 10px/15px var(--f-num); }
 .v3 .rail-dot.live { min-width: 8px; width: 8px; height: 8px; padding: 0; top: 8px; right: 15px; background: var(--qing); animation: m-pulse 1.6s infinite; }
 .v3 .rail-sp { flex: 1; min-height: 8px; }
-.v3 .rail-ver { margin-top: 14px; padding: 4px 6px; border-radius: 5px; font: 10.5px/1 var(--f-num); color: var(--rail-ink); opacity: .55; flex: none; }
+.v3 .rail-ver { position: relative; margin-top: 14px; padding: 4px 6px; border-radius: 5px; font: 10.5px/1 var(--f-num); color: var(--rail-ink); opacity: .55; flex: none; }
 .v3 .rail-ver:hover { opacity: 1; background: #ffffff0d; }
+.v3 .rail-ver.has-update { opacity: 1; }
+.v3 .rail-update-dot { position: absolute; top: 0; right: 0; width: 7px; height: 7px; border-radius: 50%; background: #ef5a48; box-shadow: 0 0 0 2px var(--rail); }
 @keyframes m-pulse { 50% { opacity: .35; } }
 .v3 .top { grid-area: top; display: flex; align-items: center; gap: 14px; padding: 0 14px 0 20px; border-bottom: 1px solid var(--line); background: var(--panel); white-space: nowrap; min-width: 0; }
 .v3 .top > * { flex: none; }
@@ -110,6 +112,8 @@
 .v3 .status-it .ok { width: 7px; height: 7px; border-radius: 50%; background: var(--qing); }
 .v3 .status-it .warn { width: 7px; height: 7px; border-radius: 50%; background: var(--zhu); }
 .v3 .status-it .busy { width: 7px; height: 7px; border-radius: 50%; background: var(--jin); animation: m-pulse 1.4s infinite; }
+.v3.writing .status { position: relative; z-index: 80; overflow: visible; }
+.v3.writing .status-l { overflow: visible; }
 .v3 .save-banner { flex: none; display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 9px 18px; background: var(--zhu-soft); color: var(--zhu); font-size: 13px; border-bottom: 1px solid var(--zhu-mid); }
 /* ---------- 通用控件 ---------- */
 .v3 .icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }

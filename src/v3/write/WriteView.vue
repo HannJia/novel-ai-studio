@@ -38,8 +38,25 @@
   </Teleport>
   <Teleport defer to="#v3-status">
     <span class="status-it"><V3Icon name="type" size="s" />本章 <b class="m-num">{{ wordCount.toLocaleString() }}</b> 字 · 目标 {{ lengthPolicy.minWords }}–{{ lengthPolicy.maxWords }}</span>
-    <span class="status-it"><V3Icon name="clock" size="s" />{{ storyTimeLabel }}</span>
-    <span v-if="viewpointLabel" class="status-it"><V3Icon name="user" size="s" />计划视角 {{ viewpointLabel }}</span>
+    <div ref="typographyControl" class="write-type-control" @click.stop @keydown.esc.stop.prevent="typographyOpen = false">
+      <button type="button" class="status-it write-type-trigger" aria-label="正文排版" title="正文排版"
+        :aria-expanded="typographyOpen" @click="typographyOpen = !typographyOpen"><V3Icon name="type" size="s" />排版</button>
+      <section v-if="typographyOpen" class="write-type-pop" role="dialog" aria-label="正文排版设置">
+        <header><strong>正文排版</strong><button type="button" class="m-ibtn" title="恢复默认排版" aria-label="恢复默认排版" @click="resetTypography"><V3Icon name="refresh" size="s" /></button></header>
+        <label class="write-type-field" for="write-font-size"><span>字号</span><output>{{ typography.fontSize }} px</output>
+          <input id="write-font-size" type="range" min="14" max="30" step="1" :value="typography.fontSize" aria-label="字号"
+            @input="setTypography('fontSize', Number(($event.target as HTMLInputElement).value))">
+        </label>
+        <label class="write-type-field" for="write-paragraph-spacing"><span>段落间距</span><output>{{ typography.paragraphSpacing.toFixed(1) }} em</output>
+          <input id="write-paragraph-spacing" type="range" min="0" max="2" step="0.1" :value="typography.paragraphSpacing" aria-label="段落间距"
+            @input="setTypography('paragraphSpacing', Number(($event.target as HTMLInputElement).value))">
+        </label>
+        <label class="write-type-field" for="write-letter-spacing"><span>字间距</span><output>{{ typography.letterSpacing.toFixed(2) }} em</output>
+          <input id="write-letter-spacing" type="range" min="0" max="0.12" step="0.01" :value="typography.letterSpacing" aria-label="字间距"
+            @input="setTypography('letterSpacing', Number(($event.target as HTMLInputElement).value))">
+        </label>
+      </section>
+    </div>
     <span v-if="ai.statusText.value" class="status-it status-note" :title="ai.statusText.value">{{ ai.statusText.value }}</span>
   </Teleport>
 
@@ -78,7 +95,7 @@
       <EditorRecoveryPicker :drafts="session.drafts.value" :busy="busy" @restore="restoreDraft" @discard="discardDraft" />
       <div v-if="session.novel.value.writingMode === 'ai'" class="write-banner"><V3Icon name="info" size="s" /><span>协作模式：AI 内容先保存为候选，由你预览、采纳或拒绝。批量起草请进入自动写作运行中心。</span></div>
       <div v-if="displayStatus === 'finalized'" class="write-banner finalized-banner"><V3Icon :name="locked ? 'lock' : 'check'" size="s" /><span>{{ locked ? '本章已锁定，正文只读。' : '本章已定稿。仍可修订，保存修改后需要重新审校；历史来源保留供核对。' }}</span></div>
-      <section ref="paper" class="paper" :style="{ minHeight: marginHeight ? marginHeight + 'px' : undefined }">
+      <section ref="paper" class="paper" :class="{ 'with-margins': showMargins }">
         <header class="paper-head">
           <div class="paper-kicker" :aria-label="'第' + (session.chapter.value.chapterIndex + 1) + '章'">{{ chapterHeading(session.chapter.value.chapterIndex) }}</div>
           <input v-model="session.title.value" class="chapter-title" :readonly="locked || busy" aria-label="章节标题" placeholder="章节标题" @blur="saveTitle">
@@ -89,7 +106,7 @@
             <span><V3Icon name="clock" size="s" />{{ storyTimeLabel }}</span>
             <button v-if="session.chapter.value.versions?.length" type="button" class="m-link" :disabled="versionBusy" @click="openVersionPanel">版本历史 {{ session.chapter.value.versions.length }}</button>
           </div>
-          <span class="paper-mnote">批注 · {{ openFindings.length }} 条待处理</span>
+          <span v-if="showMargins" class="paper-mnote">{{ activeTab === 'review' ? `批注 · ${openFindings.length} 条待处理` : '候选 · 待确认' }}</span>
         </header>
         <div v-if="versionOpen" class="version-panel">
           <div class="version-panel-head"><strong>正文历史版本</strong><button type="button" class="m-btn xs" @click="versionOpen = false">收起</button></div>
@@ -101,8 +118,22 @@
             <button type="button" class="m-btn xs zhu" :disabled="versionBusy || locked || !selectedVersionId" @click="restoreSelectedVersion">{{ versionBusy ? '恢复中…' : '恢复此版本' }}</button>
           </div>
         </div>
-        <div ref="editorHost"><PlainTextEditor ref="editor" v-model="session.content.value" :readonly="locked || busy" :marks="ai.currentMarks.value" placeholder="从这里开始写下本章……" @selection="onSelection" @mark-click="onMarkClick" @layout="scheduleMargins" @ready="revealRouteEvidence" /></div>
-        <div class="paper-margins" aria-label="页边批注与候选">
+        <div ref="editorHost" class="editor-host" :style="typographyStyle">
+          <PlainTextEditor ref="editor" v-model="session.content.value" :readonly="locked || busy" :marks="ai.currentMarks.value" placeholder="从这里开始写下本章……" @selection="onSelection" @scroll="onEditorHostScroll" @mark-click="onMarkClick" @layout="scheduleMargins" @ready="revealRouteEvidence">
+            <section class="chapter-gate" aria-labelledby="chapter-gate-title">
+              <div class="gate-head"><h4 id="chapter-gate-title">定稿检查</h4><span class="m-tag" :class="gateReady ? 'qing' : 'jin'">{{ displayStatus === 'finalized' ? '已定稿' : gateReady ? '可提交定稿' : '仍有项目待核对' }}</span></div>
+              <div class="gate-stats">
+                <div :class="{ bad: !!session.workflow.value?.blockers.length }"><b>{{ session.workflow.value?.blockers.length || 0 }}</b><span>阻塞问题</span></div>
+                <div><b>{{ openFindings.filter(item => item.severity !== 'blocker').length }}</b><span>其余待处理</span></div>
+                <div :class="{ bad: !deskReview.valid }"><b>{{ session.workflow.value?.coverage ? `${session.workflow.value.coverage.completed}/${session.workflow.value.coverage.total}` : '—' }}</b><span>审校分段覆盖</span></div>
+                <div><b>{{ planBeats.length }}</b><span>计划要点 · 非完成数</span></div>
+              </div>
+              <p class="gate-detail">{{ deskReview.detail }}。候选不会自动写入正文或典籍。</p>
+              <div class="gate-actions"><button class="m-btn" type="button" :disabled="busy || locked || !session.content.value.trim()" @click="reviewChapter"><V3Icon name="refresh" size="s" />全章审校</button><button class="m-btn zhu" type="button" :disabled="busy || !session.workflow.value?.primary || locked" @click="openCompletion"><V3Icon name="stamp" size="s" />{{ primaryLabel }} · 核对</button></div>
+            </section>
+          </PlainTextEditor>
+        </div>
+        <div v-if="showMargins" class="paper-margins" aria-label="页边批注与候选" :style="{ top: marginViewport.top + 'px', height: marginViewport.height + 'px' }">
           <div v-for="item in marginItems" :key="item.id" :ref="value => setMarginElement(item.id, value)" class="margin-item" :style="{ top: (marginPositions[item.id] || 0) + 'px', visibility: marginPositions[item.id] === undefined ? 'hidden' : undefined }">
             <button v-if="item.finding" type="button" class="margin-note" :class="[item.finding.severity, { foreshadowing: item.finding.type === 'foreshadowing', done: !['open', 'deferred'].includes(item.finding.status) }]" @click="onMarkClick(item.id)"><b>{{ item.number }}</b>{{ item.finding.suggestedFix || item.finding.title }}<span>{{ findingTypeLabel[item.finding.type] }} · {{ severityLabel[item.finding.severity] }}</span></button>
             <article v-else-if="item.candidate" class="margin-slip">
@@ -117,18 +148,6 @@
             </article>
           </div>
         </div>
-        <section class="chapter-gate" aria-labelledby="chapter-gate-title">
-          <div class="gate-head"><h4 id="chapter-gate-title">定稿检查</h4><span class="m-tag" :class="gateReady ? 'qing' : 'jin'">{{ displayStatus === 'finalized' ? '已定稿' : gateReady ? '可提交定稿' : '仍有项目待核对' }}</span></div>
-          <div class="gate-stats">
-            <div :class="{ bad: !!session.workflow.value?.blockers.length }"><b>{{ session.workflow.value?.blockers.length || 0 }}</b><span>阻塞问题</span></div>
-            <div><b>{{ openFindings.filter(item => item.severity !== 'blocker').length }}</b><span>其余待处理</span></div>
-            <div :class="{ bad: !deskReview.valid }"><b>{{ session.workflow.value?.coverage ? `${session.workflow.value.coverage.completed}/${session.workflow.value.coverage.total}` : '—' }}</b><span>审校分段覆盖</span></div>
-            <div><b>{{ planBeats.length }}</b><span>计划要点 · 非完成数</span></div>
-          </div>
-          <p class="gate-detail">{{ deskReview.detail }}。候选不会自动写入正文或典籍。</p>
-          <div class="gate-actions"><button class="m-btn" type="button" :disabled="busy || locked || !session.content.value.trim()" @click="reviewChapter"><V3Icon name="refresh" size="s" />全章审校</button><button class="m-btn zhu" type="button" :disabled="busy || !session.workflow.value?.primary || locked" @click="openCompletion"><V3Icon name="stamp" size="s" />{{ primaryLabel }} · 核对</button></div>
-        </section>
-        <p class="editor-bottom">正文以纯文本保存，页边批注与浮签不属于正式稿。</p>
       </section>
     </main>
 
@@ -313,6 +332,38 @@ const workspace = useReconstructionWorkspaceStore(), novels = useNovelStore()
 const paper = ref<HTMLElement>(), editorHost = ref<HTMLElement>()
 const sideOpen = ref(window.innerWidth > 800), deskOpen = ref(window.innerWidth > 1120), focused = ref(false)
 const closedGroups = ref(new Set<string>()), selectedSceneId = ref(''), modeInfoOpen = ref(false)
+type TypographySetting = 'fontSize' | 'paragraphSpacing' | 'letterSpacing'
+const typographyKey = 'mojian-v3-writing-typography'
+const defaultTypography = { fontSize: 18, paragraphSpacing: 0.9, letterSpacing: 0.03 }
+function readTypography() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(typographyKey) || 'null') as Partial<typeof defaultTypography> | null
+    if (!saved) return { ...defaultTypography }
+    const clamp = (value: unknown, fallback: number, min: number, max: number) =>
+      typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback
+    return { fontSize: clamp(saved.fontSize, 18, 14, 30), paragraphSpacing: clamp(saved.paragraphSpacing, 0.9, 0, 2),
+      letterSpacing: clamp(saved.letterSpacing, 0.03, 0, 0.12) }
+  } catch { return { ...defaultTypography } }
+}
+const typography = ref(readTypography())
+const typographyOpen = ref(false), typographyControl = ref<HTMLElement>()
+const typographyStyle = computed(() => ({ '--write-font-size': `${typography.value.fontSize}px`,
+  '--write-paragraph-spacing': `${typography.value.paragraphSpacing}em`, '--write-letter-spacing': `${typography.value.letterSpacing}em` }))
+function setTypography(key: TypographySetting, value: number) {
+  typography.value = { ...typography.value, [key]: value }
+  try { localStorage.setItem(typographyKey, JSON.stringify(typography.value)) } catch { /* Keep the current session setting when storage is unavailable. */ }
+}
+function resetTypography() {
+  typography.value = { ...defaultTypography }
+  try { localStorage.removeItem(typographyKey) } catch { /* Keep the current session setting when storage is unavailable. */ }
+}
+function closeTypographyOutside(event: PointerEvent) {
+  if (!typographyControl.value?.contains(event.target as Node)) typographyOpen.value = false
+}
+watch(typographyOpen, open => {
+  if (open) document.addEventListener('pointerdown', closeTypographyOutside, true)
+  else document.removeEventListener('pointerdown', closeTypographyOutside, true)
+})
 const selectionRect = ref<SelectionInfo['rect']>(null)
 const selectionTools = ref<HTMLElement>()
 const selectionToolsSize = ref({ width: 0, height: 0 })
@@ -328,13 +379,16 @@ watch(selectionTools, element => {
   selectionToolsObserver = new ResizeObserver(measure)
   selectionToolsObserver.observe(element)
 }, { flush: 'post' })
-onBeforeUnmount(() => selectionToolsObserver?.disconnect())
+onBeforeUnmount(() => {
+  selectionToolsObserver?.disconnect()
+  document.removeEventListener('pointerdown', closeTypographyOutside, true)
+})
 watch([sideOpen, deskOpen, focused], () => { selectionRect.value = null })
 const completionOpen = ref(false), confirmationVersion = ref(''), completionDialog = ref<HTMLElement>()
 const sealVisible = ref(false)
 let completionTrigger: HTMLElement | null = null
 let sealTimer: ReturnType<typeof setTimeout> | undefined
-const activeTab = ref<'review' | 'candidate' | 'memory' | 'chat' | 'advisor'>('review')
+const activeTab = ref<'review' | 'candidate' | 'memory' | 'chat' | 'advisor'>('advisor')
 watch(activeTab, tab => { if (tab === 'chat') chatMounted.value = true })
 const decisionBusy = ref(false)
 const editingCandidate = ref<CandidateChange>()
@@ -450,8 +504,10 @@ const anchoredFindings = computed(() => anchorFindings(session.content.value, cu
 function findingAnchor(finding: ReviewFinding) { return anchoredFindings.value.find(item => item.finding.id === finding.id)?.anchor }
 interface MarginItem { id: string; start: number; finding?: ReviewFinding; candidate?: CandidateChange; number?: number }
 const marginItems = computed<MarginItem[]>(() => {
-  const items: MarginItem[] = anchoredFindings.value.flatMap(({ finding, anchor }, index) => anchor
+  if (activeTab.value !== 'review' && activeTab.value !== 'candidate') return []
+  if (activeTab.value === 'review') return anchoredFindings.value.flatMap(({ finding, anchor }, index) => anchor
     ? [{ id: 'f:' + finding.id, start: anchor.start, finding, number: index + 1 }] : [])
+  const items: MarginItem[] = []
   for (const candidate of pendingCandidates.value) {
     const anchor = candidateAnchor(session.content.value, candidate)
     if (anchor) items.push({ id: 'c:' + candidate.id, start: anchor.start, candidate })
@@ -459,7 +515,9 @@ const marginItems = computed<MarginItem[]>(() => {
   if (revision.value?.current && session.pendingRevision.value) items.push({ id: 'r:' + session.pendingRevision.value.id, start: revision.value.start })
   return items.sort((left, right) => left.start - right.start)
 })
-const marginPositions = ref<Record<string, number>>({}), marginHeight = ref(0)
+const showMargins = computed(() => deskOpen.value && !focused.value && marginItems.value.length > 0)
+const marginPositions = ref<Record<string, number>>({})
+const marginViewport = ref({ top: 0, height: 0 })
 const marginElements = new Map<string, HTMLElement>()
 let marginFrame = 0, layoutObserver: ResizeObserver | undefined
 function setMarginElement(id: string, value: unknown) {
@@ -473,20 +531,29 @@ function setMarginElement(id: string, value: unknown) {
 function scheduleMargins() {
   cancelAnimationFrame(marginFrame)
   marginFrame = requestAnimationFrame(() => {
-    if (!paper.value || !editor.value) return
+    if (!showMargins.value) {
+      marginPositions.value = {}
+      return
+    }
+    if (!paper.value || !editor.value || !editorHost.value) return
     const paperTop = paper.value.getBoundingClientRect().top
+    const bounds = editorHost.value.getBoundingClientRect()
+    marginViewport.value = { top: bounds.top - paperTop, height: bounds.height }
     let previousBottom = 0
     const positions: Record<string, number> = {}
     for (const item of marginItems.value) {
       const element = marginElements.get(item.id), coords = editor.value.coordsAtOffset(item.start)
-      if (!element || !coords) continue
-      const top = Math.max(coords.top - paperTop - 4, previousBottom + 10)
+      if (!element || !coords || coords.bottom < bounds.top || coords.top >= bounds.bottom) continue
+      const top = Math.max(coords.top - bounds.top - 4, previousBottom + 10)
       positions[item.id] = top
       previousBottom = top + element.offsetHeight
     }
     marginPositions.value = positions
-    marginHeight.value = previousBottom ? Math.ceil(previousBottom + 64) : 0
   })
+}
+function onEditorHostScroll() {
+  selectionRect.value = null
+  scheduleMargins()
 }
 const gateReady = computed(() => session.saved.value && session.workflow.value?.gate.every(gate => gate.state === 'ok') === true)
 const canSubmitCompletion = computed(() => !!session.workflow.value?.primary && !locked.value && (session.workflow.value.primary === 'finalize' ? gateReady.value
@@ -511,10 +578,11 @@ const backgroundTaskLabel: Record<'pending' | 'running' | 'completed' | 'failed'
   pending: '等待中', running: '进行中', completed: '已完成', failed: '失败',
 }
 const tabs = computed(() => [
-  { id: 'review' as const, label: '审校', count: currentFindings.value.filter(item => item.status === 'open' || item.status === 'deferred').length },
+  { id: 'advisor' as const, label: '顾问', count: 0 },
   { id: 'memory' as const, label: '记忆', count: 0 },
   { id: 'candidate' as const, label: '候选', count: pendingCandidates.value.length + (revision.value ? 1 : 0) },
-  { id: 'chat' as const, label: '对话', count: 0 }, { id: 'advisor' as const, label: '顾问', count: 0 },
+  { id: 'chat' as const, label: '对话', count: 0 },
+  { id: 'review' as const, label: '审校', count: currentFindings.value.filter(item => item.status === 'open' || item.status === 'deferred').length },
 ])
 
 watch([() => session.novel.value?.chapters, chapterId], () => {
@@ -536,6 +604,7 @@ watch([() => route.query.evidenceVersion, () => route.query.evidenceStart, () =>
   () => session.loading.value, () => session.contentVersion.value, editor], revealRouteEvidence, { flush: 'post' })
 
 watch(() => session.chapter.value?.id, () => {
+  activeTab.value = 'advisor'
   editingCandidate.value = undefined
   causalityCandidateId.value = ''
   versionOpen.value = false
@@ -546,7 +615,6 @@ watch(() => session.chapter.value?.id, () => {
   completionOpen.value = false
   sealVisible.value = false
   marginPositions.value = {}
-  marginHeight.value = 0
   clearChatPrefill()
 })
 watch(() => session.findings.value, findings => {
@@ -657,7 +725,11 @@ async function primaryAction() {
     sealTimer = setTimeout(() => { sealVisible.value = false }, 1800)
   } else if (pendingCandidates.value.length || revision.value) showDesk('candidate')
 }
-async function reviewChapter() { await runDecision(() => ai.reviewChapter()) }
+async function reviewChapter() {
+  showDesk('review')
+  await runDecision(() => ai.reviewChapter())
+}
+watch(ai.reviewBusy, reviewing => { if (reviewing) showDesk('review') }, { immediate: true })
 function onSelection(value: SelectionInfo) {
   selection.value = { start: value.start, end: value.end, text: value.text }
   selectionRect.value = value.rect
@@ -791,7 +863,7 @@ async function copyAdvisorSuggestion(suggestion: WritingAdviceSuggestion) {
   try { await copyText(text) }
   catch { advisorSaveError.value = '复制失败，请手动选择文本。' }
 }
-watch([marginItems, sideOpen, deskOpen, focused, versionOpen], () => { void nextTick(scheduleMargins) }, { flush: 'post' })
+watch([marginItems, showMargins, sideOpen, versionOpen], () => { void nextTick(scheduleMargins) }, { flush: 'post' })
 watch([paper, editorHost], (elements, previous) => {
   previous?.forEach(element => { if (element) layoutObserver?.unobserve(element) })
   elements.forEach(element => { if (element) layoutObserver?.observe(element) })
@@ -833,6 +905,15 @@ onBeforeUnmount(() => {
 .mode-pop { display: none; position: absolute; z-index: 100; right: 0; top: calc(100% + 8px); width: 350px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); box-shadow: var(--shadow-3); white-space: normal; font-size: 12px; }
 .mode-pop.open, .mode-wrap:has(.mode-info:hover) .mode-pop, .mode-wrap:has(.mode-info:focus-visible) .mode-pop { display: block; }.mode-pop > strong { color: var(--ink-2); font-size: 12px; }.mode-pop > div { display: grid; grid-template-columns: 35px 1fr; gap: 10px; margin-top: 12px; }.mode-pop b { font-size: 13px; }.mode-pop p { margin: 0; color: var(--ink-3); line-height: 1.65; }.mode-pop small { display: flex; gap: 6px; padding-top: 12px; margin-top: 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--ink-3); }
 .top-save { display: flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: 12px; }.top-save i { width: 6px; height: 6px; border-radius: 50%; background: var(--qing); }.top-save i.warn { background: var(--jin); }.view-on { color: var(--ink-2); }.status-note { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+.write-type-control { position: relative; flex: none; }
+.write-type-trigger { color: var(--ink-3); }
+.write-type-trigger:hover, .write-type-trigger[aria-expanded="true"] { color: var(--ink); }
+.write-type-pop { position: absolute; z-index: 120; left: 0; bottom: calc(100% + 8px); width: min(320px, calc(100vw - 86px)); max-height: calc(100vh - 64px); overflow: auto; box-sizing: border-box; padding: 12px 14px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--paper); color: var(--ink); box-shadow: var(--shadow-3); white-space: normal; }
+.write-type-pop > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.write-type-pop > header strong { font-size: 13px; }
+.write-type-field { display: grid; grid-template-columns: 1fr auto; gap: 7px 12px; padding: 8px 0; color: var(--ink-2); font-size: 12px; }
+.write-type-field output { color: var(--ink-3); font: 11px var(--f-num); }
+.write-type-field input { grid-column: 1 / -1; width: 100%; margin: 0; accent-color: var(--zhu); }
 .selection-tools { position: fixed; z-index: 60; display: flex; flex-wrap: wrap; width: max-content; box-sizing: border-box; align-items: center; justify-content: center; gap: 3px; padding: 5px 8px; border-radius: 8px; background: var(--rail); color: var(--rail-hi); box-shadow: var(--shadow-3); font: 12px/1.5 var(--f-ui); }
 .selection-tools > span { color: var(--rail-ink); font: 10px var(--f-num); padding: 0 6px; }.selection-tools button { padding: 6px 7px; border-radius: 4px; white-space: nowrap; }.selection-tools button:hover { background: #ffffff18; }.selection-tools button:disabled { opacity: .4; cursor: not-allowed; }.selection-tools i { height: 16px; border-left: 1px solid #ffffff30; margin: 0 3px; }
 .focus-hint { position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); font-size: 12px; color: var(--ink-3); background: var(--paper); padding: 6px 12px; border-radius: 20px; box-shadow: var(--shadow-1); z-index: 30; }.is-focused .paper-margins { opacity: .4; transition: opacity .2s; }.is-focused .paper-margins:hover { opacity: 1; }
@@ -842,7 +923,9 @@ onBeforeUnmount(() => {
 .seal-overlay { position: fixed; inset: 0; z-index: 910; pointer-events: none; display: grid; place-content: center; justify-items: center; gap: 30px; background: color-mix(in srgb, var(--paper) 60%, transparent); }.chapter-seal { width: 172px; height: 172px; display: grid; place-items: center; border: 6px solid var(--zhu); color: var(--zhu); font: 700 54px/1 var(--f-kai); letter-spacing: .08em; writing-mode: vertical-rl; border-radius: 8px; transform: rotate(-8deg); box-shadow: inset 0 0 0 3px var(--paper), inset 0 0 0 5px var(--zhu); animation: chapter-stamp .7s var(--ease); }.seal-overlay > span { font-size: 12px; color: var(--ink-2); }@keyframes chapter-stamp { 0% { opacity: 0; transform: rotate(-18deg) scale(2.4); }65% { opacity: 1; transform: rotate(-8deg) scale(.94); }100% { transform: rotate(-8deg) scale(1); } }
 .write-page { --side-w: 220px; --desk-w: 320px; position: absolute; inset: 0; display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr) var(--desk-w); min-height: 0; background: var(--desk); }
 .write-page.no-side { --side-w: 0px; }.write-page.no-desk { --desk-w: 0px; }
-.write-main { grid-column: 2; min-width: 0; min-height: 0; overflow: auto; padding: 28px 28px 120px; position: relative; }
+.write-main { grid-column: 2; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; padding: 28px; position: relative; }
+.write-main > .editor-recovery, .write-main > .write-banner { flex: none; }
+.write-main > .editor-recovery { max-height: 22%; overflow: auto; }
 .write-side { min-width: 0; background: var(--panel); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .tree-side { grid-column: 1; grid-row: 1; border-right: 1px solid var(--line); }.desk-side { grid-column: 3; grid-row: 1; border-left: 1px solid var(--line); }
 .side-head, .panel-title { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 14px 14px 8px 16px; }
@@ -858,14 +941,17 @@ onBeforeUnmount(() => {
 .tree-scenes { margin: 2px 0 6px 38px; padding-left: 10px; border-left: 1px solid var(--line-2); }.tree-scenes button { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 12px; color: var(--ink-3); text-align: left; }.tree-scenes button.on { color: var(--zhu); }.tree-empty { padding: 0 20px; color: var(--ink-4); font-size: 11px; }
 .tree-foot { padding: 12px 16px; border-top: 1px solid var(--line); display: grid; gap: 7px; color: var(--ink-3); font-size: 12px; }.tree-progress { display: flex; justify-content: space-between; gap: 8px; }.tree-progress .m-num { white-space: nowrap; }.tree-legend { display: flex; gap: 7px 10px; flex-wrap: wrap; font-size: 11px; }.tree-legend span { display: flex; align-items: center; gap: 5px; }.tree-foot a { display: flex; align-items: center; font-size: 11px; }
 .write-banner { max-width: 840px; margin: 0 auto 14px; display: flex; gap: 10px; align-items: flex-start; padding: 9px 14px; border-radius: 8px; background: var(--dai-soft); color: var(--dai); font-size: 12px; }.write-banner .icon { margin-top: 3px; }.finalized-banner { background: var(--qing-soft); color: var(--qing); }
-.paper { --margin-w: 198px; max-width: 840px; margin: 0 auto; background: var(--paper); border-radius: 4px; box-shadow: var(--shadow-2); padding: 56px var(--margin-w) 64px 48px; position: relative; }
-.paper::before { content: ''; position: absolute; top: 150px; bottom: 40px; right: var(--margin-w); border-left: 1px dashed var(--line-2); }
+.paper { --paper-inset: 48px; --margin-w: 198px; flex: 1 1 0; min-height: 0; width: 100%; max-width: 840px; margin: 0 auto; display: flex; flex-direction: column; background: var(--paper); border-radius: 4px; box-shadow: var(--shadow-2); padding: 56px var(--margin-w) 64px var(--paper-inset); position: relative; }
+.paper:not(.with-margins) { padding-right: var(--paper-inset); }
+.paper:not(.with-margins) :deep(.pte-doc) { padding-right: 0; }
+.paper:not(.with-margins) .chapter-gate { margin-right: 0; }
+.paper.with-margins::before { content: ''; position: absolute; top: 150px; bottom: 40px; right: var(--margin-w); border-left: 1px dashed var(--line-2); }
 .paper::after { content: ''; position: absolute; inset: 10px; border: 1px solid var(--line); border-radius: 2px; pointer-events: none; opacity: .55; }
-.paper-head { position: relative; margin-bottom: 32px; }.paper-kicker { color: var(--zhu); font: 500 13px/1 var(--f-serif); letter-spacing: .35em; margin-bottom: 12px; }
+.paper-head { position: relative; flex: none; margin-bottom: 32px; }.paper-kicker { color: var(--zhu); font: 500 13px/1 var(--f-serif); letter-spacing: .35em; margin-bottom: 12px; }
 .chapter-title { width: 100%; border: 0; outline: 0; background: transparent; color: var(--ink); font: 600 30px/1.3 var(--f-serif); letter-spacing: .06em; padding: 0; }
 .paper-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--ink-3); font-size: 11px; margin-top: 14px; }.paper-meta span { display: flex; align-items: center; gap: 5px; }.paper-meta .m-link { font-size: 11px; }
 .paper-mnote { position: absolute; left: calc(100% + 16px); bottom: 4px; width: calc(var(--margin-w) - 32px); font: 14px/1.4 var(--f-kai); color: var(--ink-4); }
-.paper-margins { position: absolute; top: 0; bottom: 0; right: 0; width: var(--margin-w); pointer-events: none; }.margin-item { position: absolute; width: 100%; padding: 4px 16px 0; pointer-events: auto; }
+.paper-margins { position: absolute; right: 0; width: var(--margin-w); overflow: hidden; pointer-events: none; }.margin-item { position: absolute; width: 100%; padding: 4px 16px 0; pointer-events: auto; }
 .margin-note { display: block; font: 15px/1.55 var(--f-kai); color: var(--zhu); text-align: left; position: relative; overflow-wrap: anywhere; }
 .margin-note::before { content: ''; position: absolute; left: -16px; top: 10px; width: 12px; height: 1px; background: currentColor; opacity: .5; }.margin-note b { display: inline-grid; place-items: center; width: 16px; height: 16px; font: 600 10px/1 var(--f-num); border: 1px solid currentColor; border-radius: 50%; margin-right: 5px; vertical-align: 2px; }.margin-note span { display: block; font: 11px/1.4 var(--f-ui); color: var(--ink-3); margin-top: 3px; }
 .margin-note.warning { color: var(--jin); }.margin-note.suggestion { color: var(--dai); }.margin-note.foreshadowing { color: var(--qing); }.margin-note.done { color: var(--ink-4); }.margin-note.done > b { opacity: .6; }.margin-note:hover { transform: translateX(2px); }
@@ -874,9 +960,9 @@ onBeforeUnmount(() => {
 .slip-head { display: flex; justify-content: space-between; gap: 6px; font-size: 10px; color: var(--ink-3); margin-bottom: 6px; }.slip-head span:last-child { color: var(--jin); white-space: nowrap; }
 .slip-body { max-height: 220px; overflow: auto; font: 14px/1.75 var(--f-serif); white-space: pre-wrap; overflow-wrap: anywhere; }.slip-body del, .revision-diff del { display: block; color: var(--zhu); opacity: .8; }.slip-body ins, .revision-diff ins { display: block; text-decoration: none; background: var(--qing-soft); color: var(--qing); }
 .slip-story { font: 14px/1.6 var(--f-serif); margin: 0 0 5px; }.slip-detail { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 140px; overflow: auto; font-size: 11px; color: var(--ink-2); margin: 0 0 8px; }.slip-acts { display: flex; gap: 4px; margin-top: 9px; flex-wrap: wrap; }.slip-acts .m-btn { height: 24px; padding: 0 6px; font-size: 11px; }
-.version-panel { margin: -8px 24px 20px 0; padding: 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); }.version-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }.version-panel p { margin: 5px 0 10px; }.version-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }.version-select { min-width: 0; width: 100%; padding: 6px 8px; border: 1px solid var(--line-2); border-radius: 5px; background: var(--paper); color: var(--ink); }
-.editor-bottom { font-size: 11px; color: var(--ink-4); margin: 20px 24px 0 0; }
-.chapter-gate { margin: 40px 24px 0 0; border: 1px solid var(--line); border-radius: var(--r-m); padding: 18px 20px; background: var(--panel); }.gate-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }.gate-head h4 { margin: 0; font: 600 15px var(--f-serif); }.gate-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 14px 0; }.gate-stats > div { padding: 10px 8px; border-radius: 8px; background: var(--paper); border: 1px solid var(--line); }.gate-stats b { display: block; font: 600 20px/1.2 var(--f-num); }.gate-stats span { font-size: 10px; color: var(--ink-3); }.gate-stats .bad b { color: var(--zhu); }.gate-detail { font-size: 11px; line-height: 1.6; color: var(--ink-3); }.gate-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.version-panel { flex: none; margin: -8px 24px 20px 0; padding: 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); }.version-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }.version-panel p { margin: 5px 0 10px; }.version-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }.version-select { min-width: 0; width: 100%; padding: 6px 8px; border: 1px solid var(--line-2); border-radius: 5px; background: var(--paper); color: var(--ink); }
+.editor-host { flex: 1 1 0; min-height: 0; overflow: hidden; }
+.chapter-gate { flex: none; margin: 40px 24px 0 0; border: 1px solid var(--line); border-radius: var(--r-m); padding: 18px 20px; background: var(--panel); }.gate-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }.gate-head h4 { margin: 0; font: 600 15px var(--f-serif); }.gate-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 14px 0; }.gate-stats > div { padding: 10px 8px; border-radius: 8px; background: var(--paper); border: 1px solid var(--line); }.gate-stats b { display: block; font: 600 20px/1.2 var(--f-num); }.gate-stats span { font-size: 10px; color: var(--ink-3); }.gate-stats .bad b { color: var(--zhu); }.gate-detail { font-size: 11px; line-height: 1.6; color: var(--ink-3); }.gate-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .desk-tabs { display: flex; border-bottom: 1px solid var(--line); overflow-x: auto; }.desk-tabs button { flex: 1; min-width: 54px; padding: 14px 6px 11px; font-size: 12px; color: var(--ink-3); border-bottom: 2px solid transparent; white-space: nowrap; }.desk-tabs button.on { color: var(--zhu); border-bottom-color: var(--zhu); }.desk-tabs b { margin-left: 3px; font-size: 10px; }
 .desk-panel { flex: 1; overflow: auto; }.desk-empty { padding: 20px 16px; line-height: 1.7; }.finding, .candidate { padding: 14px 16px; border-bottom: 1px solid var(--line); cursor: pointer; }.finding:hover, .candidate:hover { background: var(--panel-2); }.finding-head { display: flex; align-items: flex-start; gap: 7px; font-size: 12.5px; line-height: 1.5; }.finding p, .candidate p { margin: 8px 0 0; font-size: 12px; line-height: 1.65; color: var(--ink-3); }.finding.accepted, .finding.intentional { opacity: .6; }.finding-actions { display: flex; gap: 5px; margin-top: 9px; flex-wrap: wrap; }.quote { padding-left: 9px; border-left: 2px solid var(--zhu-mid); color: var(--ink-2) !important; }.review-report { margin: 12px 16px; padding: 10px; background: var(--panel-2); white-space: pre-wrap; font-size: 11px; line-height: 1.6; max-height: 260px; overflow: auto; }
 .chat-host { min-height: 520px; }.chat-host :deep(.ai-chat-wrapper) { height: 100%; }.chat-host :deep(.chat-window) { width: auto; height: 100%; max-height: none; border: 0; box-shadow: none; border-radius: 0; }.chat-host :deep(.chat-header) { display: none; }.chat-host :deep(.chat-search-notice) { margin-top: 12px; }
@@ -923,9 +1009,9 @@ onBeforeUnmount(() => {
 .candidate .quote { margin: 6px 0 8px !important; padding: 6px 10px; background: var(--panel); border-left-color: var(--zhu-mid); border-radius: 0 4px 4px 0; font: 13px/1.7 var(--f-serif); }
 .write-loading, .write-error { padding: 60px; color: var(--ink-2); }.write-error { color: var(--zhu); }.write-toast { position: fixed; right: 24px; bottom: 52px; z-index: 30; display: flex; align-items: center; gap: 10px; max-width: 520px; padding: 10px 14px; background: var(--rail); color: var(--rail-hi); border-radius: 8px; box-shadow: var(--shadow-3); font-size: 12.5px; }
 .crumb-link { color: var(--ink-3); text-decoration: none; }.crumb-link:hover { color: var(--zhu); }.crumb-sep { margin: 0 7px; color: var(--ink-4); }
-@media (min-width: 1600px) { .write-page { --side-w: 248px; --desk-w: 360px; }.write-page.no-side { --side-w: 0px; }.write-page.no-desk { --desk-w: 0px; }.paper { --margin-w: 214px; padding-left: 64px; } }
+@media (min-width: 1600px) { .write-page { --side-w: 248px; --desk-w: 360px; }.write-page.no-side { --side-w: 0px; }.write-page.no-desk { --desk-w: 0px; }.paper { --paper-inset: 64px; --margin-w: 214px; padding-left: 64px; } }
 @media (max-width: 1120px) { .write-page { --desk-w: 0px; }.desk-side { grid-area: auto; position: absolute; z-index: 25; right: 0; top: 0; bottom: 0; width: min(360px, 85%); box-shadow: var(--shadow-3); }.top-save { font-size: 0; gap: 0; }.top-save i { margin: 0; }.crumb-volume { display: none; } }
-@media (max-width: 800px) { .write-page { --side-w: 0px; }.tree-side { grid-area: auto; position: absolute; z-index: 26; left: 0; top: 0; bottom: 0; width: 235px; box-shadow: var(--shadow-3); }.write-main { padding: 18px 16px 80px; }.paper { --margin-w: 170px; padding-left: 32px; padding-top: 40px; }.paper-meta { gap: 5px 8px; }.chapter-title { font-size: 26px; }.gate-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }.chapter-gate { padding: 14px; }.lifecycle { gap: 3px; }.lc-bar { width: 6px; } }
-@media (max-width: 600px) { .paper { --margin-w: 0px; padding: 30px 24px 40px; min-height: 0 !important; }.paper::before, .paper-mnote, .paper-margins { display: none; }.write-main { padding: 12px 10px 70px; }.paper :deep(.pte-doc) { padding-right: 0; }.chapter-gate, .editor-bottom { margin-right: 0; }.top-save { display: none; }.mode-info { display: none; }.selection-tools { flex-wrap: wrap; height: auto; padding: 6px; }.selection-tools span { display: none; }.completion-overlay .m-modal-f { flex-wrap: wrap; }.completion-overlay .m-modal-f .l { width: 100%; } }
+@media (max-width: 800px) { .write-page { --side-w: 0px; }.tree-side { grid-area: auto; position: absolute; z-index: 26; left: 0; top: 0; bottom: 0; width: 235px; box-shadow: var(--shadow-3); }.write-main { padding: 18px 16px 24px; }.paper { --paper-inset: 32px; --margin-w: 170px; padding-left: 32px; padding-top: 40px; }.paper-meta { gap: 5px 8px; }.chapter-title { font-size: 26px; }.gate-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }.chapter-gate { padding: 14px; }.lifecycle { gap: 3px; }.lc-bar { width: 6px; } }
+@media (max-width: 600px) { .paper { --paper-inset: 24px; --margin-w: 0px; padding: 30px 24px 40px; min-height: 0 !important; }.paper::before, .paper-mnote, .paper-margins { display: none; }.write-main { padding: 12px 10px 20px; }.paper :deep(.pte-doc) { padding-right: 0; }.chapter-gate { margin-right: 0; }.top-save { display: none; }.mode-info { display: none; }.selection-tools { flex-wrap: wrap; height: auto; padding: 6px; }.selection-tools span { display: none; }.completion-overlay .m-modal-f { flex-wrap: wrap; }.completion-overlay .m-modal-f .l { width: 100%; } }
 @media (prefers-reduced-motion: reduce) { .chapter-seal { animation: none; }.margin-note:hover { transform: none; } }
 </style>

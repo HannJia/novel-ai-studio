@@ -62,7 +62,7 @@ describe('GitHub release validation', () => {
 })
 
 describe('desktop update lifecycle', () => {
-  it('retries failed startup checks after a minute and stops retrying when disabled', async () => {
+  it('retries failed checks after automatic downloads are disabled', async () => {
     vi.useFakeTimers()
     const { controller, options } = setup({ autoCheck: true, currentVersion: '1.0.3' })
     options.fetchLatest.mockRejectedValueOnce(new Error('fetch failed'))
@@ -76,7 +76,8 @@ describe('desktop update lifecycle', () => {
     await controller.check()
     controller.setAutoCheck(false)
     await vi.advanceTimersByTimeAsync(3600000)
-    expect(options.fetchLatest).toHaveBeenCalledTimes(3)
+    expect(options.fetchLatest).toHaveBeenCalledTimes(4)
+    expect(controller.snapshot().phase).toBe('current')
     controller.dispose()
   })
   it('keeps the new-version notice if manifest verification fails without allowing unverified downloads', async () => {
@@ -92,7 +93,7 @@ describe('desktop update lifecycle', () => {
     expect(controller.snapshot().release.canDownload).toBe(true)
     controller.dispose()
   })
-  it('refreshes stale checks after wake, throttles repeated wake events and respects opt-out', async () => {
+  it('refreshes stale checks after wake and throttles repeated events with automatic downloads disabled', async () => {
     vi.useFakeTimers()
     const { controller, options } = setup({ autoCheck: true, currentVersion: '1.0.3' })
     await controller.check()
@@ -104,7 +105,7 @@ describe('desktop update lifecycle', () => {
     controller.setAutoCheck(false)
     vi.setSystemTime(Date.now() + 7 * 60 * 60 * 1000)
     await controller.wake()
-    expect(options.fetchLatest).toHaveBeenCalledTimes(2)
+    expect(options.fetchLatest).toHaveBeenCalledTimes(3)
     controller.dispose()
   })
   it('never checks or downloads in development and browser-like environments', async () => {
@@ -118,9 +119,9 @@ describe('desktop update lifecycle', () => {
     expect(controller.snapshot().phase).toBe('unsupported')
     controller.dispose()
   })
-  it('checks at startup and respects a persisted automatic-check preference', async () => {
+  it.each([true, false])('checks at startup and periodically with auto-download preference %s', async autoCheck => {
     vi.useFakeTimers()
-    const { controller, options } = setup({ autoCheck: true, currentVersion: '1.0.3' })
+    const { controller, options, updater } = setup({ autoCheck, currentVersion: '1.0.3' })
     controller.start()
     await vi.advanceTimersByTimeAsync(11999)
     expect(options.fetchLatest).not.toHaveBeenCalled()
@@ -129,9 +130,10 @@ describe('desktop update lifecycle', () => {
     controller.setAutoCheck(false)
     expect(options.savePreference).toHaveBeenCalledWith(false)
     await vi.advanceTimersByTimeAsync(6 * 60 * 60 * 1000)
-    expect(options.fetchLatest).toHaveBeenCalledOnce()
+    expect(options.fetchLatest).toHaveBeenCalledTimes(3)
     await controller.check()
-    expect(options.fetchLatest).toHaveBeenCalledTimes(2)
+    expect(options.fetchLatest).toHaveBeenCalledTimes(4)
+    expect(updater.downloadUpdate).not.toHaveBeenCalled()
     expect(() => controller.setAutoCheck('yes')).toThrow()
     controller.dispose()
   })

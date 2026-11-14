@@ -38,6 +38,8 @@ export const useAppUpdateStore = defineStore('app-update', () => {
     return initialization
   }
   const noticeKey = computed(() => `${state.value.release?.version}:${state.value.phase}`)
+  const hasUpdate = computed(() => state.value.supported && !state.value.autoCheck && !!state.value.release
+    && !['unsupported', 'current'].includes(state.value.phase))
   const showNotice = computed(() => state.value.supported && ['available', 'downloaded', 'error'].includes(state.value.phase)
     && !(state.value.phase === 'available' && state.value.autoCheck && state.value.release?.canDownload && !state.value.error)
     && dismissed.value !== noticeKey.value)
@@ -55,5 +57,5 @@ export const useAppUpdateStore = defineStore('app-update', () => {
     catch { state.value = { ...state.value, error: '无法打开发布页，请检查默认浏览器设置。' } }
   }
   onScopeDispose(() => { unsubscribe?.(); window.removeEventListener('online', wake) })
-  return { state, init, detailsOpen, showNotice, dismissNotice, check, download, cancel, install, setAutoCheck, openRelease }
+  return { state, init, detailsOpen, hasUpdate, showNotice, dismissNotice, check, download, cancel, install, setAutoCheck, openRelease }
 })

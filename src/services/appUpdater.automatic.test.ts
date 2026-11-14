@@ -28,7 +28,10 @@ function setup(autoCheck?: boolean) {
   controllers.push(controller)
   return { controller, updater, options, token, manifest }
 }
-afterEach(() => { for (const controller of controllers.splice(0)) controller.dispose() })
+afterEach(() => {
+  for (const controller of controllers.splice(0)) controller.dispose()
+  vi.useRealTimers()
+})
 
 describe('automatic update downloads', () => {
   it('downloads one verified release by default without installing or preparing to quit', async () => {
@@ -53,6 +56,36 @@ describe('automatic update downloads', () => {
     expect(controller.snapshot().phase).toBe('downloaded')
     expect(updater.downloadUpdate).toHaveBeenCalledOnce()
     expect(updater.quitAndInstall).not.toHaveBeenCalled()
+  })
+
+  it('discovers new releases periodically after startup with automatic downloads disabled', async () => {
+    vi.useFakeTimers()
+    const { controller, updater, options } = setup(false)
+    const latest = await options.fetchLatest()
+    options.fetchLatest.mockClear()
+    options.fetchLatest.mockResolvedValueOnce({ ...latest, tag_name: 'v1.0.2' })
+    controller.start()
+    await vi.advanceTimersByTimeAsync(12000)
+    expect(controller.snapshot().phase).toBe('current')
+    await vi.advanceTimersByTimeAsync(6 * 60 * 60 * 1000)
+    expect(options.fetchLatest).toHaveBeenCalledTimes(2)
+    expect(controller.snapshot()).toMatchObject({ phase: 'available', autoCheck: false, release: { version: '1.0.3' } })
+    expect(updater.downloadUpdate).not.toHaveBeenCalled()
+    expect(updater.quitAndInstall).not.toHaveBeenCalled()
+  })
+
+  it('rechecks an already-known release periodically without downloading when automatic downloads are disabled', async () => {
+    vi.useFakeTimers()
+    const { controller, updater, options } = setup(false)
+    controller.start()
+    await vi.advanceTimersByTimeAsync(12000)
+    expect(options.fetchLatest).toHaveBeenCalledOnce()
+    expect(controller.snapshot()).toMatchObject({ phase: 'available', autoCheck: false })
+    await vi.advanceTimersByTimeAsync(6 * 60 * 60 * 1000)
+    expect(options.fetchLatest).toHaveBeenCalledTimes(2)
+    expect(controller.snapshot()).toMatchObject({ phase: 'available', release: { version: '1.0.3' } })
+    expect(updater.downloadUpdate).not.toHaveBeenCalled()
+    controller.dispose()
   })
 
   it.each(['release', 'manifest'])('does not start a download when disabled during the %s request', async stage => {

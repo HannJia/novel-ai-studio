@@ -15,16 +15,18 @@ import WriteView from './WriteView.vue'
 const state = vi.hoisted(() => ({ session: {} as ReturnType<typeof useChapterSession>, ai: {} as ReturnType<typeof useChapterAi> }))
 vi.mock('./useChapterSession', () => ({ useChapterSession: () => state.session }))
 vi.mock('./useChapterAi', () => ({ useChapterAi: () => state.ai }))
-vi.mock('@/composables/useWritingAdvisor', () => ({ useWritingAdvisor: () => ({ error: ref('') }) }))
+vi.mock('@/composables/useWritingAdvisor', () => ({ useWritingAdvisor: () => ({
+  error: ref(''), analyzing: ref(false), stale: ref(false), result: ref(null), lastMode: ref('scene'), analyzingModes: ref([]),
+}) }))
 
 const revealRange = vi.fn()
 const EditorDouble = defineComponent({
-  props: ['modelValue', 'marks', 'readonly'], emits: ['selection', 'layout', 'ready', 'mark-click', 'update:modelValue'],
+  props: ['modelValue', 'marks', 'readonly'], emits: ['selection', 'scroll', 'layout', 'ready', 'mark-click', 'update:modelValue'],
   setup(_props, { expose }) {
     expose({ getSelectionOffsets: () => ({ start: 0, end: 3 }), revealRange, coordsAtOffset: () => ({ top: 250, bottom: 286, left: 200 }) })
     return {}
   },
-  template: '<div class="editor-double">{{ modelValue }}</div>',
+  template: '<div class="editor-double"><div class="editor-content">{{ modelValue }}</div><slot /></div>',
 })
 
 let pinia: ReturnType<typeof createPinia>, wrapper: ReturnType<typeof mount>
@@ -51,6 +53,7 @@ async function mountDesk(query: Record<string, string> = {}) {
 
 beforeEach(() => {
   document.body.innerHTML = ['v3-crumb', 'v3-lifecycle', 'v3-tools', 'v3-view-tools', 'v3-status'].map(id => `<div id="${id}"></div>`).join('')
+  localStorage.removeItem('mojian-v3-writing-typography')
   revealRange.mockReset().mockReturnValue(true)
   vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1440)
   vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
@@ -88,8 +91,83 @@ afterEach(() => { wrapper?.unmount(); disposePinia(pinia); vi.restoreAllMocks();
 describe('V3 写作台原型交互', () => {
   it('hides the internal review schema version in the writing desk', async () => {
     await mountDesk()
+    await button('审校').trigger('click')
     expect(wrapper.get('.desk-side').text()).toContain('全章审校')
     expect(wrapper.get('.desk-side').text()).not.toContain('review-v')
+  })
+
+  it('默认打开最前面的顾问，正文写作不预留空批注栏', async () => {
+    await mountDesk()
+    expect(wrapper.findAll('.desk-tabs button').map(tab => tab.text())).toEqual(['顾问', '记忆', '候选', '对话', '审校'])
+    expect(wrapper.get('.desk-tabs button.on').text()).toBe('顾问')
+    expect(wrapper.get('.paper').classes()).not.toContain('with-margins')
+    expect(wrapper.find('.paper-margins').exists()).toBe(false)
+    expect(wrapper.find('.paper-mnote').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('正文以纯文本保存，页边批注与浮签不属于正式稿。')
+    await button('审校').trigger('click')
+    expect(wrapper.find('.paper-margins').exists()).toBe(false)
+    expect(state.ai.reviewChapter).not.toHaveBeenCalled()
+    expect(state.ai.generateSelection).not.toHaveBeenCalled()
+  })
+
+  it('在底栏调整并保存正文排版，不重复显示故事时间和计划视角', async () => {
+    await mountDesk()
+    const status = document.querySelector('#v3-status')!
+    expect(status.textContent).not.toContain('故事时间')
+    expect(status.textContent).not.toContain('计划视角')
+    const trigger = status.querySelector<HTMLButtonElement>('[aria-label="正文排版"]')!
+    trigger.click()
+    await flushPromises()
+    const panel = document.querySelector('[role="dialog"][aria-label="正文排版设置"]')!
+    const changes = [
+      ['write-font-size', '22', '--write-font-size: 22px'],
+      ['write-paragraph-spacing', '1.3', '--write-paragraph-spacing: 1.3em'],
+      ['write-letter-spacing', '0.08', '--write-letter-spacing: 0.08em'],
+    ]
+    for (const [id, value, expectedStyle] of changes) {
+      const input = panel.querySelector<HTMLInputElement>(`#${id}`)!
+      input.value = value
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      await flushPromises()
+      expect(wrapper.get('.editor-host').attributes('style')).toContain(expectedStyle)
+    }
+    expect(localStorage.getItem('mojian-v3-writing-typography')).toContain('"fontSize":22')
+    expect(localStorage.getItem('mojian-v3-writing-typography')).toContain('"paragraphSpacing":1.3')
+    expect(localStorage.getItem('mojian-v3-writing-typography')).toContain('"letterSpacing":0.08')
+  })
+
+  it('长正文和定稿检查一起滚动，检查始终保留在正文末尾', async () => {
+    await mountDesk()
+    const editor = wrapper.getComponent(EditorDouble)
+    const text = Array.from({ length: 80 }, (_, index) => `第${index + 1}段正文。`).join('\n')
+    editor.vm.$emit('update:modelValue', text)
+    await flushPromises()
+    expect(editor.get('.editor-content').text()).toBe(text)
+    expect(editor.get('.chapter-gate').element.previousElementSibling).toBe(editor.get('.editor-content').element)
+    expect(document.querySelector('#v3-status [aria-label="显示定稿检查"]')).toBeNull()
+
+    editor.vm.$emit('selection', { start: 0, end: 3, text: text.slice(0, 3), rect: { left: 100, right: 200, top: 220, bottom: 250 } })
+    await flushPromises()
+    expect(wrapper.find('.selection-tools').exists()).toBe(true)
+    editor.vm.$emit('scroll')
+    await flushPromises()
+    expect(wrapper.find('.selection-tools').exists()).toBe(false)
+    expect(editor.find('.chapter-gate').exists()).toBe(true)
+  })
+
+  it('开始审核才自动切到审校，审核完成后允许手动回到顾问', async () => {
+    await mountDesk()
+    state.ai.reviewBusy.value = true
+    await flushPromises()
+    expect(wrapper.get('.desk-tabs button.on').text()).toBe('审校')
+    state.ai.reviewBusy.value = false
+    await flushPromises()
+    expect(wrapper.get('.desk-tabs button.on').text()).toBe('审校')
+    await button('顾问').trigger('click')
+    expect(wrapper.get('.desk-tabs button.on').text()).toBe('顾问')
+    await button('全章审校').trigger('click')
+    expect(wrapper.get('.desk-tabs button.on').text()).toBe('审校')
+    expect(state.ai.reviewChapter).toHaveBeenCalledOnce()
   })
 
   it('窄屏从定稿核对打开候选案头时收起目录，两个抽屉不会相互遮挡', async () => {
@@ -166,13 +244,22 @@ describe('V3 写作台原型交互', () => {
       quotedText: '灯还亮着。', startOffset: 1, endOffset: 7, evidence: [], status: 'open', blocksFinalization: true, sourceVersionId: state.session.contentVersion.value }
     ;(state.session.findings as Ref<ReviewFinding[]>).value = [finding]
     await mountDesk()
+    expect(wrapper.find('.paper-margins').exists()).toBe(false)
+    await button('审校1').trigger('click')
+    expect(wrapper.get('.paper').classes()).toContain('with-margins')
     expect(wrapper.findAll('.margin-note')).toHaveLength(1)
     await wrapper.get('.margin-note').trigger('click')
     expect(revealRange).toHaveBeenCalledWith(7, 12, { focus: false })
+    await button('顾问').trigger('click')
+    expect(wrapper.find('.paper-margins').exists()).toBe(false)
+    expect(wrapper.get('.paper').classes()).not.toContain('with-margins')
+    await button('审校1').trigger('click')
+    expect(wrapper.findAll('.margin-note')).toHaveLength(1)
     state.session.workflow.value!.reviewCurrent = false
     await flushPromises()
     revealRange.mockClear()
     expect(wrapper.findAll('.margin-note')).toHaveLength(0)
+    expect(wrapper.get('.paper').classes()).not.toContain('with-margins')
     await wrapper.get('.finding').trigger('click')
     expect(revealRange).not.toHaveBeenCalled()
     expect(wrapper.get('.finding').text()).toContain('此前正文参考')
@@ -221,9 +308,10 @@ describe('V3 写作台原型交互', () => {
       proposedContent: '新' + original.slice(1), source: 'ai', status: 'pending', diff: '', reason: '选区候选', createdAt: '', updatedAt: '',
       selection: { mode: 'rewrite', startOffset: 0, endOffset: 1, contextVersion: 'ctx' } }
     await mountDesk()
+    expect(wrapper.find('.margin-slip').exists()).toBe(false)
+    await button('候选1').trigger('click')
     expect(wrapper.get('.margin-slip').text()).toContain('未入正文')
     expect(state.session.content.value).toBe(original)
-    await button('候选1').trigger('click')
     expect(wrapper.get('.revision-diff').text()).toContain('新')
     ;(state.session.contextVersion as Ref<string>).value = 'changed'
     await flushPromises()

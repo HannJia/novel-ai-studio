@@ -29,6 +29,12 @@ const steps = ['起点', '作品契约', '故事骨架', '分卷大纲', '开始
   position: absolute; inset: 0; overflow: auto; background: var(--desk); color: var(--ink);
 }
 .create-in { max-width: 1240px; padding: 32px 40px 60px; margin: 0 auto; }
+.create-page:has(.discussing-inspiration) { overflow: hidden; }
+.create-page:has(.discussing-inspiration) .create-in {
+  display: flex; flex-direction: column; height: 100%; padding-bottom: 24px;
+}
+.create-page:has(.discussing-inspiration) .create-steps,
+.create-page:has(.discussing-inspiration) .create-heading { flex-shrink: 0; }
 .create-steps { display: flex; align-items: center; list-style: none; margin: 0 0 26px; padding: 0; gap: 14px; }
 .create-steps li { display: flex; align-items: center; gap: 10px; color: var(--ink-4); font-size: 13px; white-space: nowrap; }
 .create-steps li:not(:last-child)::after { content: ''; width: clamp(24px, 6vw, 90px); height: 1px; background: var(--line-2); margin-left: 4px; }
@@ -41,5 +47,14 @@ const steps = ['起点', '作品契约', '故事骨架', '分卷大纲', '开始
 .crumb-link { color: var(--ink-3); text-decoration: none; }.crumb-link:hover { color: var(--zhu); }.crumb-sep { margin: 0 7px; color: var(--ink-4); }
 @media (max-width: 1100px) { .create-in { padding: 26px 24px 44px; }.create-steps { justify-content: space-between; gap: 8px; }.create-steps li:not(:last-child)::after { width: 24px; margin-left: 0; }.create-steps li { gap: 7px; font-size: 12px; } }
 @media (max-width: 700px) { .create-in { padding: 22px 16px 36px; }.create-steps { align-items: flex-start; gap: 4px; }.create-steps li { flex: 1; flex-direction: column; gap: 7px; position: relative; font-size: 10px; }.create-steps li:not(:last-child)::after { position: absolute; left: calc(50% + 20px); width: calc(100% - 40px); top: 13px; }.create-heading h1 { font-size: 23px; }.creation-principles { grid-template-columns: repeat(2, minmax(0, 1fr)); }.creation-principles > div { border-bottom: 1px solid var(--line); }.creation-principles > div:nth-child(2) { border-right: 0; }.creation-principles > div:nth-child(3) { border-bottom: 0; } }
+@media (max-width: 850px) {
+  .create-page:has(.discussing-inspiration) .create-heading { display: none; }
+  .create-page:has(.discussing-inspiration) .create-steps { margin-bottom: 18px; }
+}
+@media (max-height: 800px) {
+  .create-page:has(.discussing-inspiration) .create-in { padding-top: 20px; padding-bottom: 16px; }
+  .create-page:has(.discussing-inspiration) .create-steps { margin-bottom: 18px; }
+  .create-page:has(.discussing-inspiration) .create-heading { display: none; }
+}
 
 </style>

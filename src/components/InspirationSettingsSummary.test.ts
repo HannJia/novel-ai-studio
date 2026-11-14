@@ -20,6 +20,17 @@ function setup() {
 }
 
 describe('inspiration draft sidebar', () => {
+  it('offers independent organize and finish actions', async () => {
+    const { wrapper } = setup()
+    await wrapper.findAll('button').find(button => button.text() === '整理设定')!.trigger('click')
+    expect(wrapper.emitted('extract')).toHaveLength(1)
+    expect(wrapper.emitted('finish')).toBeUndefined()
+    await wrapper.findAll('button').find(button => button.text() === '完成')!.trigger('click')
+    expect(wrapper.emitted('finish')).toHaveLength(1)
+    expect(wrapper.emitted('extract')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   it('edits a copied draft without applying settings or mutating the parent form', async () => {
     const { form, wrapper, save } = setup()
     await wrapper.get('[aria-label="编辑主角"]').trigger('click')

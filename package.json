@@ -1,6 +1,6 @@
 {
   "name": "ai-novel-writer",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "墨笔生花 mobish，本地优先的 AI 长篇小说写作软件，支持作者主笔、AI 协作、知识库与长篇记忆",
   "author": "HannJia",
   "repository": {

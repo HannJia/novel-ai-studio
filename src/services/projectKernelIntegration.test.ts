@@ -351,17 +351,27 @@ describe('desktop project kernel integration', () => {
 
   it('unbinds deleted knowledge in open inspiration sessions before subsequent edits are saved', async () => {
     const backup = await fixture()
+    const novel = backup.novels[0]
+    const settingsDraft = JSON.stringify({ genre: novel.genre, subGenre: novel.subGenre, tags: novel.tags,
+      targetWordCountMin: novel.targetWordCountMin, targetWordCountMax: novel.targetWordCountMax,
+      writingStyle: novel.writingStyle, settings: novel.settings })
+    const questions = ['主角的目标是什么？', '他会遇到什么阻力？', '故事从哪里开始？']
     backup.inspirationSessions = [{ id: 'idea', title: '灵感', updatedAt: backup.exportedAt,
-      messages: [], knowledgeIds: ['library'], draft: '继续构思', webSearch: false }]
+      messages: [{ role: 'assistant', content: '继续聊聊主角。', questions }], knowledgeIds: ['library'], draft: '继续构思', webSearch: false, settingsDraft }]
     const { kernel } = await existing(backup)
     const { useKnowledgeStore } = await import('@/stores/knowledge')
     const { useInspirationSessionsStore } = await import('@/stores/inspirationSessions')
     const knowledge = useKnowledgeStore(), inspiration = useInspirationSessionsStore()
     await knowledge.initStore(); await inspiration.initialize()
+    expect(inspiration.sessions[0].settingsDraft).toBe(settingsDraft)
+    expect(inspiration.sessions[0].messages[0].questions).toEqual(questions)
     await knowledge.deleteKB('library')
     expect(inspiration.sessions[0].knowledgeIds).toEqual([])
-    inspiration.upsert({ ...inspiration.sessions[0], draft: '删除资料后继续构思' })
+    const edited = JSON.parse(settingsDraft)
+    edited.settings.protagonist.name = '作者修改后的主角'
+    inspiration.upsert({ ...inspiration.sessions[0], draft: '删除资料后继续构思', settingsDraft: JSON.stringify(edited) })
     await inspiration.flushPendingSaves()
-    expect((await kernel.read()).backup.inspirationSessions[0]).toMatchObject({ knowledgeIds: [], draft: '删除资料后继续构思' })
+    expect((await kernel.read()).backup.inspirationSessions[0]).toMatchObject({ knowledgeIds: [], draft: '删除资料后继续构思', settingsDraft: JSON.stringify(edited),
+      messages: [{ role: 'assistant', content: '继续聊聊主角。', questions }] })
   }, 20000)
 })

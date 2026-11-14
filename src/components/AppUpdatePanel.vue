@@ -20,7 +20,7 @@
           <n-switch :id="switchId" :value="state.autoCheck" :disabled="!state.supported || state.phase === 'installing'"
             aria-label="自动更新" @update:value="store.setAutoCheck" />
         </div>
-        <p class="update-description">自动检查新版本并在后台下载；关闭后仍可手动检查、下载与安装。</p>
+        <p class="update-description">开启后自动下载新版。关闭后仍检查新版并显示红点提醒，可手动下载。安装前由你确认。</p>
         <div class="update-actions">
           <n-button :disabled="!state.supported || busy || state.phase === 'downloaded'" :loading="state.phase === 'checking'"
             @click="store.check">

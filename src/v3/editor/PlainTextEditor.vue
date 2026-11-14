@@ -1,11 +1,14 @@
 <template>
-  <EditorContent :editor="editor" class="pte" :class="{ readonly }" />
+  <div ref="editorViewport" class="pte" :class="{ readonly }" @scroll.passive="emit('scroll')">
+    <EditorContent :editor="editor" class="pte-content" />
+    <slot />
+  </div>
 </template>
 
 <script setup lang="ts">
 // 纯文本稿纸编辑器。对外是 v-model 字符串，内部用 doc → paragraph → text 的 Tiptap 文档。
 // 标记（审校发现、候选位置）只作为装饰显示，不写进正文。偏移一律是纯文本 UTF-16 偏移。
-import { onBeforeUnmount, onMounted, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { EditorContent, useEditor } from '@tiptap/vue-3'
 import { Extension } from '@tiptap/core'
 import Document from '@tiptap/extension-document'
@@ -16,6 +19,7 @@ import { EditorState, Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
 import { Fragment, Slice, type Schema } from '@tiptap/pm/model'
 import { docToPlainText, offsetToPos, plainTextToDoc, posToOffset, splitLines } from './plainText'
+import { caretAnchorScrollTop } from './caretAnchor'
 
 export interface EditorMark {
   id: string
@@ -44,6 +48,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   'update:modelValue': [value: string]
   selection: [info: SelectionInfo]
+  scroll: []
   markClick: [id: string]
   /** 文档或装饰变化后触发，页边批注据此重新排布 */
   layout: []
@@ -52,6 +57,7 @@ const emit = defineEmits<{
 }>()
 
 const markKey = new PluginKey<DecorationSet>('v3-marks')
+const editorViewport = ref<HTMLElement>()
 
 function buildDecorations(doc: EditorState['doc'], marks: EditorMark[]): DecorationSet {
   const max = docToPlainText(doc).length
@@ -112,6 +118,8 @@ let pendingMarks: EditorMark[] | null = null
 let lastEmitted = props.modelValue
 let documentReady = false
 let lastSelectionOffsets = { start: 0, end: 0 }
+let caretAnchorFrame = 0
+let viewportObserver: ResizeObserver | undefined
 
 const editor = useEditor({
   extensions: [
@@ -161,6 +169,7 @@ const editor = useEditor({
     lastEmitted = text
     emit('update:modelValue', text)
     emit('layout')
+    keepCaretAtReadingLine()
   },
   onSelectionUpdate() { emitSelection() },
   onBlur() { emit('blur') },
@@ -185,6 +194,28 @@ function flushMarks() {
   pendingMarks = null
   view.dispatch(view.state.tr.setMeta(markKey, marks).setMeta('addToHistory', false))
   emit('layout')
+}
+
+function updateCaretAnchorSpace(view = editor.value?.view) {
+  const viewport = editorViewport.value
+  if (!view || !viewport) return
+  const height = viewport.clientHeight
+  view.dom.style.paddingBottom = height ? `${Math.ceil(height / 3)}px` : ''
+}
+
+function keepCaretAtReadingLine() {
+  cancelAnimationFrame(caretAnchorFrame)
+  caretAnchorFrame = requestAnimationFrame(() => {
+    caretAnchorFrame = 0
+    const view = editor.value?.view
+    const viewport = editorViewport.value
+    if (!view?.hasFocus() || !viewport?.clientHeight) return
+    updateCaretAnchorSpace(view)
+    try {
+      const caret = view.coordsAtPos(view.state.selection.head)
+      viewport.scrollTop = caretAnchorScrollTop(viewport, viewport.getBoundingClientRect().top, caret.top)
+    } catch { /* Layout may not be measurable while the editor is being mounted. */ }
+  })
 }
 
 watch(() => props.modelValue, value => {
@@ -248,10 +279,13 @@ function revealRange(start: number, end = start, options: { focus?: boolean } = 
   const doc = view.state.doc
   const sel = TextSelection.create(doc, offsetToPos(doc, start), offsetToPos(doc, end))
   view.dispatch(view.state.tr.setSelection(sel).scrollIntoView().setMeta('addToHistory', false))
+  const viewport = editorViewport.value
+  if (viewport) {
+    const caret = view.coordsAtPos(offsetToPos(doc, start))
+    const bounds = viewport.getBoundingClientRect()
+    viewport.scrollTop += caret.top - (bounds.top + viewport.clientHeight / 2)
+  }
   if (options.focus !== false) view.focus()
-  const dom = view.domAtPos(offsetToPos(doc, start)).node
-  const el = dom instanceof HTMLElement ? dom : dom.parentElement
-  el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
   return true
 }
 
@@ -272,9 +306,19 @@ function getText(): string {
   return view ? docToPlainText(view.state.doc) : props.modelValue
 }
 
-onMounted(() => document.addEventListener('selectionchange', syncDomSelection))
+onMounted(() => {
+  document.addEventListener('selectionchange', syncDomSelection)
+  const viewport = editorViewport.value
+  if (viewport && typeof ResizeObserver !== 'undefined') {
+    viewportObserver = new ResizeObserver(() => updateCaretAnchorSpace())
+    viewportObserver.observe(viewport)
+  }
+  updateCaretAnchorSpace()
+})
 onBeforeUnmount(() => {
   document.removeEventListener('selectionchange', syncDomSelection)
+  cancelAnimationFrame(caretAnchorFrame)
+  viewportObserver?.disconnect()
   editor.value?.destroy()
 })
 
@@ -282,8 +326,10 @@ defineExpose({ getSelectionOffsets, revealRange, focus, coordsAtOffset, replaceD
 </script>
 
 <style>
-.v3 .pte .pte-doc { outline: none; white-space: pre-wrap; word-break: break-word; min-height: 50vh; caret-color: var(--zhu); font: 18px/2 var(--f-serif); letter-spacing: .03em; padding-right: 24px }
-.v3 .pte .pte-doc p { margin: 0 0 .9em; text-indent: 2em; min-height: 2em }
+.v3 .pte { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain }
+.v3 .pte-content { display: flex; flex-direction: column; flex: 1 0 auto; min-height: 0 }
+.v3 .pte .pte-doc { flex: 1 0 auto; outline: none; white-space: pre-wrap; word-break: break-word; caret-color: var(--zhu); font: var(--write-font-size, 18px)/2 var(--f-serif); letter-spacing: var(--write-letter-spacing, .03em); padding-right: 24px }
+.v3 .pte .pte-doc p { margin: 0 0 var(--write-paragraph-spacing, .9em); text-indent: 2em; min-height: 2em }
 .v3 .pte [data-mark] { cursor: pointer; border-radius: 2px; text-underline-offset: 6px }
 .v3 .pte .mk-block { text-decoration: underline wavy var(--zhu) 1.5px; background: var(--zhu-soft) }
 .v3 .pte .mk-warn { text-decoration: underline solid var(--jin) 2px }

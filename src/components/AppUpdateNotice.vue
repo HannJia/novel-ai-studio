@@ -41,8 +41,9 @@ onMounted(() => { void store.init() })
 .update-notice { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 8px 18px; font-size: 13px; color: var(--ink); background: var(--paper); border-bottom: 1px solid var(--line-2); }
 .update-notice > span { overflow-wrap: anywhere; }
 .notice-actions { display: flex; align-items: center; gap: 8px; }
-.update-ready-card { position:fixed; left:20px; bottom:20px; z-index:1100; width:min(380px,calc(100vw - 40px)); box-sizing:border-box; padding:16px; display:grid; gap:12px; border:1px solid var(--line-2); border-radius:12px; background:var(--paper); color:var(--ink); box-shadow:0 6px 24px rgba(0,0,0,.12); font-size:13px; }
+.update-ready-card { position:fixed; left:84px; bottom:44px; z-index:1100; width:min(380px,calc(100vw - 104px)); box-sizing:border-box; padding:16px; display:grid; gap:12px; border:1px solid var(--line-2); border-radius:12px; background:var(--paper); color:var(--ink); box-shadow:0 6px 24px rgba(0,0,0,.12); font-size:13px; }
 .update-ready-card p { margin:0; line-height:1.6; overflow-wrap:anywhere; }
 .ready-notes { margin:0; padding:10px; max-height:140px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; line-height:1.6; background:var(--desk); border-radius:6px; }
 .ready-error { color:var(--zhu); }
+@media (max-width: 600px) { .update-ready-card { left:76px; bottom:40px; width:calc(100vw - 88px); padding:12px; } }
 </style>

@@ -10,11 +10,15 @@ export interface InspirationSession {
   draft: string
   webSearch: boolean
   context?: { content: string; messageCount: number }
+  /** Serialized story settings, independent of the compressed conversation. */
+  settingsDraft?: string
+  /** Number of history entries included in the last successful settings extraction. */
+  settingsMessageCount?: number
 }
 
 export function parseInspirationSession(raw: unknown): InspirationSession {
   const value = raw as InspirationSession
-  const invalid = () => { throw new Error('灵感会话数据不完整或无效。') }
+  const invalid = (): never => { throw new Error('灵感会话数据不完整或无效。') }
   if (!value || typeof value !== 'object' || typeof value.id !== 'string' || !/^[^\x00-\x1f\x7f]{1,200}$/.test(value.id)
     || ['__proto__', 'constructor', 'prototype'].includes(value.id)
     || typeof value.title !== 'string' || value.title.length > 200 || typeof value.updatedAt !== 'string' || !Number.isFinite(Date.parse(value.updatedAt))
@@ -29,6 +33,12 @@ export function parseInspirationSession(raw: unknown): InspirationSession {
     characters += message.content.length
     if (characters > 5_000_000) invalid()
     const next: InspirationMessage = { role: message.role, content: message.content }
+    if (message.questions !== undefined) {
+      if (message.role !== 'assistant' || !Array.isArray(message.questions) || message.questions.length !== 3
+        || message.questions.some(question => typeof question !== 'string' || !question.trim() || question.length > 200)
+        || new Set(message.questions).size !== 3) invalid()
+      next.questions = [...message.questions]
+    }
     if (message.search !== undefined) {
       const search = message.search
       if (!search || !['responses', 'anthropic', 'openrouter', 'chat-completions'].includes(search.protocol)
@@ -45,10 +55,28 @@ export function parseInspirationSession(raw: unknown): InspirationSession {
   const context = value.context
   if (context && (typeof context.content !== 'string' || context.content.length > 100000
     || !Number.isSafeInteger(context.messageCount) || context.messageCount < 1 || context.messageCount > messages.length)) invalid()
+  if (value.settingsDraft !== undefined) {
+    if (typeof value.settingsDraft !== 'string' || value.settingsDraft.length > 100000) invalid()
+    const draft: Record<string, unknown> = (() => {
+      try { return JSON.parse(value.settingsDraft) } catch { return invalid() }
+    })()
+    if (!draft || typeof draft !== 'object' || Array.isArray(draft) || typeof draft.genre !== 'string'
+      || typeof draft.subGenre !== 'string' || !Array.isArray(draft.tags)
+      || draft.tags.some(item => typeof item !== 'string')
+      || typeof draft.targetWordCountMin !== 'number' || !Number.isFinite(draft.targetWordCountMin)
+      || typeof draft.targetWordCountMax !== 'number' || !Number.isFinite(draft.targetWordCountMax)
+      || !draft.settings || typeof draft.settings !== 'object' || Array.isArray(draft.settings)
+      || !draft.writingStyle || typeof draft.writingStyle !== 'object' || Array.isArray(draft.writingStyle)) invalid()
+  }
+  if (value.settingsMessageCount !== undefined && (!value.settingsDraft
+    || !Number.isSafeInteger(value.settingsMessageCount) || value.settingsMessageCount < 0
+    || value.settingsMessageCount > messages.length)) invalid()
   return { id: value.id, title: value.title, updatedAt: value.updatedAt, messages,
     knowledgeIds: value.knowledgeIds == null ? null : [...value.knowledgeIds],
     draft: value.draft || '', webSearch: value.webSearch || false,
-    ...(context ? { context: { content: context.content, messageCount: context.messageCount } } : {}) }
+    ...(context ? { context: { content: context.content, messageCount: context.messageCount } } : {}),
+    ...(value.settingsDraft === undefined ? {} : { settingsDraft: value.settingsDraft }),
+    ...(value.settingsMessageCount === undefined ? {} : { settingsMessageCount: value.settingsMessageCount }) }
 }
 
 export function latestInspirationSessions(sessions: InspirationSession[]) {

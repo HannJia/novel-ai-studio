@@ -261,6 +261,11 @@ async function openReviewView(novelId: string) {
 async function openChapterFromReview(chapter: Chapter) {
   await until(() => chapterCell(chapter), `审校中心没有显示第 ${chapter.chapterIndex + 1} 章`)
   chapterCell(chapter)!.click()
+  await until(() => document.querySelector('.write-page'), '审校中心没有打开写作台')
+  const reviewTab = Array.from(document.querySelectorAll<HTMLButtonElement>('.desk-tabs button'))
+    .find(button => button.textContent?.includes('审校'))
+  assert(reviewTab, '写作台没有审校标签')
+  reviewTab.click()
   await until(() => document.querySelector('.review-summary'), '写作台没有显示持久化审校状态')
 }
 

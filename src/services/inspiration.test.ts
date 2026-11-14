@@ -8,8 +8,11 @@ import {
   compactInspirationContext,
   extractInspirationSettings,
   inspirationContextLength,
+  inspirationReplyText,
   parseInspirationSettings,
+  inspirationSettingsSnapshot,
 } from './inspiration'
+import { parseInspirationSession } from './inspirationSessions'
 import type { ModelConfig } from '@/stores/config'
 import type { CreateWizardForm } from '@/types/novel'
 import type { InspirationMessage } from './inspiration'
@@ -21,10 +24,98 @@ function base(): CreateWizardForm {
   return { genre: '', subGenre: '', tags: [], targetWordCountMin: 80, targetWordCountMax: 100,
     writingStyle: store.defaultWritingStyle(), settings: store.defaultSettings(), writingMode: 'manual' }
 }
+function answerWithQuestions(content: string) {
+  return `${content}\n<inspiration-questions>\n还可以怎样展开这个方向？\n主角会遇到什么阻力？\n哪些设定仍需要确认？\n</inspiration-questions>`
+}
 beforeEach(() => { setActivePinia(createPinia()); vi.clearAllMocks() })
 afterEach(() => vi.unstubAllGlobals())
 
 describe('inspiration settings', () => {
+  it('fills missing questions once using the current reply and edited settings without repeating the conversation request', async () => {
+    const questions = ['顾宁怎样应对官府阻挠？', '还能从哪些人情门路入手？', '这次受阻会让他失去什么？']
+    vi.mocked(callAI).mockResolvedValueOnce({ content: '官府不肯受理顾宁的请求。' })
+      .mockResolvedValueOnce({ content: JSON.stringify({ questions }) })
+    const form = base()
+    form.settings.protagonist.name = '顾宁'
+    const reply = await chatInspiration(model, [{ role: 'user', content: '给我一种查案阻力。' }], new AbortController().signal, () => {}, false, [], undefined, form)
+    expect(reply).toMatchObject({ content: '官府不肯受理顾宁的请求。', questions })
+    expect(callAI).toHaveBeenCalledTimes(2)
+    const supplement = vi.mocked(callAI).mock.calls[1][0]
+    expect(supplement).toMatchObject({ stream: false, noAutomaticRetry: true, structuredOutput: 'concise-json' })
+    expect(supplement.messages[1].content).toContain('顾宁')
+    expect(supplement.messages[1].content).toContain('官府不肯受理')
+    expect(JSON.stringify(supplement.messages)).not.toContain('test-key')
+  })
+
+  it('preserves the completed reply if generating follow-up questions fails', async () => {
+    vi.mocked(callAI).mockResolvedValueOnce({ content: '正文回答已完成。' }).mockRejectedValueOnce(new Error('请求超时'))
+    const reply = await chatInspiration(model, [{ role: 'user', content: '继续聊。' }], new AbortController().signal, () => {})
+    expect(reply.content).toBe('正文回答已完成。')
+    expect(reply.questions).toHaveLength(3)
+    expect(callAI).toHaveBeenCalledTimes(2)
+  })
+
+  it('separates three contextual follow-up questions from the answer in the same request', async () => {
+    const questions = ['姐姐留下的灯可以有哪些线索？', '怎样设计顾宁与姐姐之间的矛盾？', '明朝灯市可以怎样融入调查？']
+    vi.mocked(callAI).mockResolvedValue({ content: `先从那盏未修完的灯查起。\n<inspiration-questions>\n${questions.join('\n')}\n</inspiration-questions>` })
+    const reply = await chatInspiration(model, [{ role: 'user', content: '继续讨论修灯人顾宁。' }], new AbortController().signal, () => {})
+    expect(reply).toMatchObject({ content: '先从那盏未修完的灯查起。', questions })
+    expect(callAI).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(callAI).mock.calls[0][0].messages[0].content).toContain('恰好三个问题')
+    const restored = parseInspirationSession({ id: 'questions', title: '修灯人', updatedAt: '2026-11-14T00:00:00Z',
+      messages: [{ role: 'assistant', ...reply }] })
+    expect(restored.messages[0].questions).toEqual(questions)
+    await chatInspiration(model, [...restored.messages, { role: 'user', content: questions[0] }], new AbortController().signal, () => {})
+    const continued = JSON.stringify(vi.mocked(callAI).mock.calls[1][0].messages.slice(1))
+    expect(continued).toContain('先从那盏未修完的灯查起。')
+    expect(continued).not.toContain(questions[1])
+    expect(vi.mocked(callAI).mock.calls[1][0].messages[1].content).toBe('先从那盏未修完的灯查起。')
+  })
+
+  it('hides question metadata during streaming and supplies three general prompts when the list is missing or invalid', async () => {
+    expect(inspirationReplyText('回答\n<inspira')).toBe('回答')
+    expect(inspirationReplyText('回答\n<inspiration-questions>\n问题')).toBe('回答')
+    expect(inspirationReplyText('正常的回答')).toBe('正常的回答')
+    for (const metadata of ['', '<inspiration-questions>\n问题一\n问题二\n问题一\n</inspiration-questions>', '<inspiration-questions>\n问题一', '<inspiration-questions>\n</inspiration-questions>']) {
+      vi.mocked(callAI).mockResolvedValue({ content: `正常回答\n${metadata}` })
+      const reply = await chatInspiration(model, [{ role: 'user', content: '继续讨论。' }], new AbortController().signal, () => {})
+      expect(reply.content).toBe('正常回答')
+      expect(reply.questions).toHaveLength(3)
+      expect(reply.questions?.[1]).toContain('哪些细节还需要确认')
+    }
+    expect(() => parseInspirationSession({ id: 'bad', title: '无效问题', updatedAt: '2026-11-14T00:00:00Z',
+      messages: [{ role: 'assistant', content: '回答', questions: ['一', '一', '三'] }] })).toThrow()
+  })
+
+  it('uses current edited settings alongside compressed history and the latest question', async () => {
+    const form = base()
+    form.settings.protagonist.name = '苏晴'
+    form.settings.worldBuilding.worldType = '作者修改后的海边小镇'
+    const messages: InspirationMessage[] = [{ role: 'user', content: '很早以前的原始长对话' }, { role: 'user', content: '继续讨论主角的选择。' }]
+    const context = { content: '旧讨论曾把主角叫林晚，反派尚未决定。', messageCount: 1 }
+    vi.mocked(callAI).mockResolvedValue({ content: '苏晴的新选择。' })
+    await chatInspiration(model, messages, new AbortController().signal, () => {}, false, [], context, form)
+    const prompt = vi.mocked(callAI).mock.calls[0][0].messages
+    expect(prompt[0].content).toContain('以当前设定为准')
+    expect(prompt.some(message => message.content.includes('作者修改后的海边小镇') && message.content.includes('苏晴'))).toBe(true)
+    expect(prompt.some(message => message.content.includes('反派尚未决定'))).toBe(true)
+    expect(prompt[prompt.length - 1].content).toMatch(/^继续讨论主角的选择。\n\n【界面附加格式】/)
+    expect(messages[1].content).toBe('继续讨论主角的选择。')
+    expect(JSON.stringify(prompt)).not.toContain('很早以前的原始长对话')
+    expect(inspirationContextLength(messages, context, form)).toBe(context.content.length + messages[1].content.length + inspirationSettingsSnapshot(form).length)
+  })
+
+  it('round trips organized settings in an inspiration session and rejects malformed snapshots', () => {
+    const form = base()
+    form.settings.protagonist.name = '手工修改后的名字'
+    const settingsDraft = inspirationSettingsSnapshot(form)
+    const session = parseInspirationSession({ id: 'draft', title: '已有设定', updatedAt: '2026-11-14T00:00:00Z', messages: [], settingsDraft })
+    expect(parseInspirationSession(JSON.parse(JSON.stringify(session))).settingsDraft).toBe(settingsDraft)
+    expect(parseInspirationSettings(session.settingsDraft!, base()).settings.protagonist.name).toBe('手工修改后的名字')
+    expect(() => parseInspirationSession({ ...session, settingsDraft: '{invalid' })).toThrow()
+    expect(() => parseInspirationSession({ ...session, settingsDraft: '[]' })).toThrow()
+  })
+
   it('extracts long conversations in bounded chronological batches rather than blocking its own recovery action', async () => {
     const messages: InspirationMessage[] = [{ role: 'user', content: '甲'.repeat(65000) }, { role: 'user', content: '最终决定：主角叫小林' }]
     vi.mocked(callAI).mockResolvedValue({ content: JSON.stringify({ genre: 'urban', subGenre: 'business',
@@ -114,7 +205,7 @@ describe('inspiration settings', () => {
     const store = useKnowledgeStore()
     const kb = store.createKB('舞阳县志')
     const entry = store.addEntry(kb.id, { title: '地方事件', content: '舞阳县在该年举行集市。', category: '事件', summary: '', tags: [] })!
-    vi.mocked(callAI).mockResolvedValue({ content: '已参考资料。' })
+    vi.mocked(callAI).mockResolvedValue({ content: answerWithQuestions('已参考资料。') })
     const ask = (ids?: string[]) => chatInspiration(model, [{ role: 'user', content: '你可以看舞阳县的知识库吗？' }], new AbortController().signal, () => {}, false, ids)
     await ask()
     let prompt = vi.mocked(callAI).mock.calls.slice(-1)[0][0].messages[0].content
@@ -185,7 +276,9 @@ describe('inspiration settings', () => {
     const messages = [{ role: 'user' as const, content: '不写重生，写九十年代经商。' }]
     await chatInspiration(model, messages, new AbortController().signal, () => {})
     const request = vi.mocked(callAI).mock.calls[0][0]
-    expect(request.messages[1]).toEqual(messages[0])
+    expect(request.messages[1].role).toBe(messages[0].role)
+    expect(request.messages[1].content).toMatch(/^不写重生，写九十年代经商。\n\n【界面附加格式】/)
+    expect(messages[0].content).toBe('不写重生，写九十年代经商。')
     expect(request.messages[0].content).toContain('不要代写正文')
     expect(JSON.stringify(request.messages)).not.toContain('test-key')
     expect(request).not.toHaveProperty('tools')
@@ -204,7 +297,7 @@ describe('inspiration settings', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       status: 'completed',
       output: [{ type: 'web_search_call', status: 'completed' }, {
-        type: 'message', content: [{ type: 'output_text', text: '这是近期背景资料，小说取舍由作者决定。',
+        type: 'message', content: [{ type: 'output_text', text: answerWithQuestions('这是近期背景资料，小说取舍由作者决定。'),
           annotations: [{ type: 'url_citation', url: 'https://example.org/event', title: '事件资料' }] }],
       }],
     })))

@@ -1,6 +1,10 @@
 <template>
   <section class="inspiration-chat">
-    <div class="inspiration-workspace">
+    <div class="inspiration-panel-switch" role="group" aria-label="灵感工作区视图">
+      <button type="button" :aria-pressed="compactPanel === 'conversation'" @click="compactPanel = 'conversation'">灵感对话</button>
+      <button type="button" :aria-pressed="compactPanel === 'settings'" @click="compactPanel = 'settings'">已整理的设定</button>
+    </div>
+    <div class="inspiration-workspace" :class="{ 'show-settings': compactPanel === 'settings' }">
       <main class="inspiration-conversation paper-panel">
         <header class="inspiration-heading"><h2>从一个想法开始</h2><p>和墨笔生花一起梳理灵感，把模糊的想法变成清晰的故事。</p></header>
         <details ref="historyDetails" class="inspiration-options"><summary>对话选项 · 历史与参考资料</summary>
@@ -53,23 +57,33 @@
           <template #icon><n-icon><save-outline /></n-icon></template>存入知识库
         </n-button>
       </article>
-      <article v-if="streamText" data-streaming-assistant class="inspiration-message assistant">
-        <strong>AI</strong><div v-html="renderMd(streamText)"></div>
+      <article v-if="streamReplyText" data-streaming-assistant class="inspiration-message assistant">
+        <strong>AI</strong><div v-html="renderMd(streamReplyText)"></div>
       </article>
       <p v-else-if="busy" class="inspiration-progress" role="status">{{ compacting
         ? compactionProgress
         : extracting
           ? extractionProgress
           : requestWebSearch ? '正在请求联网回复，完成后显示回答和来源；开关修改下条生效…' : 'AI 正在回复…' }}</p>
+      <div v-if="suggestedQuestions.length && !busy" class="inspiration-follow-ups" role="group" aria-label="建议继续讨论的问题">
+        <span>可以接着聊</span>
+        <button v-for="question in suggestedQuestions" :key="question" type="button" @click="sendSuggestedQuestion(question)">
+          {{ question }}<span aria-hidden="true">↗</span>
+        </button>
+      </div>
     </div>
     <div class="inspiration-composer">
+      <aside v-if="pendingIdea" class="inspiration-carried-idea" aria-label="已带入的一句话灵感">
+        <strong>已带入一句话灵感</strong><p>{{ pendingIdea }}</p><small>发送时会与下方草稿一起带入讨论。</small>
+      </aside>
       <n-input v-model:value="input" type="textarea" :rows="3" :maxlength="4000" :disabled="busy"
         placeholder="我想写一个怎样的故事？" aria-label="小说灵感"
         @keydown="handleInputKeydown" @compositionstart="composing = true"
         @compositionend="composing = false" @blur="composing = false" />
-      <p class="inspiration-input-hint">回车发送 · 上档键＋回车换行</p>
       <div v-if="error" role="alert" class="inspiration-error">{{ error }}</div>
       <div class="inspiration-actions">
+        <p class="inspiration-input-hint">回车发送 · 上档键＋回车换行</p>
+        <n-button v-if="retryAvailable && !busy && !pendingIdea" @click="respond">重试回复</n-button>
         <div class="inspiration-send-group">
           <div v-if="contextStatus" class="inspiration-context-status" role="status">
             <button type="button" class="inspiration-context-summary" :aria-label="contextTooltip">
@@ -86,21 +100,16 @@
               aria-label="灵感对话上下文使用量"></progress>
           </div>
           <n-button v-if="busy" @click="stop"><template #icon><n-icon><stop-outline /></n-icon></template>停止</n-button>
-          <n-button v-else :disabled="!input.trim()" type="primary" @click="send">
+          <n-button v-else :disabled="!input.trim() && !pendingIdea" type="primary" @click="send">
             <template #icon><n-icon><send-outline /></n-icon></template>发送
           </n-button>
         </div>
-        <n-button v-if="retryAvailable && !busy" @click="respond">重试回复</n-button>
-
       </div>
     </div>
 
       </main>
-      <InspirationSettingsSummary :form="form" :busy="busy" :extracting="extracting" :can-extract="history.some(item => item.role === 'user')" @draft-change="value => emit('draft-change', value)" @history="openHistory">
-        <n-button block type="primary" size="large" class="summary-extract" :loading="extracting" :disabled="busy || !history.some(item => item.role === 'user')" @click="extract">
-          <template #icon><n-icon><checkmark-outline /></n-icon></template>{{ extracting ? '整理中' : '整理设定并检查' }}
-        </n-button>
-      </InspirationSettingsSummary>
+      <InspirationSettingsSummary :form="discussionSettings" :busy="busy" :extracting="extracting" :can-extract="canExtract" :can-finish="hasSettingsDraft || canExtract" :settings-status="settingsStatus"
+        @draft-change="updateDiscussionSettings" @extract="extract" @finish="finish" @history="openHistory" />
     </div>
     <SaveChatKnowledge :key="selectedSessionId || 'new'" v-model:show="showKnowledgeDraft" :content="knowledgeDraft" :preferred-ids="knowledgeIds"
       @saved="knowledgeSaved" />
@@ -111,7 +120,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NButton, NIcon, NInput, NSelect } from 'naive-ui'
-import { AddOutline, BulbOutline, CheckmarkOutline, SaveOutline, SendOutline, StopOutline } from '@vicons/ionicons5'
+import { AddOutline, BulbOutline, SaveOutline, SendOutline, StopOutline } from '@vicons/ionicons5'
 import { useConfigStore } from '@/stores/config'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import {
@@ -119,6 +128,9 @@ import {
   compactInspirationContext,
   extractInspirationSettings,
   inspirationContextLength,
+  inspirationReplyText,
+  inspirationSettingsSnapshot,
+  parseInspirationSettings,
   INSPIRATION_COMPACT_AT,
   INSPIRATION_CONTEXT_BUDGET,
   type InspirationMessage,
@@ -134,7 +146,12 @@ import type { ChatSearchRecord } from '@/types/chat'
 import { useInspirationSessionsStore } from '@/stores/inspirationSessions'
 import type { InspirationSession } from '@/services/inspirationSessions'
 
-const props = defineProps<{ form: CreateWizardForm; active: boolean }>()
+const props = defineProps<{
+  form: CreateWizardForm
+  active: boolean
+  initialIdea?: string
+  startRequest?: { id: number; idea: string }
+}>()
 const emit = defineEmits<{
   apply: [form: CreateWizardForm, history: InspirationMessage[]]
   'history-change': [history: InspirationMessage[]]
@@ -144,16 +161,27 @@ const config = useConfigStore()
 const knowledge = useKnowledgeStore()
 const sessionsStore = useInspirationSessionsStore()
 const history = ref<InspirationMessage[]>([])
+const initialForm: CreateWizardForm = JSON.parse(JSON.stringify(props.form))
+const discussionSettings = ref<CreateWizardForm>(JSON.parse(JSON.stringify(props.form)))
+const hasSettingsDraft = ref(false)
+const settingsMessageCount = ref<number>()
+let restoreSettingsOnOpen = false
 const savedSessions = computed(() => sessionsStore.sessions)
 const selectedSessionId = ref<string | null>(null)
 const historyElement = ref<HTMLElement | null>(null)
 const historyDetails = ref<HTMLDetailsElement | null>(null)
+const compactPanel = ref<'conversation' | 'settings'>('conversation')
 async function openHistory() {
+  compactPanel.value = 'conversation'
   if (historyDetails.value) historyDetails.value.open = true
   await nextTick()
   historyDetails.value?.querySelector<HTMLInputElement>('.inspiration-session-select input')?.focus()
 }
 const input = ref('')
+const pendingIdea = ref('')
+const importedIdea = ref('')
+const canExtract = computed(() => history.value.some(item => item.role === 'user') || !!pendingIdea.value
+  || !!importedIdea.value && input.value.trim() === importedIdea.value)
 const selectedKnowledgeIds = ref<string[] | null>(null)
 const knowledgeIds = computed<string[]>({
   get: () => selectedKnowledgeIds.value === null ? knowledge.knowledgeBases.map(base => base.id)
@@ -167,6 +195,26 @@ const showKnowledgeDraft = ref(false)
 const knowledgeDraft = ref('')
 const composing = ref(false)
 const streamText = ref('')
+const streamReplyText = computed(() => inspirationReplyText(streamText.value))
+const latestDiscussionIndex = computed(() => {
+  for (let index = history.value.length - 1; index >= 0; index--) {
+    const item = history.value[index]
+    if (item.role !== 'assistant' || !item.content.startsWith('【软件保存回执】')) return index
+  }
+  return -1
+})
+const suggestedQuestions = computed(() => {
+  const latest = history.value[latestDiscussionIndex.value]
+  return latest?.role === 'assistant' ? latest.questions || [] : []
+})
+const settingsStatus = computed(() => {
+  if (settingsMessageCount.value === undefined) return hasSettingsDraft.value
+    ? '已有设定草稿，可整理当前讨论后再检查。'
+    : '当前讨论尚未整理为设定，可先整理，或点击完成后手动补充。'
+  return latestDiscussionIndex.value >= settingsMessageCount.value || pendingIdea.value
+    ? '有新增讨论待整理，点击完成将带入当前设定。'
+    : '设定已整理到最新讨论，点击完成进入详细检查。'
+})
 const error = ref('')
 const busy = ref(false)
 const extracting = ref(false)
@@ -186,7 +234,7 @@ const latestPromptIndex = computed(() => {
 })
 const latestPrompt = computed(() => history.value[latestPromptIndex.value]?.content || '')
 const contextLength = computed(() =>
-  inspirationContextLength(history.value, conversationContext.value),
+  inspirationContextLength(history.value, conversationContext.value, discussionSettings.value),
 )
 const contextPercent = computed(() => Math.min(100, Math.round(
   contextLength.value / INSPIRATION_CONTEXT_BUDGET * 100,
@@ -238,29 +286,73 @@ if (savedSessions.value[0]) {
   input.value = savedSessions.value[0].draft
   webSearch.value = savedSessions.value[0].webSearch
   conversationContext.value = savedSessions.value[0].context
+  restoreDiscussionSettings(savedSessions.value[0].settingsDraft, savedSessions.value[0].settingsMessageCount)
+}
+
+function restoreDiscussionSettings(snapshot?: string, messageCount?: number) {
+  discussionSettings.value = snapshot
+    ? parseInspirationSettings(snapshot, { ...initialForm, genre: '', subGenre: '' })
+    : JSON.parse(JSON.stringify(initialForm))
+  discussionSettings.value.writingMode = props.form.writingMode
+  hasSettingsDraft.value = !!snapshot
+  settingsMessageCount.value = messageCount
+  restoreSettingsOnOpen = true
+}
+
+function updateDiscussionSettings(form: CreateWizardForm) {
+  discussionSettings.value = { ...JSON.parse(JSON.stringify(form)), writingMode: props.form.writingMode }
+  hasSettingsDraft.value = true
+  emit('draft-change', JSON.parse(JSON.stringify(discussionSettings.value)))
+  persistCurrentHistory()
 }
 
 function persistCurrentHistory() {
-  if (restoring || !sessionsStore.initialized || (!history.value.some(message => message.role === 'user') && !input.value.trim())) return
+  if (restoring || !sessionsStore.initialized || (!selectedSessionId.value && !hasSettingsDraft.value && !history.value.some(message => message.role === 'user') && !input.value.trim())) return
   const id = selectedSessionId.value || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
   selectedSessionId.value = id
   const next: InspirationSession = {
     id,
-    title: history.value.length ? sessionTitle(history.value) : input.value.trim().slice(0, 42),
+    title: history.value.length ? sessionTitle(history.value) : input.value.trim().slice(0, 42) || '新书设定',
     updatedAt: new Date().toISOString(),
     messages: cloneHistory(history.value),
     knowledgeIds: selectedKnowledgeIds.value === null ? null : [...selectedKnowledgeIds.value],
     draft: input.value,
     webSearch: webSearch.value,
     context: conversationContext.value,
+    ...(hasSettingsDraft.value ? { settingsDraft: inspirationSettingsSnapshot(discussionSettings.value) } : {}),
+    ...(settingsMessageCount.value === undefined ? {} : { settingsMessageCount: settingsMessageCount.value }),
   }
   const previous = savedSessions.value.find(session => session.id === id)
   if (previous && JSON.stringify({ ...previous, updatedAt: '' }) === JSON.stringify({ ...next, updatedAt: '' })) return
   sessionsStore.upsert(next)
 }
 
+function carryInitialIdea() {
+  const idea = props.initialIdea?.trim() || ''
+  if (!props.active || idea === importedIdea.value) return
+  pendingIdea.value = ''
+  if (!idea) {
+    if (input.value === importedIdea.value) input.value = ''
+    importedIdea.value = ''
+    return
+  }
+  if (!history.value.some(item => item.role === 'user' && item.content.includes(idea)) && !input.value.includes(idea)) {
+    if (!input.value.trim() || input.value === importedIdea.value) input.value = idea
+    else pendingIdea.value = idea
+  }
+  importedIdea.value = idea
+}
+
+function commitPendingIdea(content = '') {
+  if (!pendingIdea.value) return
+  if (!content.includes(pendingIdea.value)) history.value.push({ role: 'user', content: pendingIdea.value })
+  pendingIdea.value = ''
+}
+
 function loadSession(id: string | null) {
   persistCurrentHistory()
+  importedIdea.value = ''
+  pendingIdea.value = ''
   restoring = true
   try {
   stop()
@@ -273,6 +365,7 @@ function loadSession(id: string | null) {
     selectedKnowledgeIds.value = null
     conversationContext.value = undefined
     webSearch.value = false
+    restoreDiscussionSettings()
     return
   }
   const session = savedSessions.value.find(item => item.id === id)
@@ -283,9 +376,19 @@ function loadSession(id: string | null) {
   input.value = session.draft
   webSearch.value = session.webSearch
   conversationContext.value = session.context
+  restoreDiscussionSettings(session.settingsDraft, session.settingsMessageCount)
   error.value = ''
   void scrollToLatestMessage()
-  } finally { restoring = false }
+  } finally { restoring = false; activateDiscussionSettings(); carryInitialIdea() }
+}
+
+function activateDiscussionSettings() {
+  if (!props.active) return
+  if (restoreSettingsOnOpen) {
+    restoreSettingsOnOpen = false
+    discussionSettings.value.writingMode = props.form.writingMode
+    emit('draft-change', JSON.parse(JSON.stringify(discussionSettings.value)))
+  } else discussionSettings.value = JSON.parse(JSON.stringify(props.form))
 }
 
 function openKnowledgeDraft(content: string, search?: ChatSearchRecord) {
@@ -346,14 +449,36 @@ function handleInputKeydown(event: KeyboardEvent) {
   if (!event.repeat) send()
 }
 function send() {
-  if (!props.active || busy.value || !input.value.trim()) return
+  if (!props.active || busy.value || (!input.value.trim() && !pendingIdea.value)) return
   const content = input.value.trim()
-  history.value.push({ role: 'user', content })
+  commitPendingIdea(content)
+  if (content) history.value.push({ role: 'user', content })
   persistCurrentHistory()
   promptExpanded.value = false
   input.value = ''
   void respond()
 }
+
+function sendSuggestedQuestion(question: string) {
+  if (!props.active || busy.value || !suggestedQuestions.value.includes(question)) return
+  history.value.push({ role: 'user', content: question })
+  persistCurrentHistory()
+  promptExpanded.value = false
+  void respond()
+}
+
+function startDiscussion(idea: string) {
+  const content = idea.trim()
+  if (!props.active || busy.value || !content
+    || history.value.some(item => item.role === 'user' && item.content.includes(content))) return
+  history.value.push({ role: 'user', content })
+  if (input.value.trim() === content) input.value = ''
+  if (pendingIdea.value === content) pendingIdea.value = ''
+  persistCurrentHistory()
+  promptExpanded.value = false
+  void respond()
+}
+
 async function respond() {
   if (busy.value) return
   const model = config.getModelForTask('chat')
@@ -369,7 +494,7 @@ async function respond() {
   void scrollToReplyStart(request, replyIndex)
   try {
     const snapshot = JSON.parse(JSON.stringify(history.value)) as InspirationMessage[]
-    if (inspirationContextLength(snapshot, conversationContext.value) >= INSPIRATION_COMPACT_AT) {
+    if (inspirationContextLength(snapshot, conversationContext.value, discussionSettings.value) >= INSPIRATION_COMPACT_AT) {
       compacting.value = true
       compactionProgress.value = '正在自动压缩较早的对话…'
       const compacted = await compactInspirationContext(
@@ -398,7 +523,7 @@ async function respond() {
           void scrollToReplyStart(request, replyIndex)
         }
       }
-    }, requestWebSearch.value, [...knowledgeIds.value], conversationContext.value)
+    }, requestWebSearch.value, [...knowledgeIds.value], conversationContext.value, JSON.parse(JSON.stringify(discussionSettings.value)))
     if (controller === request && !request.signal.aborted && props.active) {
       history.value.push({ role: 'assistant', ...result })
       persistCurrentHistory()
@@ -412,9 +537,15 @@ async function respond() {
   }
 }
 async function extract() {
-  if (busy.value) return
+  if (busy.value || !props.active) return
   const model = config.getModelForTask('outline')
   if (!model?.apiKey.trim()) { error.value = '请先在设置中配置大纲模型及有效接口密钥。'; return }
+  commitPendingIdea()
+  if (importedIdea.value && input.value.trim() === importedIdea.value && !history.value.some(item => item.role === 'user' && item.content.includes(importedIdea.value))) {
+    history.value.push({ role: 'user', content: importedIdea.value })
+    input.value = ''
+  }
+  persistCurrentHistory()
   const request = new AbortController()
   controller = request
   busy.value = extracting.value = true
@@ -422,15 +553,22 @@ async function extract() {
   extractionProgress.value = '正在整理设定…'
   void scrollToReplyStart(request, history.value.length)
   try {
-    const base = JSON.parse(JSON.stringify(props.form)) as CreateWizardForm
+    const base = JSON.parse(JSON.stringify(discussionSettings.value)) as CreateWizardForm
     const snapshot = JSON.parse(JSON.stringify(history.value)) as InspirationMessage[]
     const form = await extractInspirationSettings({ ...model }, snapshot, base, request.signal, (completed, total) => {
       if (controller === request) extractionProgress.value = `正在整理设定：已完成 ${completed}/${total} 步…`
     })
+    if (controller !== request || request.signal.aborted || !props.active) return
+    extractionProgress.value = '设定已整理，正在压缩已聊内容…'
+    const context = await compactInspirationContext({ ...model }, snapshot, undefined, request.signal,
+      (completed, total) => {
+        if (controller === request) extractionProgress.value = `正在压缩已聊内容：已完成 ${completed}/${total} 批…`
+      }, 0)
     if (controller === request && !request.signal.aborted && props.active) {
-      conversationContext.value = { content: JSON.stringify(form), messageCount: snapshot.length }
+      conversationContext.value = context
+      settingsMessageCount.value = snapshot.length
+      updateDiscussionSettings(form)
       persistCurrentHistory()
-      emit('apply', form, snapshot)
     }
   } catch (err) {
     if (controller === request && !request.signal.aborted) error.value = err instanceof Error ? err.message : '整理失败'
@@ -438,17 +576,41 @@ async function extract() {
     if (controller === request) stop()
   }
 }
+
+function finish() {
+  if (!props.active || busy.value) return
+  persistCurrentHistory()
+  emit('apply', JSON.parse(JSON.stringify(discussionSettings.value)), cloneHistory(history.value))
+}
+
 onMounted(() => { void scrollToLatestMessage() })
-watch(() => props.active, active => {
-  if (active) void scrollToLatestMessage()
-  else { stop(); showKnowledgeDraft.value = false }
+watch(() => JSON.stringify(props.form), () => {
+  if (!props.active || restoreSettingsOnOpen || restoring) return
+  if (inspirationSettingsSnapshot(props.form) === inspirationSettingsSnapshot(discussionSettings.value)
+    && props.form.writingMode === discussionSettings.value.writingMode) return
+  discussionSettings.value = JSON.parse(JSON.stringify(props.form))
+  hasSettingsDraft.value = true
+  persistCurrentHistory()
 })
-watch(history, value => emit('history-change', cloneHistory(value)), { deep: true, immediate: true })
 watch([input, webSearch], persistCurrentHistory, { flush: 'sync' })
+watch([() => props.active, () => props.initialIdea], ([active]) => {
+  if (active) { activateDiscussionSettings(); carryInitialIdea(); void scrollToLatestMessage() }
+  else { stop(); showKnowledgeDraft.value = false }
+}, { immediate: true })
+let handledStartRequest = 0
+watch([() => props.active, () => props.startRequest], ([active, request]) => {
+  if (!active || !request || request.id === handledStartRequest) return
+  handledStartRequest = request.id
+  startDiscussion(request.idea)
+}, { flush: 'post', immediate: true })
+watch(history, value => emit('history-change', cloneHistory(value)), { deep: true, immediate: true })
 onBeforeUnmount(() => { persistCurrentHistory(); stop() })
 </script>
 
 <style scoped>
+.inspiration-carried-idea { margin-bottom: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--panel-2); font-size: 12px; }
+.inspiration-carried-idea p { margin: 6px 0; max-height: 130px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.inspiration-carried-idea small { color: var(--ink-3); }
 .inspiration-chat { display: flex; flex-direction: column; flex: 1; min-height: 0; max-width: 960px; width: 100%; margin: 0 auto; }
 .inspiration-search-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 0; flex-shrink: 0; color: var(--ink-3); font-size: 12px; }
 .inspiration-session-select { margin-left: auto; width: min(300px, 100%); }
@@ -488,25 +650,33 @@ onBeforeUnmount(() => { persistCurrentHistory(); stop() })
 .inspiration-composer { flex: 0 0 auto; margin: 4px 0 12px; padding: 12px 14px; border: 1px solid var(--line-2);
   border-radius: var(--r-l); background: var(--paper); }
 .inspiration-progress { padding-left: 4px; color: var(--dai); }
-.inspiration-input-hint { margin: 6px 0 0; color: var(--ink-3); font-size: 12px; line-height: 1.5; }
-.inspiration-send-group { display: inline-flex; align-items: center; gap: 8px; }
+.inspiration-input-hint { flex: 1 1 auto; margin: 0; color: var(--ink-3); font-size: 12px; line-height: 1.5; }
+.inspiration-send-group { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
 .inspiration-context-status { position: relative; display: inline-flex; align-items: center; color: var(--ink-3); font-size: 11px; line-height: 1; }
 .inspiration-context-summary { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px;
   padding: 0; border: 0; border-radius: 6px; background: transparent; cursor: help; }
 .inspiration-context-summary:focus-visible { outline: 2px solid var(--zhu); outline-offset: 2px; }
 .inspiration-context-ring { position: relative; display: inline-block; width: 22px; height: 22px; flex: 0 0 22px; border-radius: 50%; }
 .inspiration-context-ring::after { content: ''; position: absolute; inset: 4px; border-radius: 50%; background: var(--paper); }
-.inspiration-context-tooltip { position: absolute; z-index: 5; bottom: calc(100% + 8px); left: 0; display: flex; flex-direction: column; gap: 3px;
-  width: max-content; max-width: min(280px, calc(100vw - 32px)); padding: 9px 11px; border-radius: 9px;
+.inspiration-context-tooltip { position: absolute; z-index: 5; bottom: calc(100% + 8px); right: 0; display: flex; flex-direction: column; gap: 3px;
+  width: max-content; max-width: min(280px, calc(100vw - 160px)); padding: 9px 11px; border-radius: 9px;
   background: var(--ink); color: var(--paper); box-shadow: var(--shadow-2);
   font-size: 11px; line-height: 1.45; opacity: 0; pointer-events: none; transform: translateY(3px);
-  transition: opacity 120ms ease, transform 120ms ease; white-space: nowrap; }
+  transition: opacity 120ms ease, transform 120ms ease; white-space: normal; overflow-wrap: anywhere; }
 .inspiration-context-tooltip strong { color: inherit; font-weight: 600; }
 .inspiration-context-status:hover .inspiration-context-tooltip,
 .inspiration-context-summary:focus + .inspiration-context-tooltip { opacity: 1; transform: translateY(0); }
 .inspiration-context-progress-native { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; clip-path: inset(50%); }
 .inspiration-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; clip-path: inset(50%); }
 .inspiration-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.inspiration-follow-ups { display: grid; gap: 8px; margin: 12px 0 8px 42px; }
+.inspiration-follow-ups > span { color: var(--ink-3); font-size: 12px; }
+.inspiration-follow-ups button { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 9px 12px; border: 1px solid var(--line-2); border-radius: var(--r-m); background: var(--paper);
+  color: var(--ink-2); font: 13px/1.6 var(--f-ui); text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.inspiration-follow-ups button:hover { border-color: var(--zhu); color: var(--zhu); }
+.inspiration-follow-ups button:focus-visible { outline: 2px solid var(--zhu); outline-offset: 2px; }
+.inspiration-follow-ups button > span { flex-shrink: 0; color: var(--ink-3); }
 .inspiration-error { color: var(--zhu); margin-top: 8px; overflow-wrap: anywhere; }
 @media (max-width: 600px) {
   .inspiration-message { padding: 10px 12px; }
@@ -514,15 +684,17 @@ onBeforeUnmount(() => { persistCurrentHistory(); stop() })
 }
 
 /* Approved split layout: conversation and real story settings. */
-.inspiration-chat { flex: 1; min-height: 0; width: 100%; max-width: 1520px; margin: 0 auto; padding: 0 32px 24px; display: flex; box-sizing: border-box; }
-.inspiration-workspace { flex: 1; display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(320px, 1fr); gap: 16px; width: 100%; min-height: 0; }
-.inspiration-conversation { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 24px; }
+.inspiration-chat { flex: 1; min-height: 0; width: 100%; max-width: 1520px; margin: 0 auto; padding: 0 32px 24px; display: flex; overflow: hidden; box-sizing: border-box; }
+.inspiration-panel-switch { display: none; }
+.inspiration-workspace { flex: 1; display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(320px, 1fr); grid-template-rows: minmax(0, 1fr); gap: 16px; width: 100%; min-height: 0; }
+.inspiration-conversation { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 24px; overflow: hidden; }
+.inspiration-heading { flex-shrink: 0; }
 .inspiration-heading h2 { font-size: 30px; margin: 0 0 6px; }
 .inspiration-heading p { color: var(--ink-2); font-size: 14px; line-height: 1.7; }
-.inspiration-options { flex-shrink: 0; margin: 12px 0; color: var(--ink-2); font-size: 12px; }
+.inspiration-options { flex-shrink: 0; max-height: 30%; overflow-y: auto; margin: 12px 0; color: var(--ink-2); font-size: 12px; }
 .inspiration-options summary { cursor: pointer; padding: 4px 0; }
 .inspiration-options .inspiration-search-toolbar { padding-top: 10px; }
-.inspiration-history { flex: 1; min-height: 100px; padding: 4px 0 16px; }
+.inspiration-history { flex: 1; min-height: 0; padding: 4px 0 16px; }
 .inspiration-message { max-width: 88%; margin: 18px 0; padding: 16px 18px; }
 .inspiration-message.user { background: var(--zhu-soft); border-color: transparent; }
 .inspiration-message.assistant { max-width: calc(100% - 42px); margin-left: 42px; position: relative; border-left: 1px solid var(--line-2); box-shadow: none; }
@@ -530,10 +702,28 @@ onBeforeUnmount(() => { persistCurrentHistory(); stop() })
 .inspiration-message.assistant > strong { display: none; }
 .inspiration-composer { margin: auto 0 0; padding: 12px; }
 .inspiration-composer :deep(.n-input) { background: transparent; }
-.inspiration-workspace > :deep(.inspiration-settings) { min-height: 0; overflow-y: auto; }
+.inspiration-workspace > :deep(.inspiration-settings) { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .inspiration-sticky-prompt { margin: 0 0 8px; padding: 8px 12px; background: var(--panel); }
 @media (max-width: 1100px) { .inspiration-chat { padding: 0 20px 20px; } .inspiration-workspace { grid-template-columns: minmax(0, 1fr) 300px; } .inspiration-conversation { padding: 18px; } }
-@media (max-width: 850px) { .inspiration-chat { display: block; overflow-y: auto; padding: 0 12px 20px; } .inspiration-workspace { grid-template-columns: 1fr; } .inspiration-conversation { min-height: 620px; height: calc(100dvh - 160px); max-height: 850px; padding: 16px; } .inspiration-heading h2 { font-size: 26px; } }
+@media (max-width: 850px) {
+  .inspiration-chat { padding: 0 12px 20px; }
+  .inspiration-panel-switch { display: flex; flex: 0 0 auto; gap: 8px; margin-bottom: 12px; }
+  .inspiration-panel-switch button { flex: 1; padding: 8px 12px; border: 1px solid var(--line-2); border-radius: var(--r-m); background: var(--paper); color: var(--ink-2); font: 13px var(--f-ui); cursor: pointer; }
+  .inspiration-panel-switch button[aria-pressed="true"] { border-color: var(--zhu); background: var(--zhu-soft); color: var(--zhu); }
+  .inspiration-panel-switch button:focus-visible { outline: 2px solid var(--zhu); outline-offset: 2px; }
+  .inspiration-workspace { grid-template-columns: minmax(0, 1fr); }
+  .inspiration-conversation { padding: 16px; }
+  .inspiration-workspace:not(.show-settings) > :deep(.inspiration-settings),
+  .inspiration-workspace.show-settings > .inspiration-conversation { display: none; }
+  .inspiration-heading h2 { font-size: 26px; }
+  .inspiration-heading p { display: none; }
+}
+@media (max-height: 800px) {
+  .inspiration-conversation { padding: 16px; }
+  .inspiration-heading h2 { font-size: 24px; }
+  .inspiration-heading p { display: none; }
+  .inspiration-options { margin: 6px 0; }
+}
 .inspiration-empty-guide { margin: auto; max-width: 440px; text-align: center; padding: 28px; color: var(--ink-2); }
 .inspiration-empty-guide > .n-icon { color: var(--dai); margin-bottom: 16px; }
 .inspiration-empty-guide h3 { font-size: 24px; color: var(--ink); margin-bottom: 8px; }

@@ -9,16 +9,19 @@ import {
   compactInspirationContext,
   extractInspirationSettings,
   inspirationContextLength,
+  inspirationSettingsSnapshot,
 } from '@/services/inspiration'
 import { useConfigStore } from '@/stores/config'
 import { useNovelStore } from '@/stores/novel'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import SaveChatKnowledge from './SaveChatKnowledge.vue'
+import InspirationSettingsSummary from './InspirationSettingsSummary.vue'
 import type { CreateWizardForm } from '@/types/novel'
 import { useInspirationSessionsStore } from '@/stores/inspirationSessions'
 import { parseInspirationSession } from '@/services/inspirationSessions'
 
-vi.mock('@/services/inspiration', () => ({
+vi.mock('@/services/inspiration', async original => ({
+  ...await original<object>(),
   chatInspiration: vi.fn(),
   compactInspirationContext: vi.fn(),
   extractInspirationSettings: vi.fn(),
@@ -30,16 +33,20 @@ vi.mock('@/services/db/inspirationSessions', () => ({
   loadInspirationSessions: async () => JSON.parse(localStorage.getItem('novel-writer-inspiration-sessions') || '[]').map(parseInspirationSession),
   saveInspirationSessions: async () => {},
 }))
-beforeEach(async () => { setActivePinia(createPinia()); vi.resetAllMocks(); localStorage.clear(); await useInspirationSessionsStore().initialize() })
+beforeEach(async () => {
+  setActivePinia(createPinia()); vi.resetAllMocks(); localStorage.clear(); await useInspirationSessionsStore().initialize()
+  vi.mocked(compactInspirationContext).mockImplementation(async (_model, messages) => ({ content: '已聊内容摘要，尚未决定的方向保持开放。', messageCount: messages.length }))
+})
 afterEach(() => vi.restoreAllMocks())
 
-function mountChat(active = true) {
+function mountChat(active = true, initialIdea = '') {
   const store = useNovelStore()
   const form: CreateWizardForm = { genre: '', subGenre: '', tags: [], targetWordCountMin: 1, targetWordCountMax: 2,
     writingStyle: store.defaultWritingStyle(), settings: store.defaultSettings() }
   useConfigStore().models = [{ id: 'local', name: 'local', baseUrl: 'https://example.test', modelName: 'test',
     apiKey: 'synthetic', temperature: 0.7, topP: 0.9, maxTokens: 8000 }]
-  return shallowMount(InspirationChat, { props: { form, active }, global: { renderStubDefaultSlot: true, stubs: {
+  return shallowMount(InspirationChat, { props: { form, active, initialIdea }, global: { renderStubDefaultSlot: true, stubs: {
+    InspirationSettingsSummary: false,
     Input: { props: ['value', 'disabled'], emits: ['update:value'], template: '<textarea :value="value" :disabled="disabled" @input="$emit(\'update:value\', $event.target.value)" />' },
     Button: { props: ['disabled'], emits: ['click'], template: '<button :disabled="disabled" @click="$emit(\'click\')"><slot /></button>' },
   } } })
@@ -50,6 +57,332 @@ function button(wrapper: Wrapper, text: string) {
 }
 
 describe('inspiration search controls', () => {
+  it('preserves the draft while switching compact panels and returns to conversation for history', async () => {
+    const wrapper = mountChat()
+    await wrapper.get('textarea').setValue('姐姐失踪前留下了一盏旧灯。')
+    await button(wrapper, '已整理的设定').trigger('click')
+    expect(wrapper.get('.inspiration-workspace').classes()).toContain('show-settings')
+    await button(wrapper, '灵感对话').trigger('click')
+    expect(wrapper.get('textarea').element.value).toBe('姐姐失踪前留下了一盏旧灯。')
+    await button(wrapper, '已整理的设定').trigger('click')
+    wrapper.getComponent(InspirationSettingsSummary).vm.$emit('history')
+    await flushPromises()
+    expect(wrapper.get('.inspiration-workspace').classes()).not.toContain('show-settings')
+    expect(wrapper.get('.inspiration-options').attributes('open')).toBeDefined()
+    expect(wrapper.get('textarea').element.value).toBe('姐姐失踪前留下了一盏旧灯。')
+    expect(chatInspiration).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('sends the latest suggested question once, preserves the draft, and restores new suggestions after reopening', async () => {
+    const wrapper = mountChat()
+    const questions = ['姐姐留下的线索可以有哪些？', '主角会遇到什么阻力？', '怎样确定故事的时代氛围？']
+    vi.mocked(chatInspiration).mockResolvedValue({ content: '先聊聊姐姐留下的线索。', questions })
+    await wrapper.get('textarea').setValue('主角在寻找姐姐。')
+    await button(wrapper, '发送').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.inspiration-follow-ups').findAll('button').map(item => item.text().replace('↗', '').trim())).toEqual(questions)
+    wrapper.getComponent(SaveChatKnowledge).vm.$emit('saved', { kbId: 'test-kb', kbName: '验收资料', title: '线索' })
+    await flushPromises()
+    expect(wrapper.get('.inspiration-follow-ups').findAll('button').map(item => item.text().replace('↗', '').trim())).toEqual(questions)
+    const draft = '我还没写完的想法'
+    await wrapper.get('textarea').setValue(draft)
+    let complete!: (reply: { content: string; questions: string[] }) => void
+    vi.mocked(chatInspiration).mockImplementation(() => new Promise(resolve => { complete = resolve }))
+    const suggestion = wrapper.get('.inspiration-follow-ups button')
+    await suggestion.trigger('click')
+    await suggestion.trigger('click')
+    await flushPromises()
+    expect(chatInspiration).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(chatInspiration).mock.calls[1][1].slice(-1)).toEqual([{ role: 'user', content: questions[0] }])
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe(draft)
+    expect(wrapper.find('.inspiration-follow-ups').exists()).toBe(false)
+    const nextQuestions = ['这条线索可以如何误导主角？', '谁会阻止他调查？', '怎样安排第一次转折？']
+    complete({ content: '可以从一盏未修完的灯开始。', questions: nextQuestions })
+    await flushPromises()
+    expect(wrapper.get('.inspiration-follow-ups').text()).toContain(nextQuestions[0])
+    expect(wrapper.get('.inspiration-follow-ups').text()).not.toContain(questions[0])
+    wrapper.unmount()
+    const reopened = mountChat()
+    expect(reopened.get('.inspiration-follow-ups').findAll('button')).toHaveLength(3)
+    expect(reopened.get('.inspiration-follow-ups').text()).toContain(nextQuestions[0])
+    expect((reopened.get('textarea').element as HTMLTextAreaElement).value).toBe(draft)
+    expect(chatInspiration).toHaveBeenCalledTimes(2)
+    reopened.unmount()
+  })
+
+  it('organizes without leaving, uses edited settings in continued chat, and only finishes on explicit completion', async () => {
+    const wrapper = mountChat()
+    expect(wrapper.get('.summary-status').text()).toContain('尚未整理')
+    vi.mocked(chatInspiration).mockResolvedValue({ content: '继续讨论姐姐的线索。' })
+    await wrapper.get('textarea').setValue('主角叫林晚，在海边修灯，正在寻找姐姐。'.repeat(200))
+    await button(wrapper, '发送').trigger('click')
+    await flushPromises()
+    const form = JSON.parse(JSON.stringify(wrapper.props('form'))) as CreateWizardForm
+    form.settings.protagonist.name = '林晚'
+    form.settings.worldBuilding.worldType = '海边的修灯铺'
+    vi.mocked(extractInspirationSettings).mockResolvedValue(form)
+    vi.mocked(compactInspirationContext).mockResolvedValue({ content: '林晚在寻找姐姐，姐姐的去向尚未决定。', messageCount: 2 })
+    await button(wrapper, '整理设定').trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('apply')).toBeUndefined()
+    expect(wrapper.getComponent(InspirationSettingsSummary).props('form').settings.protagonist.name).toBe('林晚')
+    expect(wrapper.findAll('.inspiration-message')).toHaveLength(2)
+    expect(wrapper.get('.summary-status').text()).toContain('已整理到最新讨论')
+    expect(useInspirationSessionsStore().sessions[0].settingsMessageCount).toBe(2)
+    expect(vi.mocked(compactInspirationContext).mock.calls[0][5]).toBe(0)
+    const edited = JSON.parse(JSON.stringify(form)) as CreateWizardForm
+    edited.settings.protagonist.name = '苏晴'
+    wrapper.getComponent(InspirationSettingsSummary).vm.$emit('draft-change', edited)
+    await flushPromises()
+    expect(JSON.parse(useInspirationSessionsStore().sessions[0].settingsDraft!).settings.protagonist.name).toBe('苏晴')
+    await wrapper.get('textarea').setValue('接着聊姐姐的线索。')
+    await button(wrapper, '发送').trigger('click')
+    await flushPromises()
+    const continued = vi.mocked(chatInspiration).mock.calls[1]
+    expect(continued[6]).toEqual({ content: '林晚在寻找姐姐，姐姐的去向尚未决定。', messageCount: 2 })
+    expect(continued[7]?.settings.protagonist.name).toBe('苏晴')
+    expect(wrapper.get('.summary-status').text()).toContain('有新增讨论待整理')
+    await button(wrapper, '完成').trigger('click')
+    expect(wrapper.emitted('apply')?.[0][0]).toMatchObject({ settings: { protagonist: { name: '苏晴' } } })
+    expect((wrapper.emitted('apply')?.[0][1] as unknown[])).toHaveLength(4)
+    expect(extractInspirationSettings).toHaveBeenCalledTimes(1)
+    expect(chatInspiration).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+    const reopened = mountChat()
+    expect(reopened.getComponent(InspirationSettingsSummary).props('form').settings.protagonist.name).toBe('苏晴')
+    expect(reopened.get('.summary-status').text()).toContain('有新增讨论待整理')
+    reopened.unmount()
+  })
+
+  it('finishes an unorganized discussion with accurate status and no model extraction', async () => {
+    const wrapper = mountChat()
+    vi.mocked(chatInspiration).mockResolvedValue({ content: '先聊聊姐姐的线索。' })
+    await wrapper.get('textarea').setValue('修灯人寻找姐姐。')
+    await button(wrapper, '发送').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.summary-status').text()).toContain('尚未整理')
+    await button(wrapper, '完成').trigger('click')
+    expect(wrapper.emitted('apply')).toHaveLength(1)
+    expect(extractInspirationSettings).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('restores settings with the selected history session instead of keeping another conversation settings', async () => {
+    const wrapper = mountChat(false)
+    const makeSettings = (name: string) => {
+      const form = JSON.parse(JSON.stringify(wrapper.props('form'))) as CreateWizardForm
+      form.settings.protagonist.name = name
+      return inspirationSettingsSnapshot(form)
+    }
+    useInspirationSessionsStore().adopt([
+      parseInspirationSession({ id: 'first', title: '第一部', updatedAt: '2026-11-14T00:00:00Z', messages: [], settingsDraft: makeSettings('林晚') }),
+      parseInspirationSession({ id: 'second', title: '第二部', updatedAt: '2026-11-14T01:00:00Z', messages: [], settingsDraft: makeSettings('苏晴') }),
+    ])
+    await wrapper.setProps({ active: true })
+    wrapper.findComponent(NSelect).vm.$emit('update:value', 'first')
+    await flushPromises()
+    expect(wrapper.getComponent(InspirationSettingsSummary).props('form').settings.protagonist.name).toBe('林晚')
+    wrapper.findComponent(NSelect).vm.$emit('update:value', 'second')
+    await flushPromises()
+    expect(wrapper.getComponent(InspirationSettingsSummary).props('form').settings.protagonist.name).toBe('苏晴')
+    wrapper.unmount()
+  })
+
+  it.each(['停止', '失败'] as const)('does not replace current settings or context when compression ends with %s', async action => {
+    const wrapper = mountChat()
+    vi.mocked(chatInspiration).mockResolvedValue({ content: '先确定人物。' })
+    await wrapper.get('textarea').setValue('修灯人的故事。')
+    await button(wrapper, '发送').trigger('click')
+    await flushPromises()
+    const form = JSON.parse(JSON.stringify(wrapper.props('form'))) as CreateWizardForm
+    form.settings.protagonist.name = '迟到的结果'
+    vi.mocked(extractInspirationSettings).mockResolvedValue(form)
+    let complete!: (context: { content: string; messageCount: number }) => void
+    let fail!: (error: Error) => void
+    vi.mocked(compactInspirationContext).mockImplementation(() => new Promise((resolve, reject) => { complete = resolve; fail = reject }))
+    await button(wrapper, '整理设定').trigger('click')
+    await flushPromises()
+    if (action === '停止') {
+      await button(wrapper, '停止').trigger('click')
+      complete({ content: '迟到的摘要', messageCount: 2 })
+    } else fail(new Error('整理后的压缩失败'))
+    await flushPromises()
+    expect(wrapper.getComponent(InspirationSettingsSummary).props('form').settings.protagonist.name).toBe('')
+    expect(useInspirationSessionsStore().sessions[0].context).toBeUndefined()
+    expect(wrapper.emitted('apply')).toBeUndefined()
+    if (action === '失败') expect(wrapper.get('[role="alert"]').text()).toContain('压缩失败')
+    wrapper.unmount()
+  })
+
+  it('sends a nonempty idea once for an explicit discussion request, without repeating on return', async () => {
+    const idea = '守灯人在暴雨夜收到一封旧信。'
+    const wrapper = mountChat(false, idea)
+    vi.mocked(chatInspiration).mockResolvedValue({ content: '先聊聊这封信的来历。' })
+    await wrapper.setProps({ active: true, startRequest: { id: 1, idea } })
+    await flushPromises()
+    expect(chatInspiration).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(chatInspiration).mock.calls[0][1]).toEqual([{ role: 'user', content: idea }])
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('')
+    await wrapper.setProps({ startRequest: { id: 1, idea } })
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true, startRequest: { id: 2, idea } })
+    await flushPromises()
+    expect(chatInspiration).toHaveBeenCalledTimes(1)
+    expect(useInspirationSessionsStore().sessions[0].messages.filter(item => item.role === 'user')).toEqual([{ role: 'user', content: idea }])
+    wrapper.unmount()
+  })
+
+  it('automatically sends only the entered idea while preserving an unrelated full draft', async () => {
+    const draft = '草'.repeat(4000), idea = '渡口的守灯人收到了旧信。'
+    const store = useInspirationSessionsStore()
+    store.adopt([parseInspirationSession({ id: 'existing', title: '旧讨论', updatedAt: new Date().toISOString(),
+      messages: [{ role: 'user', content: '原有问题' }, { role: 'assistant', content: '原有回答' }], draft })])
+    const wrapper = mountChat(false, idea)
+    vi.mocked(chatInspiration).mockResolvedValue({ content: '围绕来信继续讨论。' })
+    await wrapper.setProps({ active: true, startRequest: { id: 1, idea } })
+    await flushPromises()
+    expect(vi.mocked(chatInspiration).mock.calls[0][1]).toEqual([
+      { role: 'user', content: '原有问题' }, { role: 'assistant', content: '原有回答' }, { role: 'user', content: idea },
+    ])
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe(draft)
+    expect(store.sessions[0].draft).toBe(draft)
+    expect(wrapper.find('.inspiration-carried-idea').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('opens existing discussion without sending anything when the entry idea is blank', async () => {
+    useInspirationSessionsStore().adopt([parseInspirationSession({ id: 'existing', title: '已有草稿',
+      updatedAt: new Date().toISOString(), messages: [], draft: '我还没打算发送的问题' })])
+    const wrapper = mountChat(false)
+    await wrapper.setProps({ active: true, startRequest: { id: 1, idea: '  ' } })
+    await flushPromises()
+    expect(chatInspiration).not.toHaveBeenCalled()
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('我还没打算发送的问题')
+    expect(useInspirationSessionsStore().sessions[0].messages).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('keeps an automatically submitted idea for retry when no model is configured', async () => {
+    const idea = '修灯人想寻找失踪的姐姐。'
+    const wrapper = mountChat(false, idea)
+    const config = useConfigStore(), models = [...config.models]
+    config.models = []
+    await wrapper.setProps({ active: true, startRequest: { id: 1, idea } })
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('请先在设置中配置')
+    expect(chatInspiration).not.toHaveBeenCalled()
+    expect(useInspirationSessionsStore().sessions[0].messages).toEqual([{ role: 'user', content: idea }])
+    config.models = models
+    vi.mocked(chatInspiration).mockResolvedValue({ content: '从姐姐的最后行踪开始。' })
+    await button(wrapper, '重试回复').trigger('click')
+    await flushPromises()
+    expect(chatInspiration).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(chatInspiration).mock.calls[0][1]).toEqual([{ role: 'user', content: idea }])
+    wrapper.unmount()
+  })
+
+  it('carries the creation idea into the composer on opening, preserving edits across return visits', async () => {
+    const idea = '暴雨夜，守灯人收到一封十年前的来信。'
+    const wrapper = mountChat(false, idea)
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('')
+    expect(useInspirationSessionsStore().sessions).toHaveLength(0)
+    await wrapper.setProps({ active: true })
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe(idea)
+    expect(useInspirationSessionsStore().sessions[0].draft).toBe(idea)
+    expect(chatInspiration).not.toHaveBeenCalled()
+    expect(extractInspirationSettings).not.toHaveBeenCalled()
+    const edited = idea + '\n先聊聊写信的人。'
+    await wrapper.get('textarea').setValue(edited)
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe(edited)
+    vi.mocked(chatInspiration).mockResolvedValue({ content: '一起梳理写信人的动机。' })
+    await button(wrapper, '发送').trigger('click')
+    await flushPromises()
+    expect(vi.mocked(chatInspiration).mock.calls[0][1]).toEqual([{ role: 'user', content: edited }])
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('')
+    wrapper.unmount()
+    const reopened = mountChat(true, idea)
+    expect((reopened.get('textarea').element as HTMLTextAreaElement).value).toBe('')
+    reopened.unmount()
+  })
+
+  it('persists an explicitly cleared imported draft instead of restoring its previous text', async () => {
+    const wrapper = mountChat(true, '尚未发送的灵感。')
+    await wrapper.get('textarea').setValue('')
+    expect(useInspirationSessionsStore().sessions[0].draft).toBe('')
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true })
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('')
+    wrapper.unmount()
+    const reopened = mountChat()
+    expect((reopened.get('textarea').element as HTMLTextAreaElement).value).toBe('')
+    reopened.unmount()
+  })
+
+  it('keeps a full existing draft and history, carrying the idea separately into the next explicit request', async () => {
+    const store = useInspirationSessionsStore()
+    const draft = '待'.repeat(4000), idea = '灯'.repeat(4000)
+    store.adopt([parseInspirationSession({ id: 'existing', title: '已有讨论', updatedAt: new Date().toISOString(),
+      messages: [{ role: 'user', content: '旧问题' }, { role: 'assistant', content: '旧回答' }], draft,
+      context: { content: '已有摘要', messageCount: 2 } })])
+    const wrapper = mountChat(false, idea)
+    await wrapper.setProps({ active: true })
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe(draft)
+    expect(wrapper.get('.inspiration-carried-idea p').text()).toBe(idea)
+    expect(store.sessions[0].draft).toBe(draft)
+    expect(store.sessions[0].messages).toHaveLength(2)
+    expect(chatInspiration).not.toHaveBeenCalled()
+    vi.mocked(chatInspiration).mockResolvedValue({ content: '结合新的灵感继续。' })
+    await button(wrapper, '发送').trigger('click')
+    await flushPromises()
+    expect(vi.mocked(chatInspiration).mock.calls[0][1]).toEqual([
+      { role: 'user', content: '旧问题' }, { role: 'assistant', content: '旧回答' },
+      { role: 'user', content: idea }, { role: 'user', content: draft },
+    ])
+    expect(vi.mocked(chatInspiration).mock.calls[0][6]).toEqual({ content: '已有摘要', messageCount: 2 })
+    expect(store.sessions).toHaveLength(1)
+    expect(wrapper.find('.inspiration-carried-idea').exists()).toBe(false)
+    wrapper.unmount()
+    const reopened = mountChat(true, idea)
+    expect((reopened.get('textarea').element as HTMLTextAreaElement).value).toBe('')
+    expect(reopened.find('.inspiration-carried-idea').exists()).toBe(false)
+    reopened.unmount()
+  })
+
+  it('includes the carried idea when the author chooses to organize settings directly', async () => {
+    const idea = '海边的修灯人想找到失踪的姐姐。'
+    const wrapper = mountChat(true, idea)
+    vi.mocked(extractInspirationSettings).mockResolvedValue(wrapper.props('form'))
+    await button(wrapper, '整理设定').trigger('click')
+    await flushPromises()
+    expect(vi.mocked(extractInspirationSettings).mock.calls[0][1]).toEqual([{ role: 'user', content: idea }])
+    expect(wrapper.emitted('apply')).toBeUndefined()
+    expect(wrapper.emitted('draft-change')).toHaveLength(1)
+    await button(wrapper, '完成').trigger('click')
+    expect(wrapper.emitted('apply')?.[0][1]).toEqual([{ role: 'user', content: idea }])
+    expect(useInspirationSessionsStore().sessions[0].context?.messageCount).toBe(1)
+    expect(chatInspiration).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('sends the idea exactly once when the author copies an attached idea into the composer', async () => {
+    useInspirationSessionsStore().adopt([parseInspirationSession({ id: 'draft', title: '未完成的问题',
+      updatedAt: new Date().toISOString(), messages: [], draft: '已有草稿' })])
+    const idea = '修灯人收到一封旧信。'
+    const wrapper = mountChat(true, idea)
+    expect(wrapper.find('.inspiration-carried-idea').exists()).toBe(true)
+    await wrapper.get('textarea').setValue(idea)
+    vi.mocked(chatInspiration).mockResolvedValue({ content: '讨论这封信。' })
+    await button(wrapper, '发送').trigger('click')
+    await flushPromises()
+    expect(vi.mocked(chatInspiration).mock.calls[0][1]).toEqual([{ role: 'user', content: idea }])
+    wrapper.unmount()
+  })
+
   it('opens a restored conversation at the newest message, including after returning to inspiration', async () => {
     useInspirationSessionsStore().adopt([parseInspirationSession({
       id: 'saved-session', title: '已有想法', updatedAt: '2026-09-06T10:00:00.000Z',
@@ -365,7 +698,7 @@ describe('inspiration search controls', () => {
     expect(vi.mocked(chatInspiration).mock.calls[2][4]).toBe(false)
 
     vi.mocked(extractInspirationSettings).mockResolvedValue(wrapper.props('form'))
-    await button(wrapper, '整理设定并检查').trigger('click')
+    await button(wrapper, '整理设定').trigger('click')
     await flushPromises()
     expect(vi.mocked(extractInspirationSettings).mock.calls[0][0].id).toBe('outline')
     wrapper.unmount()
@@ -381,7 +714,7 @@ describe('inspiration search controls', () => {
       progress?.(2, 6)
       return new Promise((_resolve, reject) => { fail = reject })
     })
-    await button(wrapper, '整理设定并检查').trigger('click')
+    await button(wrapper, '整理设定').trigger('click')
     await flushPromises()
     expect(wrapper.find('[role="status"]').text()).toContain('2/6 步')
     fail(new Error('请求超时（240秒）'))
@@ -389,7 +722,7 @@ describe('inspiration search controls', () => {
     expect(wrapper.find('[role="alert"]').text()).toContain('240秒')
     expect(wrapper.findAll('.inspiration-message')).toHaveLength(2)
     expect(wrapper.emitted('apply')).toBeUndefined()
-    expect(button(wrapper, '整理设定并检查').attributes('disabled')).toBeUndefined()
+    expect(button(wrapper, '整理设定').attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
 
@@ -406,7 +739,7 @@ describe('inspiration search controls', () => {
     expect(wrapper.find('.inspiration-message.assistant').text()).not.toContain(url)
     expect(wrapper.find('.inspiration-message.user').text()).toContain(url)
     vi.mocked(extractInspirationSettings).mockResolvedValue(wrapper.props('form'))
-    await button(wrapper, '整理设定并检查').trigger('click')
+    await button(wrapper, '整理设定').trigger('click')
     await flushPromises()
     expect(vi.mocked(extractInspirationSettings).mock.calls[0][1][1]).toEqual({ role: 'assistant', content, search })
     wrapper.unmount()
@@ -431,8 +764,10 @@ describe('inspiration search controls', () => {
     await flushPromises()
     expect(wrapper.findAllComponents({ name: 'ChatSearchEvidence' }).slice(-1)[0].props('record')).toEqual(search)
     vi.mocked(extractInspirationSettings).mockResolvedValue(wrapper.props('form'))
-    await button(wrapper, '整理设定并检查').trigger('click')
+    await button(wrapper, '整理设定').trigger('click')
     await flushPromises()
+    expect(wrapper.emitted('apply')).toBeUndefined()
+    await button(wrapper, '完成').trigger('click')
     expect(wrapper.emitted('apply')?.[0]?.[1]).toEqual([
       { role: 'user', content: '查近期事件给我一点灵感' }, { role: 'assistant', content: '先区分真实事件和虚构设定。', search },
     ])

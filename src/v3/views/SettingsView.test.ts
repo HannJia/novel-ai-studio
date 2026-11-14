@@ -4,7 +4,9 @@ import { webcrypto } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { URL as NodeURL } from 'node:url'
 import { createPinia, setActivePinia } from 'pinia'
-import { flushPromises, shallowMount } from '@vue/test-utils'
+import { computed } from 'vue'
+import { createMemoryHistory, createRouter, matchedRouteKey, type Router } from 'vue-router'
+import { flushPromises, shallowMount, type VueWrapper } from '@vue/test-utils'
 import SettingsView from '@/v3/views/SettingsView.vue'
 import { useConfigStore } from '@/stores/config'
 import { listAvailableModels, testConnection } from '@/services/ai'
@@ -20,8 +22,6 @@ vi.mock('@/services/embeddings', async importOriginal => ({
   ...await importOriginal<object>(), testEmbeddingConnection: vi.fn(),
 }))
 const dialog = vi.hoisted(() => ({ warning: vi.fn() }))
-const route = vi.hoisted(() => ({ query: {} as Record<string, string> }))
-vi.mock('vue-router', () => ({ useRoute: () => route, useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('@/services/chatSearch', async original => ({ ...await original<object>(), testChatSearch: vi.fn() }))
 vi.mock('naive-ui', async importOriginal => ({
   ...await importOriginal<object>(),
@@ -33,9 +33,13 @@ const ids = ['claude-opus-4-6-thinking', 'claude-opus-5', 'claude-sonnet-5']
 const aliasPlaceholder = '如：主用接口 / 备用接口；留空使用模型 ID'
 const modelPlaceholder = '如：deepseek-chat / gpt-4o / qwen-max'
 const mounted: ReturnType<typeof shallowMount>[] = []
+let router: Router
 
 function mountSettings(realSearchTest = false) {
-  const wrapper = shallowMount(SettingsView, { global: { renderStubDefaultSlot: true, stubs: {
+  const wrapper = shallowMount(SettingsView, { global: {
+    plugins: [router],
+    provide: { [matchedRouteKey as symbol]: computed(() => router.currentRoute.value.matched[0]) },
+    renderStubDefaultSlot: true, stubs: {
     Button: { props: ['disabled'], emits: ['click'], template: '<button :disabled="disabled" @click="$emit(\'click\')"><slot /></button>' },
     Modal: { props: ['show'], template: '<section v-if="show"><slot /><slot name="action" /></section>' },
     Input: { props: ['value', 'placeholder'], emits: ['update:value'],
@@ -46,6 +50,11 @@ function mountSettings(realSearchTest = false) {
   return wrapper
 }
 
+async function selectSection(wrapper: ReturnType<typeof mountSettings>, label: string) {
+  await wrapper.findAll('.settings-nav-item').find(tab => tab.text() === label)!.trigger('click')
+  await flushPromises()
+}
+
 function addLegacyModel(modelName = ids[0], name = 'Claude Sonnet 5') {
   return useConfigStore().addModel({ name, modelName, baseUrl: 'https://example.test', apiKey: 'synthetic-test-key',
     maxTokens: 4096, temperature: 0.7, topP: 0.9 })
@@ -53,12 +62,24 @@ function addLegacyModel(modelName = ids[0], name = 'Claude Sonnet 5') {
 
 function deferred<T>() {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>(resolvePromise => { resolve = resolvePromise })
-  return { promise, resolve }
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => { resolve = resolvePromise; reject = rejectPromise })
+  return { promise, resolve, reject }
 }
 
-beforeEach(() => {
-  route.query = {}
+function refreshIsBlocked() {
+  const event = new Event('beforeunload', { cancelable: true })
+  window.dispatchEvent(event)
+  return event.defaultPrevented
+}
+
+beforeEach(async () => {
+  router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/settings', component: SettingsView },
+    { path: '/outside', component: { template: '<div />' } },
+    { path: '/', component: { template: '<div />' } },
+  ] })
+  await router.push('/settings')
   setActivePinia(createPinia())
   vi.stubGlobal('crypto', webcrypto)
   localStorage.clear()
@@ -70,23 +91,28 @@ beforeEach(() => {
 afterEach(async () => {
   await useConfigStore().saveConfig()
   for (const wrapper of mounted.splice(0)) wrapper.unmount()
+  vi.restoreAllMocks()
 })
 
 describe('模型原始名称与配置备注', () => {
-  it('opens the requested settings section from the shell deep link', async () => {
-    route.query = { section: 'cloud' }
+  it.each([
+    { section: 'cloud', label: '云同步与历史', selector: '.cloud-settings-section' },
+    { section: 'about', label: '关于', selector: '.about-section' },
+  ])('opens the requested $section settings section from the shell deep link', async ({ section, label, selector }) => {
+    await router.replace({ query: { section } })
     const wrapper = mountSettings()
     await flushPromises()
-    expect(wrapper.findAll('.settings-nav-item')[6].attributes('aria-selected')).toBe('true')
-    expect(wrapper.get('.cloud-settings-section').isVisible()).toBe(true)
+    expect(wrapper.findAll('.settings-nav-item').find(tab => tab.text() === label)!.attributes('aria-selected')).toBe('true')
+    expect(wrapper.get(selector).isVisible()).toBe(true)
   })
 
   it('combines about and updates, and highlights the real workflow limits', async () => {
     const wrapper = mountSettings()
     const tabs = wrapper.findAll('.settings-nav-item')
-    expect(tabs.map(tab => tab.text())).toEqual(['模型配置', '任务分配', 'AI 工作流', '外观', '语义检索', '写作技能', '云同步与历史', '软件更新', '关于'])
+    expect(tabs.map(tab => tab.text())).toEqual(['模型配置', '任务分配', 'AI 工作流', '外观', '语义检索', '写作技能', '云同步与历史', '关于'])
     expect(tabs[0].attributes('aria-selected')).toBe('true')
-    await tabs[8].trigger('click')
+    await tabs.find(tab => tab.text() === '关于')!.trigger('click')
+    await flushPromises()
     expect(wrapper.get('.about-section').isVisible()).toBe(true)
     expect(wrapper.get('.about-update').text()).toContain('软件更新')
     useConfigStore().aiWorkflowMode = 'balanced'
@@ -96,6 +122,55 @@ describe('模型原始名称与配置备注', () => {
     await flushPromises()
     expect(wrapper.findAll('.workflow-rounds-value').map(node => node.text())).toEqual(['3 轮', '3 轮'])
   })
+
+  it('selects skills from the card, description and tags while preserving the current draft on reselection', async () => {
+    const store = useConfigStore()
+    const wrapper = mountSettings()
+    await selectSection(wrapper, '写作技能')
+    const cards = wrapper.findAll('.skill-row')
+    await cards[1].get('.skill-info p').trigger('click')
+    expect(cards[1].classes()).toContain('selected')
+    expect(cards[0].get('.skill-select').attributes('aria-pressed')).toBe('false')
+    expect(wrapper.get('input[aria-label="技能名称"]').element).toHaveProperty('value', store.skills[1].name)
+
+    await cards[2].get('.skill-name').findComponent({ name: 'Tag' }).trigger('click')
+    expect(wrapper.get('input[aria-label="技能名称"]').element).toHaveProperty('value', store.skills[2].name)
+    await cards[0].trigger('click')
+    expect(cards[0].get('.skill-select').attributes('aria-pressed')).toBe('true')
+    const name = wrapper.get('input[aria-label="技能名称"]')
+    await name.setValue('尚未保存的技能名称')
+    await cards[0].trigger('click')
+    await cards[0].get('.skill-select').trigger('click')
+    expect(name.element).toHaveProperty('value', '尚未保存的技能名称')
+    expect(store.skills[0].name).not.toBe('尚未保存的技能名称')
+  })
+
+  it('keeps switches and delete actions independent from skill selection', async () => {
+    const store = useConfigStore()
+    const custom = store.addSkill({ name: '自定义测试技能', description: '合成测试', task: 'writing', instructions: '合成规则' })
+    const wrapper = mountSettings()
+    await selectSection(wrapper, '写作技能')
+    const cards = wrapper.findAll('.skill-row')
+    const name = wrapper.get('input[aria-label="技能名称"]')
+    await name.setValue('尚未保存的技能名称')
+    const toggle = cards[1].findComponent({ name: 'Switch' })
+    await toggle.trigger('click')
+    toggle.vm.$emit('update:value', false)
+    await flushPromises()
+    expect(store.skills[1].enabled).toBe(false)
+    expect(cards[0].classes()).toContain('selected')
+    expect(name.element).toHaveProperty('value', '尚未保存的技能名称')
+
+    const customCard = cards.find(card => card.text().includes(custom.name))!
+    await customCard.findAll('button').find(button => button.text() === '删除')!.trigger('click')
+    expect(dialog.warning).toHaveBeenCalledOnce()
+    expect(cards[0].classes()).toContain('selected')
+    expect(name.element).toHaveProperty('value', '尚未保存的技能名称')
+    await cards[1].get('.model-actions button').trigger('click')
+    expect(cards[1].classes()).toContain('selected')
+    expect(name.element).toHaveProperty('value', store.skills[1].name)
+  })
+
   it('adds a local embedding model through the inline editor without requiring a key', async () => {
     const store = useConfigStore()
     const wrapper = mountSettings()
@@ -130,11 +205,14 @@ describe('模型原始名称与配置备注', () => {
     await wrapper.get(`input[placeholder="${aliasPlaceholder}"]`).setValue('未保存的配置备注')
     const tabs = wrapper.findAll('.settings-nav-item')
     await tabs[2].trigger('click')
+    await flushPromises()
     await tabs[0].trigger('click')
+    await flushPromises()
     expect(wrapper.get(`input[placeholder="${aliasPlaceholder}"]`).element).toHaveProperty('value', '未保存的配置备注')
     expect(store.models.find(model => model.id === chat.id)?.name).not.toBe('未保存的配置备注')
-    expect(tabs).toHaveLength(9)
+    expect(tabs).toHaveLength(8)
     await tabs[0].trigger('keydown', { key: 'ArrowRight' })
+    await flushPromises()
     expect(tabs[1].attributes('aria-selected')).toBe('true')
     expect(wrapper.find('.retrieval-model-status').findAll('input')).toHaveLength(0)
   })
@@ -198,7 +276,7 @@ describe('模型原始名称与配置备注', () => {
     const fetch = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Offline license check'))
     try {
       const wrapper = mountSettings()
-      await wrapper.findAll('.settings-nav-item')[8].trigger('click')
+      await selectSection(wrapper, '关于')
       const panel = wrapper.get('.about-section details.font-licenses')
       expect(panel.get('summary').text()).toBe('内置字体与许可')
       expect(panel.element).toHaveProperty('open', false)
@@ -338,6 +416,338 @@ describe('模型原始名称与配置备注', () => {
   })
 })
 
+describe('设置分区与路由同步', () => {
+  it('keeps other query parameters and the hash when navigating, and skips duplicate history entries', async () => {
+    await router.replace({ query: { section: 'cloud', returnTo: '/outside', filter: ['a', 'b'] }, hash: '#keep' })
+    const push = vi.spyOn(router, 'push')
+    const wrapper = mountSettings()
+    await selectSection(wrapper, '写作技能')
+    expect(router.currentRoute.value.query).toEqual({ section: 'skills', returnTo: '/outside', filter: ['a', 'b'] })
+    expect(router.currentRoute.value.hash).toBe('#keep')
+    expect(wrapper.get('.skill-editor').isVisible()).toBe(true)
+    await selectSection(wrapper, '写作技能')
+    expect(push).toHaveBeenCalledOnce()
+  })
+
+  it('restores sections and unsaved skill input through back and forward navigation', async () => {
+    const wrapper = mountSettings()
+    await selectSection(wrapper, '写作技能')
+    await wrapper.get('input[aria-label="技能名称"]').setValue('历史导航中的技能草稿')
+    await selectSection(wrapper, '外观')
+    router.back()
+    await vi.waitFor(() => expect(router.currentRoute.value.query.section).toBe('skills'))
+    await flushPromises()
+    expect(wrapper.get('.skill-editor').isVisible()).toBe(true)
+    expect(wrapper.get('input[aria-label="技能名称"]').element).toHaveProperty('value', '历史导航中的技能草稿')
+    router.back()
+    await vi.waitFor(() => expect(router.currentRoute.value.query.section).toBeUndefined())
+    await flushPromises()
+    expect(wrapper.findAll('.settings-nav-item')[0].attributes('aria-selected')).toBe('true')
+    router.forward()
+    await vi.waitFor(() => expect(router.currentRoute.value.query.section).toBe('skills'))
+    await flushPromises()
+    expect(wrapper.get('input[aria-label="技能名称"]').element).toHaveProperty('value', '历史导航中的技能草稿')
+    expect(dialog.warning).not.toHaveBeenCalled()
+  })
+
+  it.each([{ section: undefined }, { section: 'unknown' }, { section: ['skills', 'about'] }])('falls back to models when section becomes $section', async ({ section }) => {
+    await router.replace({ query: { section: 'about' } })
+    const wrapper = mountSettings()
+    await router.replace({ query: { section, returnTo: '/outside' } })
+    await flushPromises()
+    expect(wrapper.findAll('.settings-nav-item')[0].attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('.about-section').attributes('style')).toContain('display: none')
+    expect(router.currentRoute.value.query.returnTo).toBe('/outside')
+  })
+
+  it('uses the assignments URL and anchor for the retrieval shortcut and after remounting', async () => {
+    addLegacyModel()
+    await router.replace({ query: { section: 'retrieval', returnTo: '/outside' } })
+    const wrapper = mountSettings()
+    const assignments = wrapper.get('#model-task-assignments').element as HTMLElement
+    const scroll = vi.fn()
+    assignments.scrollIntoView = scroll
+    const focus = vi.spyOn(assignments, 'focus')
+    await wrapper.findAll('button').find(button => button.text() === '前往任务分配')!.trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.query).toEqual({ section: 'assign', returnTo: '/outside' })
+    expect(wrapper.findAll('.settings-nav-item')[1].attributes('aria-selected')).toBe('true')
+    expect(scroll).toHaveBeenCalledWith({ block: 'start', behavior: 'auto' })
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true })
+    wrapper.unmount()
+    await router.push({ path: '/settings', query: { section: 'assign', returnTo: '/outside' } })
+    const reopened = mountSettings()
+    await flushPromises()
+    expect(reopened.findAll('.settings-nav-item')[1].attributes('aria-selected')).toBe('true')
+    expect(reopened.get('#model-task-assignments').isVisible()).toBe(true)
+  })
+
+  it('initializes the skill editor when opening its deep link', async () => {
+    await router.replace({ query: { section: 'skills' } })
+    const wrapper = mountSettings()
+    expect(wrapper.get('input[aria-label="技能名称"]').element).toHaveProperty('value', useConfigStore().skills[0].name)
+    expect(refreshIsBlocked()).toBe(false)
+  })
+})
+
+describe('设置草稿保护', () => {
+  it('retains separate model drafts and does not reset the selected model on repeated clicks', async () => {
+    const first = addLegacyModel(ids[0], '第一配置')
+    addLegacyModel(ids[1], '第二配置')
+    const wrapper = mountSettings()
+    const models = wrapper.findAll('.model-select')
+    await models[0].trigger('click')
+    await wrapper.get(`input[placeholder="${aliasPlaceholder}"]`).setValue('第一份模型草稿')
+    await wrapper.get('input[placeholder="留空则保留当前接口密钥"]').setValue('synthetic-unsaved-key')
+    await models[0].trigger('click')
+    expect(wrapper.get(`input[placeholder="${aliasPlaceholder}"]`).element).toHaveProperty('value', '第一份模型草稿')
+    await models[1].trigger('click')
+    await wrapper.get(`input[placeholder="${aliasPlaceholder}"]`).setValue('第二份模型草稿')
+    await models[0].trigger('click')
+    expect(wrapper.get(`input[placeholder="${aliasPlaceholder}"]`).element).toHaveProperty('value', '第一份模型草稿')
+    expect(wrapper.get('input[placeholder="留空则保留当前接口密钥"]').element).toHaveProperty('value', 'synthetic-unsaved-key')
+    expect(wrapper.findAll('.model-card .draft-badge')).toHaveLength(2)
+    expect(useConfigStore().models.find(model => model.id === first.id)?.name).toBe('第一配置')
+    await useConfigStore().saveConfig()
+    expect(localStorage.getItem('mojian-v3-config')).not.toContain('synthetic-unsaved-key')
+    expect(JSON.stringify(sessionStorage)).not.toContain('synthetic-unsaved-key')
+    expect(dialog.warning).not.toHaveBeenCalled()
+  })
+
+  it('retains a new model, discovered choices and batch selection across models and sections', async () => {
+    addLegacyModel()
+    const wrapper = mountSettings()
+    await wrapper.get('#add-model-btn').trigger('click')
+    await wrapper.get('input[placeholder="如：https://api.deepseek.com"]').setValue('https://new.example.test')
+    await wrapper.get('input[placeholder="填写服务商提供的接口密钥"]').setValue('synthetic-new-draft-key')
+    await wrapper.findAll('button').find(button => button.text() === '获取模型')!.trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === '全选')!.trigger('click')
+    await wrapper.get('#add-model-btn').trigger('click')
+    await wrapper.get('.model-select').trigger('click')
+    expect(wrapper.get('#add-model-btn .draft-badge').text()).toBe('未保存')
+    await wrapper.get('#add-model-btn').trigger('click')
+    await selectSection(wrapper, 'AI 工作流')
+    await selectSection(wrapper, '模型配置')
+    const choices = wrapper.get('.model-editor').findAllComponents({ name: 'Select' })
+      .find((select: VueWrapper<{ $props: { multiple?: boolean } }>) => select.props('multiple'))!
+    expect(choices.props('value')).toEqual(ids)
+    expect(choices.props('options').map((option: { value: string }) => option.value)).toEqual(ids)
+    expect(wrapper.get('input[placeholder="填写服务商提供的接口密钥"]').element).toHaveProperty('value', 'synthetic-new-draft-key')
+    expect(wrapper.get('.settings-draft-note').text()).toContain('未保存')
+    await useConfigStore().saveConfig()
+    expect(localStorage.getItem('mojian-v3-config')).not.toContain('synthetic-new-draft-key')
+    expect(useConfigStore().models).toHaveLength(1)
+  })
+
+  it('retains existing and new skill drafts across selection and section changes', async () => {
+    const store = useConfigStore()
+    const wrapper = mountSettings()
+    await selectSection(wrapper, '写作技能')
+    const skills = wrapper.findAll('.skill-select')
+    await wrapper.get('input[aria-label="技能名称"]').setValue('第一份技能草稿')
+    await skills[1].trigger('click')
+    await wrapper.get('input[aria-label="技能名称"]').setValue('第二份技能草稿')
+    await skills[0].trigger('click')
+    expect(wrapper.get('input[aria-label="技能名称"]').element).toHaveProperty('value', '第一份技能草稿')
+    await wrapper.findAll('button').find(button => button.text() === '添加技能')!.trigger('click')
+    await wrapper.get('input[aria-label="技能名称"]').setValue('新技能草稿')
+    await wrapper.get('input[aria-label="技能执行规则"]').setValue('新技能的合成规则')
+    await skills[1].trigger('click')
+    expect(wrapper.get('input[aria-label="技能名称"]').element).toHaveProperty('value', '第二份技能草稿')
+    await wrapper.findAll('button').find(button => button.text().startsWith('添加技能'))!.trigger('click')
+    await selectSection(wrapper, '关于')
+    expect(refreshIsBlocked()).toBe(true)
+    await selectSection(wrapper, '写作技能')
+    expect(wrapper.get('input[aria-label="技能名称"]').element).toHaveProperty('value', '新技能草稿')
+    expect(wrapper.get('input[aria-label="技能执行规则"]').element).toHaveProperty('value', '新技能的合成规则')
+    expect(store.skills[0].name).not.toBe('第一份技能草稿')
+    expect(store.skills.some(skill => skill.name === '新技能草稿')).toBe(false)
+    expect(dialog.warning).not.toHaveBeenCalled()
+  })
+
+  it.each(['取消', '收起'])('confirms before discarding a model through %s', async action => {
+    addLegacyModel()
+    const wrapper = mountSettings()
+    await wrapper.get('.model-select').trigger('click')
+    await wrapper.get(`input[placeholder="${aliasPlaceholder}"]`).setValue('待确认的草稿')
+    const close = () => wrapper.get('.model-editor').findAll('button').find(button => button.text() === action)!
+    await close().trigger('click')
+    dialog.warning.mock.calls[0][0].onNegativeClick()
+    await flushPromises()
+    expect(wrapper.get(`input[placeholder="${aliasPlaceholder}"]`).element).toHaveProperty('value', '待确认的草稿')
+    await close().trigger('click')
+    dialog.warning.mock.calls[1][0].onPositiveClick()
+    await flushPromises()
+    expect(wrapper.find('.model-editor').exists()).toBe(false)
+    expect(refreshIsBlocked()).toBe(false)
+    await wrapper.get('.model-select').trigger('click')
+    expect(wrapper.get(`input[placeholder="${aliasPlaceholder}"]`).element).toHaveProperty('value', 'Claude Sonnet 5')
+  })
+
+  it('discards only the cancelled skill and retains other unsaved drafts', async () => {
+    const wrapper = mountSettings()
+    await selectSection(wrapper, '写作技能')
+    await wrapper.get('input[aria-label="技能名称"]').setValue('保留的技能草稿')
+    await wrapper.findAll('.skill-select')[1].trigger('click')
+    await wrapper.get('input[aria-label="技能名称"]').setValue('取消的技能草稿')
+    const cancel = () => wrapper.get('.skill-editor').findAll('button').find(button => button.text() === '取消')!
+    await cancel().trigger('click')
+    dialog.warning.mock.calls[0][0].onClose()
+    await flushPromises()
+    expect(wrapper.get('input[aria-label="技能名称"]').element).toHaveProperty('value', '取消的技能草稿')
+    await cancel().trigger('click')
+    dialog.warning.mock.calls[1][0].onPositiveClick()
+    await flushPromises()
+    expect(wrapper.find('.skill-editor').exists()).toBe(false)
+    expect(refreshIsBlocked()).toBe(true)
+    await wrapper.findAll('.skill-select')[0].trigger('click')
+    expect(wrapper.get('input[aria-label="技能名称"]').element).toHaveProperty('value', '保留的技能草稿')
+  })
+
+  it.each(['onNegativeClick', 'onClose', 'onMaskClick'])('cancels leaving with %s and leaves only after confirmation', async dismiss => {
+    addLegacyModel()
+    addLegacyModel(ids[1])
+    await router.replace({ query: { returnTo: '/outside' } })
+    const wrapper = mountSettings()
+    await wrapper.findAll('.model-select')[0].trigger('click')
+    await wrapper.get(`input[placeholder="${aliasPlaceholder}"]`).setValue('非当前条目的草稿')
+    await wrapper.findAll('.model-select')[1].trigger('click')
+    await selectSection(wrapper, '关于')
+    await wrapper.get('.back-btn').trigger('click')
+    await flushPromises()
+    expect(dialog.warning).toHaveBeenCalledOnce()
+    dialog.warning.mock.calls[0][0][dismiss]()
+    await flushPromises()
+    expect(router.currentRoute.value.path).toBe('/settings')
+    expect(refreshIsBlocked()).toBe(true)
+    const leaving = router.push('/')
+    await flushPromises()
+    dialog.warning.mock.calls[1][0].onPositiveClick()
+    await leaving
+    expect(router.currentRoute.value.path).toBe('/')
+    wrapper.unmount()
+    expect(refreshIsBlocked()).toBe(false)
+  })
+
+  it.each(['model', 'skill', 'batch'])('clears dirty and leave protection after saving a %s draft', async kind => {
+    const wrapper = mountSettings()
+    if (kind === 'skill') {
+      await selectSection(wrapper, '写作技能')
+      await wrapper.get('input[aria-label="技能名称"]').setValue('保存后的技能')
+    } else {
+      await wrapper.get('#add-model-btn').trigger('click')
+      await wrapper.get('input[placeholder="如：https://api.deepseek.com"]').setValue('https://example.test')
+      await wrapper.get('input[placeholder="填写服务商提供的接口密钥"]').setValue('synthetic-test-key')
+      await wrapper.get(`input[placeholder="${modelPlaceholder}"]`).setValue('synthetic-new-model')
+      if (kind === 'batch') {
+        await wrapper.findAll('button').find(button => button.text() === '获取模型')!.trigger('click')
+        await flushPromises()
+        await wrapper.findAll('button').find(button => button.text() === '全选')!.trigger('click')
+      }
+    }
+    expect(refreshIsBlocked()).toBe(true)
+    const editor = wrapper.get(kind === 'skill' ? '.skill-editor' : '.model-editor')
+    const save = editor.findAll('button').find(button => kind === 'batch' ? button.text().startsWith('批量添加') : button.text() === (kind === 'skill' ? '保存' : '添加'))!
+    await save.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.settings-draft-note').exists()).toBe(false)
+    expect(refreshIsBlocked()).toBe(false)
+    await router.push('/outside')
+    expect(dialog.warning).not.toHaveBeenCalled()
+  })
+
+  it('keeps edits to the original model after batch-adding its discovered choices', async () => {
+    const model = addLegacyModel()
+    const wrapper = mountSettings()
+    await wrapper.get('.model-select').trigger('click')
+    await wrapper.get(`input[placeholder="${aliasPlaceholder}"]`).setValue('批量添加前的草稿')
+    await wrapper.findAll('button').find(button => button.text() === '获取模型')!.trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === '全选')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().startsWith('批量添加'))!.trigger('click')
+    expect(refreshIsBlocked()).toBe(true)
+    await wrapper.findAll('.model-select')[0].trigger('click')
+    expect(wrapper.get(`input[placeholder="${aliasPlaceholder}"]`).element).toHaveProperty('value', '批量添加前的草稿')
+    expect(useConfigStore().models.find(item => item.id === model.id)?.name).toBe('Claude Sonnet 5')
+  })
+
+  it('keeps a different skill open when the previous skill finishes saving', async () => {
+    const wrapper = mountSettings()
+    await selectSection(wrapper, '写作技能')
+    await wrapper.get('input[aria-label="技能名称"]').setValue('已提交的技能')
+    const pending = deferred<void>()
+    vi.spyOn(useConfigStore(), 'saveConfig').mockReturnValueOnce(pending.promise)
+    await wrapper.get('.skill-editor').findAll('button').find(button => button.text() === '保存')!.trigger('click')
+    await wrapper.findAll('.skill-select')[1].trigger('click')
+    await wrapper.get('input[aria-label="技能名称"]').setValue('另一项未保存技能')
+    pending.resolve()
+    await flushPromises()
+    expect(wrapper.get('input[aria-label="技能名称"]').element).toHaveProperty('value', '另一项未保存技能')
+    expect(wrapper.findAll('.skill-row .draft-badge')).toHaveLength(1)
+    expect(refreshIsBlocked()).toBe(true)
+  })
+
+  it('retains a failed new skill save for retry without creating duplicates', async () => {
+    const store = useConfigStore()
+    const wrapper = mountSettings()
+    await selectSection(wrapper, '写作技能')
+    await wrapper.findAll('button').find(button => button.text() === '添加技能')!.trigger('click')
+    await wrapper.get('input[aria-label="技能名称"]').setValue('可重试的技能')
+    await wrapper.get('input[aria-label="技能执行规则"]').setValue('合成技能规则')
+    vi.spyOn(store, 'saveConfig').mockRejectedValueOnce(new Error('synthetic save failure'))
+    const save = () => wrapper.get('.skill-editor').findAll('button').find(button => button.text() === '保存')!
+    await save().trigger('click')
+    await flushPromises()
+    expect(refreshIsBlocked()).toBe(true)
+    await save().trigger('click')
+    await flushPromises()
+    expect(store.skills.filter(skill => skill.name === '可重试的技能')).toHaveLength(1)
+    expect(refreshIsBlocked()).toBe(false)
+  })
+
+  it.each(['success', 'failure'])('ignores a stale discovery %s after switching models while a newer request is pending', async outcome => {
+    addLegacyModel(ids[0])
+    addLegacyModel(ids[1])
+    const first = deferred<{ id: string }[]>()
+    const second = deferred<{ id: string }[]>()
+    vi.mocked(listAvailableModels).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const wrapper = mountSettings()
+    await wrapper.findAll('.model-select')[0].trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === '获取模型')!.trigger('click')
+    const signal = vi.mocked(listAvailableModels).mock.calls[0][1]!
+    await wrapper.findAll('.model-select')[1].trigger('click')
+    expect(signal.aborted).toBe(true)
+    await wrapper.findAll('button').find(button => button.text() === '获取模型')!.trigger('click')
+    if (outcome === 'success') first.resolve([{ id: 'stale-model' }])
+    else first.reject(new Error('stale discovery failure'))
+    await flushPromises()
+    expect(wrapper.get(`input[placeholder="${modelPlaceholder}"]`).element).toHaveProperty('value', ids[1])
+    expect(wrapper.get('.model-editor').text()).toContain('获取中...')
+    expect(wrapper.find('.model-discovery-error').exists()).toBe(false)
+    second.resolve([{ id: 'current-model' }])
+    await flushPromises()
+    expect(wrapper.get(`input[placeholder="${modelPlaceholder}"]`).element).toHaveProperty('value', 'current-model')
+    expect(wrapper.get('.model-editor').text()).not.toContain('stale-model')
+  })
+
+  it('aborts discovery when changing the source before the first result arrives', async () => {
+    addLegacyModel()
+    const pending = deferred<{ id: string }[]>()
+    vi.mocked(listAvailableModels).mockReturnValueOnce(pending.promise)
+    const wrapper = mountSettings()
+    await wrapper.get('.model-select').trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === '获取模型')!.trigger('click')
+    await wrapper.get('input[placeholder="如：https://api.deepseek.com"]').setValue('https://changed.example.test')
+    expect(vi.mocked(listAvailableModels).mock.calls[0][1]!.aborted).toBe(true)
+    pending.resolve([{ id: 'stale-source-model' }])
+    await flushPromises()
+    expect(wrapper.get(`input[placeholder="${modelPlaceholder}"]`).element).toHaveProperty('value', ids[0])
+    expect(wrapper.find('.model-discovery-success').exists()).toBe(false)
+    expect(wrapper.get('.model-editor').text()).not.toContain('获取中...')
+  })
+})
+
 describe('模型连接测试结果持久化', () => {
   it('saves a testing record when the mock request starts and an ok record when it succeeds', async () => {
     const model = addLegacyModel()
@@ -453,6 +863,7 @@ describe('模型连接测试结果持久化', () => {
     await vi.waitFor(() => expect(firstWrapper.get('.model-card').text()).toContain('上次测试未完成'))
     expect(firstWrapper.get('.model-tested-at').attributes('datetime')).toBe('2026-11-10T01:02:03.000Z')
     firstWrapper.unmount()
+    await router.push('/settings')
 
     const activeAttempt = store.beginModelConnectionTest(model.id, 'browser')!
     const activeWrapper = mountSettings()
@@ -473,6 +884,7 @@ describe('模型连接测试结果持久化', () => {
     await vi.waitFor(() => expect(useConfigStore().models[0].connectionTest?.status).toBe('ok'))
     const testedAt = useConfigStore().models[0].connectionTest!.testedAt
     firstWrapper.unmount()
+    await router.push('/settings')
 
     setActivePinia(createPinia())
     const restored = useConfigStore()
